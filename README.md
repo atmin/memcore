@@ -20,10 +20,13 @@ Agents forget between sessions, so you repeat the same instructions again and ag
 
 These docs are the design of memcore. An agent that uses memcore loads none of them: it runs `memcore orient` and follows it. Each line below says when to read a doc, for you and for an agent that changes this repo.
 
+- [Install](docs/install.md): read when you set up memcore on a machine. It covers the install script, `memcore init` and what runs on its own.
 - [Glossary](docs/glossary.md): read before you name anything. It gives each term in the docs one meaning.
 - [Layout](docs/layout.md): read when you place or find a document. It covers levels, kinds, the index, placement and lookup.
 - [A memory](docs/memory.md): read before you write a memory. It covers the frontmatter and the body.
 - [Git](docs/git.md): read before you commit, review or push. It covers the review queue, fixups and the remote.
+- [Interface](docs/interface.md): read when you use or build `memcore`. It covers the commands and how a stock agent learns them.
+- [Architecture](docs/architecture.md): read when you build or change `memcore`. It covers its parts, git, the thinking, concurrency and local state.
 - [Sleep](docs/sleep.md): read when you consolidate memory. It covers a sleep pass, promotion, staleness and budgets.
 - [Transcripts](docs/transcripts.md): read when you work with transcripts. It covers what a snapshot keeps and how memcore redacts it.
 - [Onboarding](docs/onboarding.md): read when you start from an empty memory repo. It covers the sources and how the structure emerges.
