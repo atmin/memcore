@@ -1,0 +1,23 @@
+# Glossary
+
+The docs use each term below with one meaning only.
+
+- **memcore**: the system, and its one command. The docs use the name for both.
+- **agent**: an AI coding agent that works with you, such as Claude Code or Codex.
+- **you**: the person whose memory it is. Skills, which address the agent, call you "the person".
+- **memory repo**: the git repo that memcore manages, in `~/memory` by default.
+- **level**: a folder in the memory repo that mirrors a directory, such as the root, `work/` or `work/shop/`.
+- **path**: the chain of levels from one level up to the root. An agent loads its path.
+- **document**: any file that memcore stores at a level: a memory, a plan, a note, a skill, a script, a conventions file or a glossary.
+- **kind**: the type of a document. The name of its folder or file gives the kind.
+- **memory**: a document that holds one current fact.
+- **script**: an executable file in a `bin/` folder. `push` links it onto your `PATH`.
+- **index**: the `README.md` of a level, with one line per document or child level.
+- **session**: one run of an agent, from its start to its exit.
+- **transcript**: the record of one session.
+- **snapshot**: a commit of new transcripts to the transcripts branch.
+- **sleep pass**: one run of sleep, the consolidation that keeps memory lean.
+- **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch.
+- **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
+- **purge**: the removal of content from every commit of the memory repo, which only you run.
+- **promotion**: the move of a document up one level.

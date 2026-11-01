@@ -15,3 +15,15 @@ Agents forget between sessions, so you repeat the same instructions again and ag
 - **Plain files, plain git.** memcore uses no database and no vector store. You can read and edit everything by hand.
 - **Local first.** Memory lives in a git repo on your machine, and it works without the remote. Local redaction runs before anything leaves. Memories go to your remote for storage. Text goes to the agent that you already use for thinking, and nowhere else.
 - **Any agent.** A stock agent learns memcore from one instruction. The formats are open standards, so nothing ties memcore to one agent.
+
+## Docs
+
+These docs are the design of memcore. An agent that uses memcore loads none of them: it runs `memcore orient` and follows it. Each line below says when to read a doc, for you and for an agent that changes this repo.
+
+- [Glossary](docs/glossary.md): read before you name anything. It gives each term in the docs one meaning.
+
+## Skills
+
+memcore ships these skills, and this repo follows them itself.
+
+- [Voice](skills/voice/SKILL.md): read before you write any reply or document. It covers how agents talk and write.
