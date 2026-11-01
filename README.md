@@ -23,6 +23,7 @@ These docs are the design of memcore. An agent that uses memcore loads none of t
 - [Glossary](docs/glossary.md): read before you name anything. It gives each term in the docs one meaning.
 - [Layout](docs/layout.md): read when you place or find a document. It covers levels, kinds, the index, placement and lookup.
 - [A memory](docs/memory.md): read before you write a memory. It covers the frontmatter and the body.
+- [Git](docs/git.md): read before you commit, review or push. It covers the review queue, fixups and the remote.
 
 ## Skills
 
