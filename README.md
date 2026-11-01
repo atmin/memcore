@@ -30,6 +30,9 @@ These docs are the design of memcore. An agent that uses memcore loads none of t
 
 ## Skills
 
-memcore ships these skills, and this repo follows them itself.
+memcore ships these skills, and this repo follows them itself. The voice skill applies to every reply and every document. The plan, build and review skills are for changes to code, in this repo and in yours.
 
 - [Voice](skills/voice/SKILL.md): read before you write any reply or document. It covers how agents talk and write.
+- [Plan](skills/plan/SKILL.md): read when you plan a change that needs more than one commit. It covers the rules and the template of a plan.
+- [Build](skills/build/SKILL.md): read when you get an approved plan. It covers the worktree, the steps, the stops and the report.
+- [Review](skills/review/SKILL.md): read when a plan or a commit needs a review. It covers the choice of the reviewer and the answers.
