@@ -24,6 +24,9 @@ These docs are the design of memcore. An agent that uses memcore loads none of t
 - [Layout](docs/layout.md): read when you place or find a document. It covers levels, kinds, the index, placement and lookup.
 - [A memory](docs/memory.md): read before you write a memory. It covers the frontmatter and the body.
 - [Git](docs/git.md): read before you commit, review or push. It covers the review queue, fixups and the remote.
+- [Sleep](docs/sleep.md): read when you consolidate memory. It covers a sleep pass, promotion, staleness and budgets.
+- [Transcripts](docs/transcripts.md): read when you work with transcripts. It covers what a snapshot keeps and how memcore redacts it.
+- [Onboarding](docs/onboarding.md): read when you start from an empty memory repo. It covers the sources and how the structure emerges.
 
 ## Skills
 
