@@ -1,0 +1,77 @@
+# Layout
+
+The memory repo mirrors your home directory. Each document lives at the highest level where it holds:
+
+```
+memory/
+├── README.md            index of the root level
+├── memories/            you, in every project
+├── skills/              procedures that hold everywhere
+├── bin/                 scripts, linked onto your PATH
+├── dev/                 ~/dev
+│   ├── README.md
+│   ├── memories/        what holds across your personal projects
+│   └── app/             ~/dev/app
+│       └── …
+└── work/                ~/work
+    ├── README.md
+    ├── memories/        what holds across work repos
+    ├── plans/           plans that span work repos
+    ├── bin/             scripts for your work repos
+    └── shop/            ~/work/shop
+        ├── README.md
+        ├── conventions.md
+        ├── glossary.md
+        ├── memories/
+        ├── plans/
+        ├── notes/
+        ├── skills/
+        └── bin/
+```
+
+Every level has the same parts:
+- an index, `README.md`, with one line per document or child level;
+- a folder per kind of document;
+- a folder per child level.
+
+The root is a level like any other, so nothing sits there loose. The folder gives the kind, so a filename gives only the topic.
+
+| Kind | Holds |
+| --- | --- |
+| `memories/` | One current fact per file. When a fact is superseded, memcore deletes it, and git keeps it. |
+| `plans/` | How to do one piece of work, written for an agent with no context. A plan is deleted when its work merges. |
+| `notes/` | Dated investigations. A note records findings at the time, not current truth. |
+| `skills/` | One folder per skill, in the open SKILL.md format<sup>[1](#sources)</sup>. A skill is a procedure that an agent follows, with any scripts it needs. |
+| `bin/` | Scripts: one executable file each, with any shared helper beside it. `push` links each script onto your `PATH`. |
+| `conventions.md` | The rules of one repo, for an agent with no context. A repo that keeps its own `AGENTS.md` needs no conventions file. |
+| `glossary.md` | The agreed terms at this level, each with one meaning. Agents use these terms and no synonyms for them. An entry may end with the words it forbids, as `Not: memory repository, memory store.`, and `verify` blocks a document that uses one of them. Any level can have a glossary. |
+
+**Scripts.** An agent writes one-off scripts wherever it works. A script enters `bin/` only when it recurs: you ask for it, or a sleep pass finds the same command sequence in two or more sessions (see [Sleep](sleep.md)). `draft script <name>` starts it from the template, and `revise` fills it. The template starts with a shebang, then one comment line that says when to run the script, then its usage. That comment line is the script's index line.
+
+A script runs the same way every time, from its arguments, with no decision inside. A procedure with judgment is a skill, and a skill carries any scripts that it needs. So a script is one executable file, and a shared helper sits beside it, not executable and never linked. Anything that needs a folder or a decision is a skill. Starting the local stack with one command is a script. Setting up a worktree, with steps and a check at the end, is a skill.
+
+A script name is global, because a command name is. It is unique in the memory repo, and memcore refuses a name that a command on your `PATH` already uses. The level says only where the script lives and which agents see it in their index.
+
+`push` links each new script onto `~/.local/bin` and removes the links of the scripts it deletes. A link points into the checkout of the accepted history, not into the working tree. So a script and its helpers run as you accepted them, and a revision in the queue waits for your push. Until you push, a new script sits in the review queue unlinked, and its index line says unreviewed.
+
+**Index.** memcore generates every index from the frontmatter of the documents, and commits it, so it reads as a plain file. Nobody writes an index by hand, because the next write regenerates it. Each line says when to read:
+- the line of a memory, a plan, a note or a skill is the `description` in its frontmatter;
+- the line of a conventions file or a glossary is fixed by its kind;
+- the line of a script is the first comment line of the script;
+- the line of a child level is fixed: read when you work under that directory.
+
+A level has a budget of 40 lines. The budget counts what `orient` prints for the level: its memories, skills, scripts, conventions and glossary. `orient` prints no child level, because an agent never loads a sibling. It prints plans and notes as one line with their counts. So the budget limits what an agent sees, not what a level stores. `remember` warns past the budget and does not block, because only a sleep pass can fix an overflow (see [Sleep](sleep.md)).
+
+**Placement.** Where a document goes follows from where the agent works:
+- The working directory maps to the toplevel of the git repo that holds it, as a path relative to home. A worktree maps to its main checkout, through the common git directory.
+- A directory in no repo maps to itself. Home maps to the root.
+- A document that spans repos goes to the level of their common parent.
+- A document about you goes to the root.
+
+So a plan that you ask for anywhere in `~/work/shop` goes to `work/shop/plans/`. memcore creates a level and its missing ancestors on the first write there. A directory outside home has no level: reads there show the root, and writes fail with that reason.
+
+**Lookup.** An agent reads the indexes from its own level up to the root, as `orient` prints them. Then it opens documents on demand. A skill's index line is its description, so skills load the way agents expect: the description first, the body on demand. Each memory names the sessions it came from. So an agent can go one step deeper: from an index, to a memory, to the transcript behind it.
+
+## Sources
+
+1. Agent Skills, the SKILL.md specification <https://agentskills.io>

@@ -21,6 +21,8 @@ Agents forget between sessions, so you repeat the same instructions again and ag
 These docs are the design of memcore. An agent that uses memcore loads none of them: it runs `memcore orient` and follows it. Each line below says when to read a doc, for you and for an agent that changes this repo.
 
 - [Glossary](docs/glossary.md): read before you name anything. It gives each term in the docs one meaning.
+- [Layout](docs/layout.md): read when you place or find a document. It covers levels, kinds, the index, placement and lookup.
+- [A memory](docs/memory.md): read before you write a memory. It covers the frontmatter and the body.
 
 ## Skills
 
