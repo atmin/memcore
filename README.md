@@ -6,7 +6,7 @@ memcore is long-term memory for the agents you work with, kept as plain markdown
 
 Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.
 
-**Status:** design only, with no code yet. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
+**Status:** the store and the write-read loop exist. `init` sets up the memory repo, and `orient`, `show`, `remember`, `verify`, `inbox` and `push` work on it. `push` asks at your terminal, but the key bound to your presence is still design. The rest of these docs is design. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
 
 ## Principles
 

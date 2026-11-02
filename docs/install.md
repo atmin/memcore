@@ -13,7 +13,7 @@ The install script downloads the single executable for your operating system and
 
 ## `memcore init <remote>`
 
-Setup needs only the remote, because every memory repo has one. You can run `init` again safely. It:
+Setup needs only the remote, because every memory repo has one. You can run `init` again safely. The status line of the [README](../README.md) says which of these steps exist today. It:
 - **Sets up the memory repo.** If the remote is empty, `init` creates the memory repo in `~/memory`. If not, it clones the remote. So the same command sets up your first machine and every later one.
 - **Makes the credentials.** `init` makes a write key bound to your presence, or to a passphrase that only you know, with the strongest guard available, and a read-only credential for the background fetch. You add both to the remote. See [Git](git.md).
 - **Links the scripts.** `init` makes the checkout of the accepted history and links its scripts onto `~/.local/bin`, next to memcore. So every machine runs the same commands.

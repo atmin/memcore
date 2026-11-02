@@ -6,7 +6,7 @@ The docs use each term below with one meaning only.
 - **agent**: an AI coding agent that works with you, such as Claude Code or Codex.
 - **you**: the person whose memory it is. Skills, which address the agent, call you "the person".
 - **memory repo**: the git repo that memcore manages, in `~/memory` by default.
-- **level**: a folder in the memory repo that mirrors a directory, such as the root, `work/` or `work/shop/`.
+- **level**: a folder in the memory repo that mirrors a directory, such as the root, `work/` or `work/shop/`. A folder whose name would collide with a kind gets a `+` in front, as `+bin/` for `~/bin`.
 - **path**: the chain of levels from one level up to the root. An agent loads its path.
 - **document**: any file that memcore stores at a level: a memory, a plan, a note, a skill, a script, a conventions file or a glossary.
 - **kind**: the type of a document. The name of its folder or file gives the kind.

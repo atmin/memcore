@@ -11,6 +11,8 @@ The intended remote is a future gitmote. It is serverless, lives in object stora
 - Nobody rewrites pushed history, and nobody pushes with `--force`, except you, in a purge.
 - Only you push, and only you purge.
 
+Each commit of memcore names its command and its path, as `remember: dev/memories/tests-before-code.md`. The first commit of a new memory repo is `init: create the memory repo`.
+
 Agents load unreviewed memories at once, and `orient` labels them as unreviewed. A bad memory lasts until your next review, and the review leaves a clean history.
 
 Hostile text, such as a web page, an issue or an email, can make an agent plant a memory or a skill. Later agents then follow that memory or skill. Skills and scripts are code, so they run only after you push them. memcore keeps a checkout of the accepted history under its local state, and moves it forward at every push and fetch. It serves skills and links scripts from that checkout. So a revision in the review queue changes nothing that runs, and a helper beside a script is the accepted helper.
