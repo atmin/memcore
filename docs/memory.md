@@ -2,7 +2,7 @@
 
 A memory is one file that holds one fact. It lives at `memories/<name>.md` at its level. Its frontmatter has four keys:
 - `name`: the topic, in lower case with hyphens. A name is unique in the memory repo, so a `[[name]]` link is never ambiguous.
-- `description`: one line of 25 words at most that says when to read the memory. It is the memory's line in the index.
+- `description`: one line of 25 words at most that says when to read the memory. It is the memory's line in the index. memcore writes it in double quotes, so a colon inside it stays one value for any YAML reader.
 - `type`: `user`, `feedback`, `project` or `reference`.
 - `sessions`: the sessions the fact came from, each as `<agent>:<id>`. memcore fills it from the agent's environment: for Claude Code, from `CLAUDE_CODE_SESSION_ID`. It stays empty when no agent sets an id.
 
@@ -13,7 +13,7 @@ For example, a feedback memory looks like this:
 ```markdown
 ---
 name: tests-before-code
-description: Read before you write code: the tests of a step come before its code.
+description: "Read before you write code: the tests of a step come before its code."
 type: feedback
 sessions:
   - claude:d4d1d99a-9439-4b7d-ae7a-25f063f909c9

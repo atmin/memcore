@@ -5,7 +5,7 @@ Copy the block below into a new plan. Omit a section rather than fill it with bo
 ```markdown
 ---
 name: <topic>
-description: Read when you build <the task in one line>.
+description: "Read when you build <the task in one line>."
 ---
 
 # <the task in one line>
