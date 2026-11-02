@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/atmin/memcore/internal/commands"
+	"github.com/atmin/memcore/internal/guards"
 )
 
 func main() {
@@ -23,7 +24,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "memcore: read the working directory: %v\n", err)
 			os.Exit(1)
 		}
-		env := commands.Env{Dir: dir, In: os.Stdin, Out: os.Stdout, Err: os.Stderr}
+		env := commands.Env{Dir: dir, In: os.Stdin, Out: os.Stdout, Err: os.Stderr, Confirm: guards.Confirm}
 		if err := c.Run(env, args); err != nil {
 			fmt.Fprintf(os.Stderr, "memcore %s: %v\n", name, err)
 			os.Exit(1)
