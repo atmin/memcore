@@ -20,7 +20,7 @@ var repoVariables = []string{
 }
 
 // Git runs the installed git in dir and returns its standard output.
-// The error holds the arguments and the standard error of git.
+// The error holds the arguments and the standard error of git, in English.
 func Git(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -29,6 +29,7 @@ func Git(dir string, args ...string) (string, error) {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
+	cmd.Env = append(cmd.Env, "LC_ALL=C")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
