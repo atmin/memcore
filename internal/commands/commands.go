@@ -30,6 +30,7 @@ type Command struct {
 func Table() []Command {
 	return []Command{
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
+		{Name: "init", Args: "<remote>", Does: "Creates the memory repo in ~/memory when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
 	}
 }
 

@@ -28,6 +28,21 @@ func Lock(repo string) (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("open the write lock: %w", err)
 	}
+	return hold(f, path)
+}
+
+// LockDir takes an exclusive flock on a directory itself. init holds it on home,
+// because the memory repo and its lock file do not exist yet.
+func LockDir(dir string) (func(), error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, fmt.Errorf("open %s to lock it: %w", dir, err)
+	}
+	return hold(f, dir)
+}
+
+// hold takes an exclusive flock on an open file, retries for lockWait, and closes the file on a failure.
+func hold(f *os.File, path string) (func(), error) {
 	fd := int(f.Fd())
 	deadline := time.Now().Add(lockWait)
 	for {
