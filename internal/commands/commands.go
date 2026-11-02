@@ -29,6 +29,8 @@ type Command struct {
 // Table returns the commands in the order that the usage and orient print them.
 func Table() []Command {
 	return []Command{
+		{Name: "orient", Does: "Shows these commands, the voice and the indexes from the working directory up to the root.", Run: runOrient},
+		{Name: "show", Args: "<path>", Does: "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.", Run: runShow},
 		{Name: "remember", Args: "[--new]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "init", Args: "<remote>", Does: "Creates the memory repo in ~/memory when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
