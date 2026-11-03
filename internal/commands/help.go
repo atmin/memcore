@@ -90,6 +90,25 @@ For example:
 
   memcore forget tests-before-code --reason "The plan template now says it."
 `,
+	"draft": `memcore draft <kind> [<topic>] [--description <text>] [--at <dir>] [--exec]
+
+Starts a document from its template at the level of the working directory, or of --at,
+and commits it. Then memcore revise fills it. The kinds:
+
+  plan <topic>         plans/<topic>.md, from the plan template; needs --description
+  note <topic>         notes/<topic>.md, a dated investigation; needs --description
+  script <name>        bin/<name>, executable; --description is its comment line
+  helper <name>        bin/<name>, a file beside the scripts, not executable
+  skill <name>         skills/<name>/SKILL.md; needs --description
+  skill <name>/<file>  a file inside an existing skill; --exec makes it executable
+  conventions          conventions.md, the rules of the repo
+  glossary             glossary.md, the terms of the level
+
+A topic is lower case with hyphens. A script name is unique in the memory repo, and no
+command on PATH may hold it. A description says when to read, or when to run. For example:
+
+  memcore draft note slow-search --description "Read when search is slow."
+`,
 	"verify": `memcore verify <path>
 
 Checks a document, or every document under a path, for dead references and forbidden
