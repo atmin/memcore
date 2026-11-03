@@ -52,6 +52,9 @@ func runPush(env Env, args []string) error {
 	if err := Fetch(repo); err != nil { // Fetch refuses while the remote is rewritten
 		return err
 	}
+	if err := foreignNames(repo); err != nil { // a file may have taken the name while the person answered
+		return err
+	}
 	if now, _ := revParse(repo, acceptedRef); now != base || headCommit(repo) != tip {
 		return errors.New("the remote or the queue changed while the person answered, so push pushed nothing: run memcore push again")
 	}
@@ -65,6 +68,9 @@ func runPush(env Env, args []string) error {
 	env.event().Pushed = pushed
 	if _, err := store.Git(repo, "update-ref", acceptedRef, tip); err != nil {
 		return fmt.Errorf("move the accepted history to the pushed tip: %w", err)
+	}
+	if err := syncAccepted(repo); err != nil {
+		return err
 	}
 	fmt.Fprintf(env.Out, "Pushed %s.\n", commits(len(queue)))
 	return nil
@@ -103,6 +109,9 @@ func prepare(repo string) (tip, base string, queue, made, folded []string, err e
 	}
 	if folded, err = fold(repo); err != nil {
 		return "", "", nil, made, nil, err
+	}
+	if err := foreignNames(repo); err != nil {
+		return "", "", nil, made, folded, err
 	}
 	tip, queue, err = queueOf(repo)
 	if err != nil {

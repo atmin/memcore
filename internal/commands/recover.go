@@ -72,10 +72,14 @@ func runRecover(env Env, args []string) error {
 	if _, err := store.Git(repo, "update-ref", acceptedRef, m.fetched); err != nil {
 		return fmt.Errorf("move the accepted history: %w", err)
 	}
+	// The recovery is complete before the links follow, so a failed link never brings the marker back.
 	if err := os.Remove(markerPath(repo)); err != nil {
 		return fmt.Errorf("remove the marker of a rewritten remote: %w", err)
 	}
 	env.event().Dropped = strings.Fields(dropped)
+	if err := syncAccepted(repo); err != nil {
+		return fmt.Errorf("the recovery is done, but the links of the scripts did not follow: %w", err)
+	}
 	fmt.Fprintln(env.Out, "Recovered: the queue sits on top of the remote.")
 	return nil
 }

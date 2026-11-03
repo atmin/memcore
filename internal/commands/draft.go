@@ -246,8 +246,7 @@ func freeScriptName(repo, name string) error {
 		return inputErrf("the script name %s is taken by %s: a script name is unique in the memory repo", name, taken)
 	}
 	if found, err := exec.LookPath(name); err == nil || errors.Is(err, exec.ErrDot) {
-		accepted := filepath.Join(store.StateDir(repo), "accepted") + string(filepath.Separator)
-		if target, err := os.Readlink(found); err != nil || !strings.HasPrefix(target, accepted) {
+		if target, err := os.Readlink(found); err != nil || !ours(repo, target) {
 			return inputErrf("the command %s on PATH already holds the name %s: choose another name", found, name)
 		}
 	}

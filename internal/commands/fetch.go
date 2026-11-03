@@ -51,6 +51,9 @@ func Fetch(repo string) error {
 	if _, err := store.Git(repo, "update-ref", acceptedRef, fetched); err != nil {
 		return fmt.Errorf("move the accepted history: %w", err)
 	}
+	if err := syncAccepted(repo); err != nil {
+		return err
+	}
 	err = rebase(repo, "-q", acceptedRef)
 	var ce *conflictError
 	if errors.As(err, &ce) {
