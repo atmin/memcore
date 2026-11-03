@@ -23,7 +23,7 @@ A skill prints as the person accepted it. For example:
 
   memcore show dev/memories/tests-before-code.md
 `,
-	"remember": `memcore remember [--new] < memory.md
+	"remember": `memcore remember [--new] [--at <dir>] < memory.md
 
 Reads one memory from standard input: a frontmatter between two --- lines, then the body.
 
@@ -35,8 +35,10 @@ Reads one memory from standard input: a frontmatter between two --- lines, then 
 The body states one fact. A feedback memory ends with **Why:** and **How to apply:**.
 Link another memory with [[name]].
 
-memcore places the memory at the level of the working directory. When memories on the
-path share most words of the description, it lists them and writes nothing, unless --new.
+memcore places the memory at the level of the working directory. --at places it at the
+level of a directory on the path up to home: --at ~ for a fact about the person, in every
+project. When memories on the path share most words of the description, memcore lists
+them and writes nothing, unless --new.
 
 Example:
 

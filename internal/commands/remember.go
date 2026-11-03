@@ -24,11 +24,12 @@ func runRemember(env Env, args []string) error {
 	flags := flag.NewFlagSet("remember", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	isNew := flags.Bool("new", false, "write the memory even when near-duplicates exist")
+	at := flags.String("at", "", "place the memory at the level of this directory, on the path to home")
 	if err := flags.Parse(args); err != nil {
 		return usageErr(err.Error())
 	}
 	if flags.NArg() != 0 {
-		return usageErr("usage: memcore remember [--new] < memory.md")
+		return usageErr("usage: memcore remember [--new] [--at <dir>] < memory.md")
 	}
 	repo, err := memoryRepo()
 	if err != nil {
@@ -50,7 +51,11 @@ func runRemember(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	level, err := store.Level(env.Dir, h)
+	level, err := placeAt(env.Dir, *at, h)
+	if err != nil {
+		return err
+	}
+	working, err := store.Level(env.Dir, h)
 	if err != nil {
 		return fmt.Errorf("place the memory: %w", err)
 	}
@@ -70,7 +75,9 @@ func runRemember(env Env, args []string) error {
 		return inputErrf("the name %s is taken by %s: choose another name", m.Name, taken)
 	}
 	if !*isNew {
-		dups, err := nearDuplicates(repo, level, m.Description)
+		// The working directory sees every level on its path, so near-duplicates come from there,
+		// even when --at places the memory higher.
+		dups, err := nearDuplicates(repo, working, m.Description)
 		if err != nil {
 			return err
 		}

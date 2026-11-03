@@ -35,7 +35,7 @@ func Table() []Command {
 	return []Command{
 		{Name: "orient", Does: "Shows these commands, the voice and the indexes from the working directory up to the root.", Run: runOrient},
 		{Name: "show", Args: "<path>", Does: "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.", Run: runShow},
-		{Name: "remember", Args: "[--new]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
+		{Name: "remember", Args: "[--new] [--at <dir>]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits, which wait for the review of the person.", Run: runInbox},
 		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},

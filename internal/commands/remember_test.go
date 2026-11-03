@@ -303,3 +303,57 @@ func TestRememberConcurrent(t *testing.T) {
 	}
 	clean(t, repo)
 }
+
+func TestRememberAt(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	app := mkdirT(t, filepath.Join(home, "dev", "app"))
+	gitT(t, app, "init", "-q", "-b", "main")
+	mkdirT(t, filepath.Join(home, "dev", "other"))
+	shared := mkdirT(t, filepath.Join(home, "dev", "shared"))
+	if err := os.Symlink(shared, filepath.Join(app, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("a symlink before ..", func(t *testing.T) {
+		if out, err := run(t, app, memoryText("through-link", "Read when you follow a link up.", "A fact."), "remember", "--at", "link/.."); err != nil {
+			t.Fatalf("remember --at link/..: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "through-link.md")); err != nil {
+			t.Errorf("the memory is not at dev, where link/.. leads: %v", err)
+		}
+	})
+
+	t.Run("near-duplicates come from the working path", func(t *testing.T) {
+		remember(t, app, "app-deploys", "Read before you deploy the app on Fridays.")
+		_, err := run(t, app, memoryText("deploys-fridays", "Read before you deploy the app on Fridays.", "A fact."), "remember", "--at", "~")
+		if err == nil || !strings.Contains(err.Error(), "near-duplicates") {
+			t.Errorf("error = %v, want a refusal of a near-duplicate on the working path", err)
+		}
+	})
+
+	for _, tt := range []struct {
+		name, at, memory, want, wantErr string
+	}{
+		{name: "home", at: "~", memory: "about-me", want: "memories/about-me.md"},
+		{name: "the parent", at: "..", memory: "across-dev", want: "dev/memories/across-dev.md"},
+		{name: "a sibling", at: "~/dev/other", memory: "sideways", wantErr: "not on the path"},
+		{name: "outside home", at: t.TempDir(), memory: "far-away", wantErr: "outside home"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := run(t, app, memoryText(tt.memory, "Read when you test "+tt.name+" placement.", "A fact."), "remember", "--at", tt.at)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %v, want one that holds %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("remember --at %s: %v\n%s", tt.at, err, out)
+			}
+			if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(tt.want))); err != nil {
+				t.Errorf("the memory is not at %s: %v", tt.want, err)
+			}
+		})
+	}
+}
