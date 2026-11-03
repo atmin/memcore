@@ -61,6 +61,9 @@ func runRemember(env Env, args []string) error {
 		return err
 	}
 	defer unlock()
+	if err := refuseRewritten(repo); err != nil {
+		return err
+	}
 
 	taken, err := findMemory(repo, m.Name)
 	if err != nil {

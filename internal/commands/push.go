@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,6 +23,7 @@ func runPush(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	base, _ := revParse(repo, acceptedRef)
 	if len(queue) == 0 {
 		fmt.Fprintln(env.Out, "Nothing to push.")
 		return nil
@@ -41,6 +43,18 @@ func runPush(env Env, args []string) error {
 		fmt.Fprintln(env.Out, "Pushed nothing.")
 		return nil
 	}
+	// The person may answer late, so push fetches again under the lock, and pushes only the queue that it counted.
+	unlock, err := store.Lock(repo)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := Fetch(repo); err != nil { // Fetch refuses while the remote is rewritten
+		return err
+	}
+	if now, _ := revParse(repo, acceptedRef); now != base || headCommit(repo) != tip {
+		return errors.New("the remote or the queue changed while the person answered, so push pushed nothing: run memcore push again")
+	}
 	pushed, err := revList(repo, tip)
 	if err != nil {
 		return err
@@ -49,8 +63,8 @@ func runPush(env Env, args []string) error {
 		return fmt.Errorf("push to origin: %w", err)
 	}
 	env.event().Pushed = pushed
-	if _, err := store.Git(repo, "fetch", "-q", "origin"); err != nil {
-		return fmt.Errorf("fetch after the push: %w", err)
+	if _, err := store.Git(repo, "update-ref", acceptedRef, tip); err != nil {
+		return fmt.Errorf("move the accepted history to the pushed tip: %w", err)
 	}
 	fmt.Fprintf(env.Out, "Pushed %s.\n", commits(len(queue)))
 	return nil

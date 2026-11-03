@@ -39,6 +39,7 @@ func Table() []Command {
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits, which wait for the review of the person.", Run: runInbox},
 		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},
+		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},
 		{Name: "help", Args: "[<command>]", Does: "Shows the input of a command, with an example.", Run: runHelp},
 		{Name: "init", Args: "<remote>", Does: "Creates the memory repo, ~/memory or $MEMCORE_REPO, when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
 	}

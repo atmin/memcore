@@ -119,3 +119,69 @@ func TestFetch(t *testing.T) {
 		}
 	})
 }
+
+func TestRewrittenRemote(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	first := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	remember(t, dev, "pushed-then-lost", "Read when the remote loses a commit.")
+	var asked string
+	if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push"); err != nil {
+		t.Fatalf("push: %v\n%s", err, out)
+	}
+	lost := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	remember(t, dev, "still-unpushed", "Read when a commit waits in the queue.")
+	gitT(t, remote, "update-ref", "refs/heads/main", first)
+
+	err := Fetch(repo)
+	if err == nil || !strings.Contains(err.Error(), "memcore recover") {
+		t.Fatalf("Fetch: error = %v, want one that names memcore recover", err)
+	}
+	if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "origin/main")); got != lost {
+		t.Errorf("origin/main = %s, want it still at %s", got, lost)
+	}
+	if got := strings.TrimSpace(gitT(t, repo, "rev-list", "--count", "origin/main..main")); got != "1" {
+		t.Errorf("queue holds %s commits, want 1", got)
+	}
+
+	if _, err := run(t, dev, memoryText("a-third", "Read when you write after a rewrite.", "A fact."), "remember"); err == nil || !strings.Contains(err.Error(), "memcore recover") {
+		t.Errorf("remember: error = %v, want a refusal that names memcore recover", err)
+	}
+	if _, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push"); err == nil || !strings.Contains(err.Error(), "memcore recover") {
+		t.Errorf("push: error = %v, want a refusal that names memcore recover", err)
+	}
+	out, _ := run(t, home, "", "inbox")
+	if !strings.Contains(out, "memcore recover") || !strings.Contains(out, "remember: dev/memories/pushed-then-lost.md") {
+		t.Errorf("inbox = %q, want the lost commit and memcore recover", out)
+	}
+
+	before := gitT(t, repo, "rev-parse", "HEAD")
+	if out, err := runWith(t, Env{Dir: home, Confirm: answer(false, &asked)}, "recover"); err != nil {
+		t.Fatalf("recover, no: %v\n%s", err, out)
+	}
+	if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+		t.Errorf("recover with no moved HEAD from %s to %s", before, got)
+	}
+
+	if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "recover"); err != nil {
+		t.Fatalf("recover, yes: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "origin/main")); got != first {
+		t.Errorf("origin/main = %s, want the remote tip %s", got, first)
+	}
+	if got := strings.TrimSpace(gitT(t, repo, "log", "--format=%s", "origin/main..main")); got != "remember: dev/memories/still-unpushed.md" {
+		t.Errorf("queue = %q, want only the unpushed commit", got)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "pushed-then-lost.md")); err == nil {
+		t.Error("the lost memory is still in the working tree")
+	}
+	clean(t, repo)
+	remember(t, dev, "a-third", "Read when you write after a recovery.")
+
+	gitT(t, repo, "reflog", "expire", "--expire=now", "--all")
+	gitT(t, repo, "gc", "-q", "--prune=now")
+	if _, err := store.Git(repo, "cat-file", "-e", lost); err != nil {
+		t.Errorf("the dropped accepted commit %s is gone after gc: %v", lost, err)
+	}
+}

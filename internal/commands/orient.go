@@ -47,7 +47,7 @@ func runOrient(env Env, args []string) error {
 			yours = append(yours, c.Name)
 		}
 	}
-	fmt.Fprintf(&w, "\nOnly the person runs %s.\n", strings.Join(yours, " and "))
+	fmt.Fprintf(&w, "\nOnly the person runs %s.\n", series(yours))
 	fmt.Fprintln(&w, "Before you first use a command, run memcore help <command>: it shows the input, with an example.")
 	fmt.Fprintln(&w)
 
@@ -158,4 +158,12 @@ func countLine(plans, notes int) string {
 		}
 	}
 	return strings.Join(parts, " and ")
+}
+
+// series joins words as a list in a sentence: "a", "a and b", "a, b and c".
+func series(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }

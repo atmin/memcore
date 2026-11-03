@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/atmin/memcore/internal/store"
 )
@@ -24,6 +25,10 @@ func runInbox(env Env, args []string) error {
 	if err := Fetch(repo); err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\nThe queue below may sit behind the accepted history.\n", err)
 	}
+	if m, ok, err := readMarker(repo); err == nil && ok {
+		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)
+		fmt.Fprintf(env.Out, "The remote no longer holds these accepted commits. memcore recover drops them here and keeps the queue:\n%s", indent(lost))
+	}
 	_, queue, err := queueOf(repo)
 	if err != nil {
 		return err
@@ -38,4 +43,15 @@ func runInbox(env Env, args []string) error {
 	}
 	fmt.Fprintf(env.Out, "Review them with git in %s, then accept them with memcore push.\n", tilde(repo))
 	return nil
+}
+
+// indent puts two spaces in front of each line of git output.
+func indent(out string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line != "" {
+			b.WriteString("  " + line + "\n")
+		}
+	}
+	return b.String()
 }

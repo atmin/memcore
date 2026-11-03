@@ -69,6 +69,12 @@ of the person.
 
 Only the person runs it, at a terminal. It fetches, asks, then pushes the unpushed commits.
 `,
+	"recover": `memcore recover
+
+Only the person runs it, at a terminal, after a fetch finds that the remote no longer holds
+the accepted history. It lists the accepted commits that the remote lost, and the queue.
+After the person confirms, it drops the lost commits here and moves the queue onto the remote.
+`,
 	"help": `memcore help [<command>]
 
 Lists the commands, or shows the input of one command, with an example. For example:
