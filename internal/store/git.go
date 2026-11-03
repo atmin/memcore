@@ -17,6 +17,8 @@ var repoVariables = []string{
 	"GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
 	"GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX",
 	"GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
+	// The editors of the person would override the ones that memcore sets, and wait for input.
+	"GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
 }
 
 // Git runs the installed git in dir and returns its standard output.

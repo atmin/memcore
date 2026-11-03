@@ -104,7 +104,8 @@ of the person.
 `,
 	"push": `memcore push
 
-Only the person runs it, at a terminal. It fetches, asks, then pushes the unpushed commits.
+Only the person runs it, at a terminal. It refuses uncommitted changes, fetches, and folds
+each fixup into the commit it corrects. Then it asks, and pushes the unpushed commits.
 `,
 	"recover": `memcore recover
 

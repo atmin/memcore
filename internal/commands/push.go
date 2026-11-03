@@ -19,11 +19,11 @@ func runPush(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	tip, queue, err := fetchLocked(repo)
+	tip, base, queue, folded, err := prepare(repo)
 	if err != nil {
 		return err
 	}
-	base, _ := revParse(repo, acceptedRef)
+	env.event().Folded = folded
 	if len(queue) == 0 {
 		fmt.Fprintln(env.Out, "Nothing to push.")
 		return nil
@@ -81,4 +81,42 @@ func revList(repo, tip string) ([]string, error) {
 		return nil, fmt.Errorf("list the review queue: %w", err)
 	}
 	return strings.Fields(out), nil
+}
+
+// prepare readies the queue for a push under the write lock. It refuses a working tree with
+// uncommitted changes, fetches, and folds the fixups. It returns the tip, the accepted commit,
+// the queue, newest first, and the commits that the fold removed.
+func prepare(repo string) (tip, base string, queue, folded []string, err error) {
+	unlock, err := store.Lock(repo)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	defer unlock()
+	if err := cleanTree(repo, "push pushed nothing"); err != nil {
+		return "", "", nil, nil, err
+	}
+	if err := Fetch(repo); err != nil {
+		return "", "", nil, nil, err
+	}
+	if folded, err = fold(repo); err != nil {
+		return "", "", nil, nil, err
+	}
+	tip, queue, err = queueOf(repo)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	base, _ = revParse(repo, acceptedRef)
+	return tip, base, queue, folded, nil
+}
+
+// cleanTree refuses a working tree with changes that are not committed, and names them.
+func cleanTree(repo, consequence string) error {
+	out, err := store.Git(repo, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return fmt.Errorf("check the working tree: %w", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("the working tree of the memory repo has changes that are not committed, so %s: the person commits or discards them:\n%s", consequence, strings.TrimRight(out, "\n"))
+	}
+	return nil
 }

@@ -77,19 +77,6 @@ func rebasing(repo string) bool {
 	return false
 }
 
-// fetchLocked takes the write lock, fetches, and returns the review queue.
-func fetchLocked(repo string) (tip string, queue []string, err error) {
-	unlock, err := store.Lock(repo)
-	if err != nil {
-		return "", nil, err
-	}
-	defer unlock()
-	if err := Fetch(repo); err != nil {
-		return "", nil, err
-	}
-	return queueOf(repo)
-}
-
 // queueOf returns the review queue: its tip and its commits, newest first.
 func queueOf(repo string) (tip string, queue []string, err error) {
 	out, err := store.Git(repo, "rev-parse", "refs/heads/main")
