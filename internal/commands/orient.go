@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 
@@ -35,31 +36,33 @@ func runOrient(env Env, args []string) error {
 		return err
 	}
 
-	w := env.Out
-	fmt.Fprintf(w, "memcore keeps the long-term memory of your agents, in %s. Touch it only through these commands:\n", tilde(repo))
-	fmt.Fprintln(w)
+	var w strings.Builder
+	words := map[string]int{}
+	fmt.Fprintf(&w, "memcore keeps the long-term memory of your agents, in %s. Touch it only through these commands:\n", tilde(repo))
+	fmt.Fprintln(&w)
 	var yours []string
 	for _, c := range Table() {
-		fmt.Fprintf(w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+		fmt.Fprintf(&w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
 		if c.Yours {
 			yours = append(yours, c.Name)
 		}
 	}
-	fmt.Fprintf(w, "\nOnly the person runs %s.\n\n", strings.Join(yours, " and "))
+	fmt.Fprintf(&w, "\nOnly the person runs %s.\n\n", strings.Join(yours, " and "))
 
 	if voice, ok := accepted(repo, voicePath); ok {
-		fmt.Fprintln(w, "Follow the voice skill in every reply and every document:")
+		fmt.Fprintln(&w, "Follow the voice skill in every reply and every document:")
 		for _, s := range []string{"Always", "Talking"} {
 			if text := section(voice, s); text != "" {
-				fmt.Fprintf(w, "\n%s\n", text)
+				fmt.Fprintf(&w, "\n%s\n", text)
 			}
 		}
-		fmt.Fprintf(w, "\nBefore you write a document, read the Writing part: memcore show %s\n", voicePath)
+		fmt.Fprintf(&w, "\nBefore you write a document, read the Writing part: memcore show %s\n", voicePath)
 	} else {
-		fmt.Fprintf(w, "No accepted voice skill exists yet: the person has not pushed %s.\n", voicePath)
+		fmt.Fprintf(&w, "No accepted voice skill exists yet: the person has not pushed %s.\n", voicePath)
 	}
 
-	fmt.Fprintln(w, "\nThe indexes, from the working directory to the root. Each line says when to read a document, and memcore show <path> prints it.")
+	fmt.Fprintln(&w, "\nThe indexes, from the working directory to the root. Each line says when to read a document, and memcore show <path> prints it.")
+	words["header"] = len(strings.Fields(w.String()))
 	for _, l := range levels {
 		ix, err := store.Lines(repo, l)
 		if err != nil {
@@ -81,13 +84,13 @@ func runOrient(env Env, args []string) error {
 		if len(lines) == 0 {
 			continue
 		}
-		title := "~"
-		if l != "" {
-			title += "/" + l
-		}
-		fmt.Fprintf(w, "\n%s\n%s\n", title, strings.Join(lines, "\n"))
+		block := fmt.Sprintf("\n%s\n%s\n", title(l), strings.Join(lines, "\n"))
+		words[title(l)] = len(strings.Fields(block))
+		w.WriteString(block)
 	}
-	return nil
+	env.event().Words = words
+	_, err = io.WriteString(env.Out, w.String())
+	return err
 }
 
 // unreviewed returns the paths that a commit after the accepted history changed.

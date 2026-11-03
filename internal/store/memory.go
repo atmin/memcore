@@ -29,6 +29,48 @@ var (
 	keyRE  = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 )
 
+// InputError is an error in the text of an input. Its message quotes parts of the input,
+// so Redacted gives the same message with each quoted part replaced.
+type InputError struct {
+	format string
+	args   []any
+}
+
+// inputErrorf returns an InputError. Each string argument is a part of the input, and every other argument is not.
+func inputErrorf(format string, args ...any) error {
+	return &InputError{format: format, args: args}
+}
+
+func (e *InputError) Error() string {
+	return fmt.Sprintf(e.format, e.args...)
+}
+
+// Unwrap returns the error that the message holds, if any.
+func (e *InputError) Unwrap() error {
+	for _, a := range e.args {
+		if err, ok := a.(error); ok {
+			return err
+		}
+	}
+	return nil
+}
+
+// Redacted returns the message with every part of the input replaced by [input].
+func (e *InputError) Redacted() string {
+	args := make([]any, len(e.args))
+	for i, a := range e.args {
+		switch v := a.(type) {
+		case *InputError:
+			args[i] = v.Redacted()
+		case string:
+			args[i] = "[input]"
+		default:
+			args[i] = a
+		}
+	}
+	return fmt.Sprintf(e.format, args...)
+}
+
 // Frontmatter is the header of a document: key: value lines, and lists of plain or quoted items.
 type Frontmatter struct {
 	Values map[string]string
@@ -68,13 +110,13 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 		}
 		key, raw, ok := strings.Cut(line, ":")
 		if !ok || !keyRE.MatchString(key) {
-			return fm, "", fmt.Errorf("frontmatter line %d: want key: value, got %q", n, line)
+			return fm, "", inputErrorf("frontmatter line %d: want key: value, got %q", n, line)
 		}
 		if _, dup := fm.Values[key]; dup {
-			return fm, "", fmt.Errorf("frontmatter line %d: key %q appears twice", n, key)
+			return fm, "", inputErrorf("frontmatter line %d: key %q appears twice", n, key)
 		}
 		if _, dup := fm.Lists[key]; dup {
-			return fm, "", fmt.Errorf("frontmatter line %d: key %q appears twice", n, key)
+			return fm, "", inputErrorf("frontmatter line %d: key %q appears twice", n, key)
 		}
 		raw = strings.TrimSpace(raw)
 		list = ""
@@ -87,7 +129,7 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 		default:
 			v, err := parseValue(raw)
 			if err != nil {
-				return fm, "", fmt.Errorf("frontmatter line %d: key %q: %w", n, key, err)
+				return fm, "", inputErrorf("frontmatter line %d: key %q: %s", n, key, err)
 			}
 			fm.Values[key] = v
 		}
@@ -117,7 +159,7 @@ func parseValue(raw string) (string, error) {
 	if strings.HasPrefix(raw, `"`) {
 		v, err := unquote(raw)
 		if err != nil {
-			return "", fmt.Errorf("bad double-quoted value %s: %w", raw, err)
+			return "", inputErrorf("bad double-quoted value %s: %s", raw, err)
 		}
 		return v, nil
 	}
@@ -125,7 +167,7 @@ func parseValue(raw string) (string, error) {
 		slices.Contains([]string{"-", "?", ":"}, raw) ||
 		strings.HasPrefix(raw, "- ") || strings.HasPrefix(raw, "? ") || strings.HasPrefix(raw, ": ")
 	if indicator || strings.Contains(raw, ": ") || strings.Contains(raw, " #") || strings.HasSuffix(raw, ":") {
-		return "", fmt.Errorf("value %q is not plain: put it in double quotes", raw)
+		return "", inputErrorf("value %q is not plain: put it in double quotes", raw)
 	}
 	return raw, nil
 }
@@ -163,11 +205,11 @@ func unquote(raw string) (string, error) {
 		}
 		width := map[byte]int{'x': 2, 'u': 4, 'U': 8}[s[i]]
 		if width == 0 || i+1+width > len(s) {
-			return "", fmt.Errorf("bad escape \\%c", s[i])
+			return "", inputErrorf("bad escape \\%s", string(s[i]))
 		}
 		r, err := strconv.ParseUint(s[i+1:i+1+width], 16, 32)
 		if err != nil || !utf8.ValidRune(rune(r)) {
-			return "", fmt.Errorf("bad escape \\%s", s[i:i+1+width])
+			return "", inputErrorf("bad escape \\%s", s[i:i+1+width])
 		}
 		b.WriteRune(rune(r))
 		i += width
@@ -215,12 +257,12 @@ func ParseMemory(r io.Reader) (Memory, error) {
 	}
 	for key := range fm.Values {
 		if !slices.Contains([]string{"name", "description", "type"}, key) {
-			return Memory{}, fmt.Errorf("parse the memory: unknown key %q", key)
+			return Memory{}, inputErrorf("parse the memory: unknown key %q", key)
 		}
 	}
 	for key := range fm.Lists {
 		if key != "sessions" {
-			return Memory{}, fmt.Errorf("parse the memory: unknown key %q, or a list where a value belongs", key)
+			return Memory{}, inputErrorf("parse the memory: unknown key %q, or a list where a value belongs", key)
 		}
 	}
 	for _, key := range []string{"name", "description", "type"} {
@@ -240,10 +282,10 @@ func ParseMemory(r io.Reader) (Memory, error) {
 		Body:        body,
 	}
 	if !nameRE.MatchString(m.Name) {
-		return Memory{}, fmt.Errorf("parse the memory: name %q is not lower case with hyphens", m.Name)
+		return Memory{}, inputErrorf("parse the memory: name %q is not lower case with hyphens", m.Name)
 	}
 	if !slices.Contains(Types, m.Type) {
-		return Memory{}, fmt.Errorf("parse the memory: type %q is not one of %s", m.Type, strings.Join(Types, ", "))
+		return Memory{}, inputErrorf("parse the memory: type %q is not one of "+strings.Join(Types, ", "), m.Type)
 	}
 	return m, nil
 }

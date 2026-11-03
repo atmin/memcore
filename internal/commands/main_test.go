@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,14 +42,11 @@ func runWith(t *testing.T, env Env, args ...string) (string, error) {
 	if env.In == nil {
 		env.In = strings.NewReader("")
 	}
-	for _, c := range Table() {
-		if c.Name == args[0] {
-			err := c.Run(env, args[1:])
-			return out.String(), err
-		}
+	err := Run(env, args[0], args[1:])
+	if errors.Is(err, ErrUnknown) {
+		t.Fatalf("no command %q", args[0])
 	}
-	t.Fatalf("no command %q", args[0])
-	return "", nil
+	return out.String(), err
 }
 
 // gitT runs git in dir and fails the test on an error.

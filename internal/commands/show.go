@@ -71,6 +71,7 @@ func runShow(env Env, args []string) error {
 		return fmt.Errorf("%s is not a path in the memory repo", args[0])
 	}
 	full := filepath.Join(repo, filepath.FromSlash(p))
+	env.event().Paths = []string{p}
 
 	if isSkill(p) {
 		content, ok := accepted(repo, p)

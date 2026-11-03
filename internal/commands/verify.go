@@ -39,6 +39,7 @@ func runVerify(env Env, args []string) error {
 	if err != nil {
 		return fmt.Errorf("find %s in %s: %w", target, repo, err)
 	}
+	env.event().Paths = []string{filepath.ToSlash(rel)}
 	r, err := guards.Verify(repo, filepath.ToSlash(rel))
 	if err != nil {
 		return err

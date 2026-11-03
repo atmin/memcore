@@ -17,6 +17,7 @@ type Env struct {
 	Out     io.Writer
 	Err     io.Writer
 	Confirm func(prompt string) (bool, error)
+	Event   *Event // the line of the use log that Run appends after the command
 }
 
 // Command is one row of the command table.
@@ -79,4 +80,12 @@ func tilde(p string) string {
 		return "~"
 	}
 	return "~/" + filepath.ToSlash(rel)
+}
+
+// event returns the event of the command, or a throwaway one when no Run logs the call.
+func (env Env) event() *Event {
+	if env.Event != nil {
+		return env.Event
+	}
+	return &Event{}
 }

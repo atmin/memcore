@@ -41,6 +41,7 @@ func runRemember(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	env.event().input(m.Name, m.Description, m.Type)
 	m.Sessions = nil
 	if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
 		m.Sessions = []string{"claude:" + id}
@@ -126,6 +127,7 @@ func runRemember(env Env, args []string) error {
 	if err := write(repo, rel, content, paths); err != nil {
 		return err
 	}
+	env.event().Paths, env.event().Made = []string{rel}, []string{headCommit(repo)}
 
 	for _, w := range m.Warnings() {
 		fmt.Fprintf(env.Out, "warning: %s\n", w)
