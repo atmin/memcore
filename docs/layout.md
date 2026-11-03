@@ -48,11 +48,19 @@ The root is a level like any other, so nothing sits there loose. The folder give
 
 **Scripts.** An agent writes one-off scripts wherever it works. A script enters `bin/` only when it recurs: you ask for it, or a sleep pass finds the same command sequence in two or more sessions (see [Sleep](sleep.md)). `draft script <name>` starts it from the template, and `revise` fills it. The template starts with a shebang, then one comment line that says when to run the script, then its usage. That comment line is the script's index line.
 
+**Drafts.** `draft <kind> [<topic>]` starts a document from its template, at its level, and `revise` then fills it. A conventions file and a glossary take no topic:
+- a plan: the template of the [plan](../skills/plan/TEMPLATE.md) skill, with its name and description;
+- a note: its name, its description, a title and the date of the draft;
+- a script: a shebang, its comment line, its usage and `set -eu`;
+- a helper, or a file inside a skill: an empty file;
+- a skill: its `SKILL.md`, with its name, its description and a title;
+- a conventions file or a glossary: a title for the level.
+
 A script runs the same way every time, from its arguments, with no decision inside. A procedure with judgment is a skill, and a skill carries any scripts that it needs. So a script is one executable file, and a shared helper sits beside it, not executable and never linked. Anything that needs a folder or a decision is a skill. Starting the local stack with one command is a script. Setting up a worktree, with steps and a check at the end, is a skill.
 
 A script name is global, because a command name is. It is unique in the memory repo, and memcore refuses a name that a command on your `PATH` already uses. The level says only where the script lives and which agents see it in their index.
 
-`push` links each new script onto `~/.local/bin` and removes the links of the scripts it deletes. A link points into the checkout of the accepted history, not into the working tree. So a script and its helpers run as you accepted them, and a revision in the queue waits for your push. Until you push, a new script sits in the review queue unlinked, and its index line says unreviewed.
+`push` links each new script onto `~/.local/bin` and removes the links of the scripts it deletes. A link points into the checkout of the accepted history, not into the working tree. So a script and its helpers run as you accepted them. A revision in the queue waits for your push. Until you push, a new script sits in the review queue unlinked, and its index line says unreviewed. `push` refuses a new script whose name a file in `~/.local/bin` already holds, unless memcore linked that file.
 
 **Index.** memcore generates every index from the frontmatter of the documents, and commits it, so it reads as a plain file. Nobody writes an index by hand, because the next write regenerates it. Each line says when to read:
 - the line of a memory, a plan, a note or a skill is the `description` in its frontmatter;

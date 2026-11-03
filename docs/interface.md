@@ -7,20 +7,23 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | | Command | Does |
 | --- | --- | --- |
 | read | `orient` | Shows the indexes from the working directory up to the root. At each level it prints the memories, skills, scripts, conventions and glossary, and the plans and notes as counts. It prints no sibling level. |
-| | `show <path>` | Prints a memory, plan, note or skill. |
+| | `show <path>` | Prints a document by its path. It prints a skill as you accepted it, and refuses a path through a symlink. |
 | | `search <query>` | Searches memories, plans, notes and skills, from this level up by default. |
 | | `recall <query>` | Finds passages in past transcripts on the transcripts branch. |
 | | `history <path>` | Shows earlier versions of a document. |
-| write | `remember` | Places, checks, indexes and commits a memory, which it reads from standard input with its frontmatter (see [A memory](memory.md)). When a memory on the path shares most of the words of the new description, it lists the matches and writes nothing. "Read", "when", "before" and "you" do not count, because most descriptions start with them. So the agent can revise one instead of adding another. `remember --new` writes anyway. It runs `verify` on the new memory before it commits. |
-| | `revise <path>` | Replaces a document's content, read from standard input, and records the reason. If the document's last change is still unpushed, the revision becomes a fixup of that commit. It then runs `verify` on the document. |
-| | `forget <path>` | Removes a document, with the reason. |
-| | `draft <kind> <topic>` | Starts a plan, a note or a script from its template, at the right level. `revise` then fills it. |
+| | `help [<command>]` | Shows the input of a command, with one valid example. `memcore <command> --help` does the same. |
+| write | `remember` | Places, checks, indexes and commits a memory, which it reads from standard input with its frontmatter (see [A memory](memory.md)). `--at <dir>` places it at the level of a directory on the path up to home. `--at ~` places a fact about you at the root. When a memory on the path shares most words of the new description, it lists the matches and writes nothing. "Read", "when", "before" and "you" do not count, because most descriptions start with them. So the agent can revise one instead of adding another. `remember --new` writes anyway. It runs `verify` on the new memory before it commits. |
+| | `revise <path or name> --reason <text>` | Replaces a document with the whole new version from standard input, and records the reason in the commit. A memory keeps its name and its sessions. If the last change of the document is still unpushed, the revision becomes a fixup of that commit. It runs `verify` and the secret filter first. |
+| | `forget <path or name> --reason <text>` | Removes a document, or the folder of a skill, and records the reason. It refuses while another document links to it. A level left with no document goes too. When the queue created the document, the removal is a fixup, and the fold leaves no commit of either. |
+| | `draft <kind> [<topic>]` | Starts any kind of document from its template, as `memcore help draft` lists them. It writes at the level of the working directory, or of `--at`. `revise` then fills it. |
 | upkeep | `snapshot` | Commits new transcripts to the transcripts branch, trimmed and redacted. |
 | | `sleep` | Runs a sleep pass, with one commit per change. The pass runs `verify` on every document. |
 | | `verify <path>` | Checks the documents at a path, or any markdown, against the references they name, the glossaries on their path and the voice skill. |
-| | `inbox` | Lists what waits on you: the unpushed commits and the open contradictions. It fetches first, and it shows which guard protects the remote. |
-| yours | `push` | Fetches, folds in the fixups, then pushes. It asks for confirmation at your terminal and signs with the key that only you can use (see [Git](git.md)). After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. |
+| | `inbox` | Lists what waits on you: the unpushed commits with their reasons and files, and the stale indexes. It also warns of a remote that lost accepted commits. It fetches first. The open contradictions and the guard of the remote wait for later work. |
+| yours | `push` | Refuses uncommitted changes, fetches, writes each stale index again, and folds in the fixups. Then it asks for confirmation at your terminal and pushes. The key that only you can use waits for later work (see [Git](git.md)). After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. |
 | | `purge <path>`, `purge --text` | Removes a document or a passage from every commit, then force pushes once, with the same confirmation and key as `push`. See [Git](git.md). |
+| | `drop <commit>` | Removes a commit of the review queue, with its fixups, after it asks at your terminal. It records your reason, so sleep learns from it. |
+| | `recover` | Runs after a fetch finds that the remote lost accepted commits. It asks at your terminal, drops them here, and moves the queue onto the remote (see [Git](git.md)). |
 | setup | `init <remote>` | Sets memcore up on a machine: the memory repo and its credentials, its scripts, every installed agent, and onboarding. Today it sets up only the memory repo. It creates the repo when the remote is empty, and clones the remote otherwise. The rest waits for later work. See [Install](install.md). |
 
 **Verify.** `verify` blocks a write only on exact faults: a dead reference, or a word that a glossary on the path forbids. A forbidden word counts as a whole word or phrase, outside code and links. `verify` only warns on heuristic faults:

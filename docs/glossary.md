@@ -19,5 +19,8 @@ The docs use each term below with one meaning only.
 - **sleep pass**: one run of sleep, the consolidation that keeps memory lean.
 - **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch.
 - **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
+- **fixup**: a commit that corrects an unpushed commit, and that `push` folds into it.
+- **fold**: the step of `push` that folds each fixup into the commit it corrects.
+- **use log**: the local record of every command of memcore, under `.git/memcore/`, which memcore never commits.
 - **purge**: the removal of content from every commit of the memory repo, which only you run.
 - **promotion**: the move of a document up one level.

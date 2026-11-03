@@ -34,4 +34,10 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
 ## State and search
 
 - Search is a text search over the working tree, plus `git grep` on the transcripts branch. memcore keeps no search index on disk.
-- Local state lives under `.git/memcore/`, and memcore never commits it. It holds the time of the last snapshot and the checkout of the accepted history, a worktree of the remote-tracking branch.
+- Local state lives under `.git/memcore/`, and memcore never commits it. It holds:
+  - the write lock;
+  - the use log, `log.jsonl`, with one line per command and no standard input;
+  - the checkout of the accepted history, a worktree of the remote-tracking branch;
+  - the marker of a remote that lost accepted commits;
+  - the time of the last snapshot.
+- memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. memcore never pushes these refs.

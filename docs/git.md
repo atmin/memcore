@@ -6,12 +6,15 @@ The intended remote is a future gitmote. It is serverless, lives in object stora
 
 - Agents commit through `memcore` as they go, one change per commit, without asking.
 - You review the queue in bulk, at a time you choose.
-- A correction becomes a fixup commit, which memcore autosquashes into the commit it corrects.
+- A correction of an unpushed change becomes a fixup commit. `push` folds each fixup into the commit it corrects.
 - Until you push, memcore can rewrite history for clarity: it can reorder, merge, reword or drop commits.
 - Nobody rewrites pushed history, and nobody pushes with `--force`, except you, in a purge.
 - Only you push, and only you purge.
+- You drop a commit of the queue with `memcore drop`, at your terminal, and the drop keeps your reason.
 
-Each commit of memcore names its command and its path, as `remember: dev/memories/tests-before-code.md`. The first commit of a new memory repo is `init: create the memory repo`.
+Each commit of memcore names its command and its path, as `remember: dev/memories/tests-before-code.md`. The commands that commit are `remember`, `revise`, `forget` and `draft`. `push` adds `index: <path>` for an index that a hand edit left stale. The body of a `revise` or a `forget` holds its reason. A fixup is `fixup! <subject of its target>`, with its command, its path and its reason in the body. The first commit of a new memory repo is `init: create the memory repo`.
+
+**Fold.** `push` folds the queue with one interactive rebase, and never rewrites the accepted history. A fixup folds into the nearest earlier commit with its subject. A chain that leaves every document as it found it, such as a remember and its forget, goes whole. Indexes are generated, so the fold writes each index again after each commit. A conflict in any other document stops the fold and leaves the queue as it was.
 
 Agents load unreviewed memories at once, and `orient` labels them as unreviewed. A bad memory lasts until your next review, and the review leaves a clean history.
 
@@ -50,10 +53,10 @@ A purge cannot reach four places, which are the host's job or yours:
 ## Fetch
 
 memcore fetches the way snapshots and sleep passes start, in the background, so no call waits:
-- When an agent calls memcore and five minutes have passed since the last fetch, memcore fetches. `inbox` and `push` fetch at once.
-- The fetch lands under the write lock. memcore moves the accepted checkout forward, rebases the review queue onto the fetched tip, and links any new scripts. A fetched memory needs no review, because a push accepted it.
-- When the queue and the fetched history change the same document, the fetched version stays in place. The local version becomes a revision on top of it in the queue, and `inbox` lists the pair as a contradiction.
-- When the fetched tip does not contain the accepted history as it stood before the fetch, you purged on another machine. The review queue sits on top of that history, so its absence from the remote is normal. memcore then stops writes, and asks you to run the same purge here before it rebases the queue.
+- When an agent calls memcore and five minutes have passed since the last fetch, memcore will fetch. Today only `inbox` and `push` fetch, and they fetch at once.
+- The fetch lands under the write lock. memcore moves the accepted checkout forward, rebases the review queue onto the fetched tip, and links any new scripts. A conflict in an index writes the index again. A fetched memory needs no review, because a push accepted it.
+- When the queue and the fetched history change the same document, the fetch stops and names the paths. The queue stays as it was. Later, the fetched version will stay in place, and the local version will become a revision on top of it. `inbox` will list the pair as a contradiction.
+- After a purge on another machine, a fetched tip lacks the accepted history as it stood before. memcore keeps `origin/main`, rebases nothing, and refuses every write. `memcore recover` asks at your terminal, drops the lost commits here, and moves the queue onto the remote.
 - memcore retries a failed fetch in silence. `inbox` shows the time of the last successful fetch.
 
 ## Sources
