@@ -24,6 +24,7 @@ func TestMain(m *testing.M) {
 	}
 	os.Unsetenv("CLAUDECODE")
 	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
+	os.Unsetenv("MEMCORE_REPO")
 	os.Exit(m.Run())
 }
 

@@ -3,9 +3,11 @@ package commands
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Env is what a command reads and writes besides the memory repo.
@@ -35,7 +37,7 @@ func Table() []Command {
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits, which wait for the review of the person.", Run: runInbox},
 		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},
-		{Name: "init", Args: "<remote>", Does: "Creates the memory repo in ~/memory when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
+		{Name: "init", Args: "<remote>", Does: "Creates the memory repo, ~/memory or $MEMCORE_REPO, when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
 	}
 }
 
@@ -48,11 +50,33 @@ func home() (string, error) {
 	return h, nil
 }
 
-// memoryRepo returns the path of the memory repo, ~/memory.
+// memoryRepo returns the path of the memory repo: $MEMCORE_REPO when it is set, and ~/memory otherwise.
 func memoryRepo() (string, error) {
+	if r := os.Getenv("MEMCORE_REPO"); r != "" {
+		if !filepath.IsAbs(r) {
+			return "", fmt.Errorf("MEMCORE_REPO is %q, not an absolute path", r)
+		}
+		return filepath.Clean(r), nil
+	}
 	h, err := home()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(h, "memory"), nil
+}
+
+// tilde writes a path under home with ~ in front, for a message.
+func tilde(p string) string {
+	h, err := home()
+	if err != nil {
+		return p
+	}
+	rel, err := filepath.Rel(h, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return p
+	}
+	if rel == "." {
+		return "~"
+	}
+	return "~/" + filepath.ToSlash(rel)
 }

@@ -34,6 +34,9 @@ func runInit(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(repo), 0o755); err != nil {
+		return fmt.Errorf("create the folder of the memory repo: %w", err)
+	}
 	unlock, err := store.LockDir(filepath.Dir(repo))
 	if err != nil {
 		return err
@@ -55,8 +58,8 @@ func runInit(env Env, args []string) error {
 		return fmt.Errorf("%s exists and is not a memory repo of memcore: move it away, then run init again", repo)
 	}
 
-	// init builds the repo beside ~/memory and renames it into place, so a failure leaves
-	// ~/memory as it was, and the rename refuses a directory that something filled meanwhile.
+	// init builds the repo beside its final path and renames it into place, so a failure leaves
+	// that path as it was, and the rename refuses a directory that something filled meanwhile.
 	tmp, err := os.MkdirTemp(filepath.Dir(repo), ".memory-init-")
 	if err != nil {
 		return fmt.Errorf("create a temporary directory: %w", err)

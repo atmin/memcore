@@ -36,7 +36,7 @@ func runOrient(env Env, args []string) error {
 	}
 
 	w := env.Out
-	fmt.Fprintln(w, "memcore keeps the long-term memory of your agents, in ~/memory. Touch it only through these commands:")
+	fmt.Fprintf(w, "memcore keeps the long-term memory of your agents, in %s. Touch it only through these commands:\n", tilde(repo))
 	fmt.Fprintln(w)
 	var yours []string
 	for _, c := range Table() {

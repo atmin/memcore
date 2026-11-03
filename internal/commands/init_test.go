@@ -8,6 +8,36 @@ import (
 )
 
 func TestInit(t *testing.T) {
+	t.Run("MEMCORE_REPO", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+		home := newHome(t)
+		remote := bareRemote(t)
+		repo := filepath.Join(t.TempDir(), "scratch", "memory")
+		t.Setenv("MEMCORE_REPO", repo)
+		if out, err := run(t, home, "", "init", remote); err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		remember(t, mkdirT(t, filepath.Join(home, "dev")), "small-commits", "Read before you commit: one change per commit.")
+		if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "small-commits.md")); err != nil {
+			t.Errorf("the memory is not in MEMCORE_REPO: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(home, "memory")); err == nil {
+			t.Error("~/memory exists, want it absent")
+		}
+		out, err := run(t, home, "", "orient")
+		if err != nil || !strings.Contains(out, "in "+repo+".") {
+			t.Errorf("orient: %v, output %q, want it to name %s", err, out, repo)
+		}
+	})
+
+	t.Run("relative MEMCORE_REPO", func(t *testing.T) {
+		home := newHome(t)
+		t.Setenv("MEMCORE_REPO", "memory")
+		if _, err := run(t, home, "", "init", bareRemote(t)); err == nil || !strings.Contains(err.Error(), "absolute") {
+			t.Errorf("error = %v, want a refusal of a relative path", err)
+		}
+	})
+
 	t.Run("empty remote", func(t *testing.T) {
 		_, repo, remote := newMemory(t)
 		if got := strings.TrimSpace(gitT(t, repo, "log", "--format=%s")); got != "init: create the memory repo" {

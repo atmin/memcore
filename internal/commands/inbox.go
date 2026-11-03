@@ -37,6 +37,6 @@ func runInbox(env Env, args []string) error {
 	for _, c := range queue {
 		fmt.Fprintf(env.Out, "  %s\n", c)
 	}
-	fmt.Fprintln(env.Out, "Review them with git in ~/memory, then accept them with memcore push.")
+	fmt.Fprintf(env.Out, "Review them with git in %s, then accept them with memcore push.\n", tilde(repo))
 	return nil
 }
