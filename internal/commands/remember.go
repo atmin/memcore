@@ -56,14 +56,11 @@ func runRemember(env Env, args []string) error {
 	}
 	rel := path.Join(store.Folder(level), "memories", m.Name+".md")
 
-	unlock, err := store.Lock(repo)
+	unlock, err := lockWrite(repo)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	if err := refuseRewritten(repo); err != nil {
-		return err
-	}
 
 	taken, err := findMemory(repo, m.Name)
 	if err != nil {
@@ -103,34 +100,11 @@ func runRemember(env Env, args []string) error {
 		}
 		return inputErrf("%d faults, so remember wrote nothing", len(report.Faults))
 	}
-	levels := store.Path(level)
-	for _, l := range levels {
-		if _, err := store.Lines(repo, l); err != nil {
-			return fmt.Errorf("read the index of the path: %w", err)
-		}
-	}
-
-	paths := []string{rel}
-	for _, l := range levels {
-		paths = append(paths, path.Join(store.Folder(l), "README.md"))
-	}
-	for _, p := range paths {
-		if err := noSymlink(repo, p); err != nil {
-			return err
-		}
-	}
-	dirty, err := store.Git(repo, append([]string{"--literal-pathspecs", "status", "--porcelain", "--"}, paths...)...)
+	made, err := apply(repo, change{writes: []file{{path: rel, content: content, mode: 0o644}}, message: "remember: " + rel})
 	if err != nil {
-		return fmt.Errorf("check the paths of the write: %w", err)
-	}
-	if strings.TrimSpace(dirty) != "" {
-		return fmt.Errorf("the working tree of the memory repo has changes that are not committed, so remember wrote nothing: the person commits or discards them:\n%s", strings.TrimRight(dirty, "\n"))
-	}
-
-	if err := write(repo, rel, content, paths); err != nil {
 		return err
 	}
-	env.event().Paths, env.event().Made = []string{rel}, []string{headCommit(repo)}
+	env.event().Paths, env.event().Made = []string{rel}, []string{made}
 
 	for _, w := range m.Warnings() {
 		fmt.Fprintf(env.Out, "warning: %s\n", w)
@@ -165,56 +139,6 @@ func budgetWarning(level string, n int) string {
 		title += "/" + level
 	}
 	return fmt.Sprintf("warning: %s has %d lines in orient, over the budget of %d: a sleep pass consolidates it", title, n, budget)
-}
-
-// write writes the memory at rel, regenerates the indexes, and commits the paths: rel and the index of each level.
-// The paths have no changes before the write, so on a failure it restores them from HEAD.
-func write(repo, rel string, content []byte, paths []string) error {
-	full := filepath.Join(repo, filepath.FromSlash(rel))
-	var created []string // the folders that the write creates, deepest first
-	for dir := filepath.Dir(full); dir != repo; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(dir); err == nil {
-			break
-		}
-		created = append(created, dir)
-	}
-	err := func() error {
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return fmt.Errorf("create the level: %w", err)
-		}
-		if err := os.WriteFile(full, content, 0o644); err != nil {
-			return fmt.Errorf("write the memory: %w", err)
-		}
-		for _, p := range paths[1:] {
-			folder := path.Dir(p)
-			if folder == "." {
-				folder = "" // the root
-			}
-			level, ok := store.LevelOf(folder)
-			if !ok {
-				return fmt.Errorf("index %s: the folder maps to no level", folder)
-			}
-			if err := store.WriteIndex(repo, level); err != nil {
-				return err
-			}
-		}
-		return store.Commit(repo, paths, "remember: "+rel)
-	}()
-	if err == nil {
-		return nil
-	}
-	store.Git(repo, append([]string{"--literal-pathspecs", "reset", "-q", "--"}, paths...)...)
-	for _, p := range paths {
-		if _, gerr := store.Git(repo, "cat-file", "-e", "HEAD:"+p); gerr == nil {
-			store.Git(repo, "--literal-pathspecs", "checkout", "HEAD", "--", p)
-		} else {
-			os.Remove(filepath.Join(repo, filepath.FromSlash(p)))
-		}
-	}
-	for _, dir := range created {
-		os.Remove(dir)
-	}
-	return err
 }
 
 // findMemory returns the path of the memory with a name anywhere in the repo, or "".
