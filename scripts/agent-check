@@ -1,0 +1,110 @@
+#!/bin/sh
+# Run by hand after a build: a fresh Claude Code agent, given only the startup line, remembers, revises and forgets a fact through memcore.
+# Usage: scripts/agent-check
+#
+# It spends the tokens of eight short headless sessions. Each session runs isolated from your own
+# configuration, against a scratch memory repo under home, so ~/memory stays untouched.
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+for flag in --safe-mode --setting-sources --strict-mcp-config --tools --allowedTools --no-session-persistence --append-system-prompt; do
+	claude --help 2>/dev/null | grep -q -- "$flag" || { echo "agent-check: claude lacks $flag, so the check cannot isolate the agent" >&2; exit 1; }
+done
+
+work=$(mktemp -d "$HOME/.memcore-agent-check.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/bin"
+(cd "$root" && CGO_ENABLED=0 go build -o "$work/bin/memcore" ./cmd/memcore)
+PATH="$work/bin:$PATH"
+export PATH
+
+startup='Run `memcore orient` at the start of every session, and follow it.'
+
+# fresh <name> makes a scratch memory repo with a bare remote, and a project directory under home.
+fresh() {
+	run="$work/$1"
+	mkdir -p "$run/project"
+	git init -q --bare -b main "$run/remote.git"
+	MEMCORE_REPO="$run/memory" memcore init "$run/remote.git" >/dev/null
+}
+
+# session <task> runs one fresh, isolated agent session in the project directory of $run.
+# It marks where the use log stood, so the checks read only the events of this session.
+session() {
+	mark=$(wc -l <"$run/memory/.git/memcore/log.jsonl" 2>/dev/null || echo 0)
+	(cd "$run/project" && env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID \
+		MEMCORE_REPO="$run/memory" CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
+		claude -p "$1" --safe-mode --setting-sources "" --strict-mcp-config \
+		--tools Bash --allowedTools "Bash(memcore *)" --no-session-persistence \
+		--append-system-prompt "$startup" >"$run/last-session.txt" 2>&1) || true
+}
+
+# holding <token> counts the memories of $run that hold a token.
+holding() {
+	grep -rl --include='*.md' -- "$1" "$run/memory" 2>/dev/null | grep -c '/memories/' || true
+}
+
+# events prints the events of the last session in the use log of $run.
+events() {
+	tail -n "+$((mark + 1))" "$run/memory/.git/memcore/log.jsonl" 2>/dev/null
+}
+
+# first <command> prints ok when the first write attempt of a command in the last session made a commit.
+# A write attempt made a commit or failed; a call for --help did neither, so it does not count.
+first() {
+	attempt=$(events | grep "\"command\":\"$1\"" | grep -e '"made":' -e '"outcome":"error"' | head -1)
+	case "$attempt" in
+	*'"made":'*) echo ok ;;
+	*) echo fail ;;
+	esac
+}
+
+# made <command> prints ok when any call of a command in the last session made a commit.
+made() {
+	if events | grep "\"command\":\"$1\"" | grep -q '"made":'; then
+		echo ok
+	else
+		echo fail
+	fi
+}
+
+remember_task() {
+	echo "Remember this for later sessions: the nightly backup of this project runs at 02:30, and its ticket tag is $1."
+}
+
+passed=0
+for i in 1 2 3 4 5; do
+	fresh "remember-$i"
+	token="tag-a-$i-$$"
+	session "$(remember_task "$token")"
+	if [ "$(first remember)" = ok ] && [ "$(holding "$token")" = 1 ]; then
+		passed=$((passed + 1))
+		echo "remember $i: pass"
+	else
+		echo "remember $i: fail, first remember: $(first remember), memories with the token: $(holding "$token")"
+	fi
+done
+
+fresh correct
+a="tag-a-correct-$$"
+b="tag-b-correct-$$"
+session "$(remember_task "$a")"
+if [ "$(first remember)" != ok ] || [ "$(holding "$a")" != 1 ]; then
+	echo "correct: fail, the starting fact is missing: first remember: $(first remember), memories with the token: $(holding "$a")"
+	exit 1
+fi
+session "The nightly backup no longer runs at 02:30: it runs at 04:15 now, and its ticket tag is $b. Correct your memory."
+revised=fail
+if [ "$(made revise)" = ok ] && [ "$(holding "$b")" = 1 ] && [ "$(holding "$a")" = 0 ]; then
+	revised=pass
+fi
+echo "revise: $revised"
+session "Forget the fact about the nightly backup: it no longer applies."
+forgotten=fail
+if [ "$(made forget)" = ok ] && [ "$(holding "$a")" = 0 ] && [ "$(holding "$b")" = 0 ]; then
+	forgotten=pass
+fi
+echo "forget: $forgotten"
+
+echo "remember on the first call: $passed of 5"
+[ "$passed" = 5 ] && [ "$revised" = pass ] && [ "$forgotten" = pass ]

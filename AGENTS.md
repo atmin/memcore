@@ -22,6 +22,7 @@ Read [README.md](README.md) first. It indexes the design docs and the skills.
 - Write the tests of a step before its code. Use table-driven tests where cases repeat.
 - A test that needs git runs the installed git in a temporary repo from `t.TempDir()`.
 - No test calls a real agent. Tests replace the headless agent with a fake.
+- Checks with a real agent live in `scripts/`, and run by hand. `go test` never runs them.
 
 ## Verification
 
