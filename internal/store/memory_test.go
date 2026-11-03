@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,12 +76,65 @@ func TestParseMemory(t *testing.T) {
 		{name: "missing name", in: without("name"), wantErr: `missing key "name"`},
 		{name: "missing description", in: without("description"), wantErr: `missing key "description"`},
 		{name: "missing type", in: without("type"), wantErr: `missing key "type"`},
-		{name: "missing sessions", in: without("sessions"), wantErr: `missing key "sessions"`},
+		{
+			name: "missing sessions",
+			in:   without("sessions"),
+			want: Memory{
+				Name:        "tests-before-code",
+				Description: "Read before you write code, since the tests of a step come first.",
+				Type:        "feedback",
+				Body:        "Write the tests of a step before its code.\n",
+			},
+		},
+		{
+			name: "sessions as a flow list",
+			in:   replace("sessions:\n  - claude:d4d1d99a-9439-4b7d-ae7a-25f063f909c9", `sessions: [claude:one, "claude:two"]`),
+			want: Memory{
+				Name:        "tests-before-code",
+				Description: "Read before you write code, since the tests of a step come first.",
+				Type:        "feedback",
+				Sessions:    []string{"claude:one", "claude:two"},
+				Body:        "Write the tests of a step before its code.\n",
+			},
+		},
 		{name: "extra key", in: replace("type: feedback", "type: feedback\nowner: me"), wantErr: `unknown key "owner"`},
 		{name: "bad name", in: replace("name: tests-before-code", "name: Tests_Before"), wantErr: `name "Tests_Before"`},
 		{name: "bad type", in: replace("type: feedback", "type: opinion"), wantErr: `type "opinion"`},
-		{name: "plain value with a colon", in: replace("since the tests", "since: the tests"), wantErr: "double quotes"},
-		{name: "single-quoted value", in: replace("type: feedback", "type: 'feedback'"), wantErr: "double quotes"},
+		{
+			name: "plain value with a colon",
+			in:   replace("since the tests", "since: the tests"),
+			want: Memory{
+				Name:        "tests-before-code",
+				Description: "Read before you write code, since: the tests of a step come first.",
+				Type:        "feedback",
+				Sessions:    []string{"claude:d4d1d99a-9439-4b7d-ae7a-25f063f909c9"},
+				Body:        "Write the tests of a step before its code.\n",
+			},
+		},
+		{
+			name: "single-quoted value",
+			in:   replace("type: feedback", "type: 'feedback'"),
+			want: Memory{
+				Name:        "tests-before-code",
+				Description: "Read before you write code, since the tests of a step come first.",
+				Type:        "feedback",
+				Sessions:    []string{"claude:d4d1d99a-9439-4b7d-ae7a-25f063f909c9"},
+				Body:        "Write the tests of a step before its code.\n",
+			},
+		},
+		{
+			name: "single-quoted description with a quote inside",
+			in:   replace("description: Read before you write code, since the tests of a step come first.", "description: 'Read before you write code: it''s the rule # one.'"),
+			want: Memory{
+				Name:        "tests-before-code",
+				Description: "Read before you write code: it's the rule # one.",
+				Type:        "feedback",
+				Sessions:    []string{"claude:d4d1d99a-9439-4b7d-ae7a-25f063f909c9"},
+				Body:        "Write the tests of a step before its code.\n",
+			},
+		},
+		{name: "a nested map", in: replace("type: feedback", "type: feedback\nmetadata:\n  origin: auto"), wantErr: "nested map"},
+		{name: "an unclosed single quote", in: replace("type: feedback", "type: 'feedback"), wantErr: "single quote"},
 		{name: "a sequence for a value", in: replace("description: Read", "description: - Read"), wantErr: "double quotes"},
 		{name: "a bad escape", in: replace("description: Read before you write code, since the tests of a step come first.", `description: "Read when \q."`), wantErr: "escape"},
 		{name: "no frontmatter", in: "Write the tests first.\n", wantErr: "no frontmatter"},
@@ -176,5 +230,61 @@ func TestMemoryWarnings(t *testing.T) {
 		if got := m.Warnings(); len(got) != tt.want {
 			t.Errorf("Warnings(%q) = %q, want %d", tt.description, got, tt.want)
 		}
+	}
+}
+
+func TestFrontmatterBytes(t *testing.T) {
+	in := "---\nname: build-x\ndescription: Read when you build x: the first step.\nowner: 'me'\nnote: plain words\ntags: []\nsessions:\n  - claude:one\n---\n\nThe body.\n"
+	fm, body, err := ParseFrontmatter(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "---\nname: build-x\ndescription: \"Read when you build x: the first step.\"\nowner: me\nnote: plain words\ntags: []\nsessions:\n  - claude:one\n---\n"
+	if got := string(fm.Bytes()); got != want {
+		t.Errorf("Bytes() =\n%s\nwant\n%s", got, want)
+	}
+	again, againBody, err := ParseFrontmatter(strings.NewReader(string(fm.Bytes()) + "\n" + body))
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if !reflect.DeepEqual(again, fm) || againBody != body {
+		t.Errorf("round trip = %#v, %q, want %#v, %q", again, againBody, fm, body)
+	}
+	for _, v := range []string{"a: b", "a #b", "ends with:", "'quoted'", "- item", "[x]", " padded", "plain"} {
+		got := formatValue(v)
+		strict := !strings.HasPrefix(got, `"`)
+		if strict != (v == "plain") {
+			t.Errorf("formatValue(%q) = %s, want double quotes for every value but plain", v, got)
+		}
+	}
+}
+
+func TestParseFlow(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{`[a, b]`, []string{"a", "b"}},
+		{`[it's, fine]`, []string{"it's", "fine"}},
+		{`["a, b", 'c''d']`, []string{"a, b", "c'd"}},
+		{`[ ]`, nil},
+		{`['it''s, fine']`, []string{"it's, fine"}},
+	}
+	for _, tt := range tests {
+		got, err := parseFlow(tt.in)
+		if err != nil || !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("parseFlow(%s) = %q, %v, want %q", tt.in, got, err, tt.want)
+		}
+	}
+}
+
+func TestInputErrorRedacted(t *testing.T) {
+	_, _, err := ParseFrontmatter(strings.NewReader("---\nprivate_token: [,]\n---\n"))
+	var ie *InputError
+	if !errors.As(err, &ie) {
+		t.Fatalf("error = %v, want an InputError", err)
+	}
+	if r := ie.Redacted(); strings.Contains(r, "private_token") || !strings.Contains(r, "frontmatter line 2") {
+		t.Errorf("Redacted() = %q, want the line without the key", r)
 	}
 }
