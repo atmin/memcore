@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -30,6 +31,10 @@ func rebase(repo string, args ...string) error {
 
 // rebaseEditor is rebase with a sequence editor, the command that writes the todo of an interactive rebase.
 func rebaseEditor(repo, editor string, args ...string) error {
+	if rebasing(repo) {
+		// The rebase of the person stays: an abort below would end it.
+		return errors.New("a rebase is in progress in the memory repo: the person finishes it or aborts it first")
+	}
 	_, err := store.Git(repo, append([]string{"-c", "core.editor=true", "-c", "sequence.editor=" + editor, "-c", "rebase.rescheduleFailedExec=false", "rebase", "--empty=drop"}, args...)...)
 	done, stuck := -1, 0
 	for err != nil {

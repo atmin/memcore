@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/atmin/memcore/internal/store"
@@ -24,33 +25,11 @@ type chain struct {
 // since git stops on a fixup that empties its target. It returns the commits that the fold removed.
 // The caller holds the write lock, and the working tree is clean.
 func fold(repo string) ([]string, error) {
-	base, hasBase := revParse(repo, acceptedRef)
-	rng := "HEAD"
-	if hasBase {
-		rng = base + "..HEAD"
-	}
-	out, err := store.Git(repo, "log", "--reverse", "--format=%H%x00%s", rng)
+	chains, base, err := chainsOf(repo)
 	if err != nil {
-		return nil, fmt.Errorf("list the review queue: %w", err)
+		return nil, err
 	}
-	var chains []*chain
-	any := false
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		sha, subject, ok := strings.Cut(line, "\x00")
-		if !ok {
-			continue
-		}
-		c := commit{sha: sha, subject: subject}
-		if want, isFixup := fixupTarget(subject); isFixup {
-			if t := nearest(chains, want); t != nil {
-				t.fixups = append(t.fixups, c)
-				any = true
-				continue
-			}
-		}
-		chains = append(chains, &chain{target: c})
-	}
-	if !any {
+	if !slices.ContainsFunc(chains, func(ch *chain) bool { return len(ch.fixups) > 0 }) {
 		return nil, nil
 	}
 
@@ -82,7 +61,7 @@ func fold(repo string) ([]string, error) {
 		return nil, fmt.Errorf("write the todo of the fold: %w", err)
 	}
 	onto := "--root"
-	if hasBase {
+	if base != "" {
 		onto = base
 	}
 	editor := "cp '" + strings.ReplaceAll(path, "'", `'\''`) + "'"
@@ -90,6 +69,36 @@ func fold(repo string) ([]string, error) {
 		return nil, fmt.Errorf("fold the fixups: %w", err)
 	}
 	return folded, nil
+}
+
+// chainsOf returns the review queue as chains, oldest first, and the accepted commit, or "" without one.
+// A fixup joins the nearest earlier commit with its subject, as autosquash does.
+func chainsOf(repo string) ([]*chain, string, error) {
+	base, _ := revParse(repo, acceptedRef)
+	rng := "HEAD"
+	if base != "" {
+		rng = base + "..HEAD"
+	}
+	out, err := store.Git(repo, "log", "--reverse", "--format=%H%x00%s", rng)
+	if err != nil {
+		return nil, "", fmt.Errorf("list the review queue: %w", err)
+	}
+	var chains []*chain
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		sha, subject, ok := strings.Cut(line, "\x00")
+		if !ok {
+			continue
+		}
+		c := commit{sha: sha, subject: subject}
+		if want, isFixup := fixupTarget(subject); isFixup {
+			if t := nearest(chains, want); t != nil {
+				t.fixups = append(t.fixups, c)
+				continue
+			}
+		}
+		chains = append(chains, &chain{target: c})
+	}
+	return chains, base, nil
 }
 
 // fixupTarget returns the subject that a fixup names, without its fixup! prefixes, and whether it is a fixup.

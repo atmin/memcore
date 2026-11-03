@@ -42,10 +42,30 @@ func runInbox(env Env, args []string) error {
 		fmt.Fprintln(env.Out, "Nothing waits for review.")
 		return nil
 	}
-	fmt.Fprintf(env.Out, "The review queue holds %s:\n", commits(len(queue), "unpushed"))
+	fmt.Fprintf(env.Out, "The review queue holds %s, newest first:\n", commits(len(queue), "unpushed"))
 	for _, c := range queue {
-		fmt.Fprintf(env.Out, "  %s\n", c)
+		sha, _, _ := strings.Cut(c, " ")
+		detail, err := store.Git(repo, "show", "-s", "--format=%b", sha)
+		if err != nil {
+			return fmt.Errorf("read the commit %s: %w", sha, err)
+		}
+		files, err := store.Git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", sha)
+		if err != nil {
+			return fmt.Errorf("list the files of %s: %w", sha, err)
+		}
+		fmt.Fprintf(env.Out, "\n  %s\n", c)
+		for _, line := range strings.Split(strings.TrimSpace(detail), "\n") {
+			if line != "" {
+				fmt.Fprintf(env.Out, "    %s\n", line)
+			}
+		}
+		for _, line := range strings.Split(strings.TrimSpace(files), "\n") {
+			if status, p, ok := strings.Cut(line, "\t"); ok {
+				fmt.Fprintf(env.Out, "    %s  %s\n", status, p)
+			}
+		}
 	}
+	fmt.Fprintln(env.Out, "\nmemcore drop <commit> removes a commit and its fixups. memcore push folds each fixup into its commit.")
 	fmt.Fprintf(env.Out, "Review them with git in %s, then accept them with memcore push.\n", tilde(repo))
 	return nil
 }

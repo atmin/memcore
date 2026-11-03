@@ -132,6 +132,15 @@ Only the person runs it, at a terminal, after a fetch finds that the remote no l
 the accepted history. It lists the accepted commits that the remote lost, and the queue.
 After the person confirms, it drops the lost commits here and moves the queue onto the remote.
 `,
+	"drop": `memcore drop <commit> [--reason <text>]
+
+Only the person runs it, at a terminal. It removes one commit of the review queue, with the
+fixups that fold into it, and records the reason, so a later sleep pass learns from it.
+It refuses an accepted commit, and a drop that leaves a reference dead. memcore inbox lists
+the commits. For example:
+
+  memcore drop 1a2b3c4 --reason "Not a fact: a status of one ticket."
+`,
 	"help": `memcore help [<command>]
 
 Lists the commands, or shows the input of one command, with an example. For example:
