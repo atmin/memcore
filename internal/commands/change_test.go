@@ -34,8 +34,11 @@ func TestApply(t *testing.T) {
 		if got := gitT(t, repo, "log", "-1", "--format=%B"); got != "forget: dev/memories/small-commits.md\n\nIt no longer holds.\n\n" {
 			t.Errorf("message = %q", got)
 		}
-		if strings.Contains(readT(t, filepath.Join(repo, "dev", "README.md")), "small-commits") {
-			t.Error("the index still lists the removed memory")
+		if _, err := os.Stat(filepath.Join(repo, "dev")); err == nil {
+			t.Error("the level dev lost its only memory, and it is still there")
+		}
+		if strings.Contains(readT(t, filepath.Join(repo, "README.md")), "[dev]") {
+			t.Error("the root index still lists dev")
 		}
 		clean(t, repo)
 	})

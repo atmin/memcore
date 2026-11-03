@@ -24,6 +24,7 @@ type file struct {
 type change struct {
 	writes  []file
 	removes []string // files, relative to the repo
+	prune   []string // folders that the removal empties, which go with every empty folder inside them
 	message string   // the subject, then a blank line and the body
 }
 
@@ -107,11 +108,45 @@ func apply(repo string, c change) (string, error) {
 			}
 		}
 		for _, r := range c.removes {
-			if err := os.Remove(filepath.Join(repo, filepath.FromSlash(r))); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			full := filepath.Join(repo, filepath.FromSlash(r))
+			if err := os.Remove(full); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("remove %s: %w", r, err)
+			}
+			// Remove the folders that the removal leaves empty, such as the folder of a skill.
+			for dir := filepath.Dir(full); dir != repo && os.Remove(dir) == nil; dir = filepath.Dir(dir) {
+			}
+		}
+		for _, p := range c.prune {
+			if err := pruneEmpty(filepath.Join(repo, filepath.FromSlash(p))); err != nil {
+				return err
+			}
+		}
+		// A removal can leave a level with nothing but its index. That level goes too, deepest first,
+		// so its parent index drops it. The root stays.
+		gone := map[string]bool{}
+		if len(c.removes) > 0 {
+			deep := slices.Clone(levels)
+			slices.SortFunc(deep, func(a, b string) int { return strings.Count(b, "/") - strings.Count(a, "/") })
+			for _, l := range deep {
+				if l == "" {
+					continue
+				}
+				empty, err := levelEmpty(repo, l)
+				if err != nil {
+					return err
+				}
+				if empty {
+					if err := os.RemoveAll(filepath.Join(repo, filepath.FromSlash(store.Folder(l)))); err != nil {
+						return fmt.Errorf("remove the empty level %s: %w", l, err)
+					}
+					gone[l] = true
+				}
 			}
 		}
 		for _, l := range levels {
+			if gone[l] {
+				continue
+			}
 			if err := store.WriteIndex(repo, l); err != nil {
 				return err
 			}
@@ -209,4 +244,52 @@ func docKind(p string) string {
 		}
 	}
 	return ""
+}
+
+// levelEmpty reports whether the folder of a level holds no file but its own index.
+func levelEmpty(repo, level string) (bool, error) {
+	dir := filepath.Join(repo, filepath.FromSlash(store.Folder(level)))
+	empty := true
+	err := filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fs.SkipAll
+		}
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && f != filepath.Join(dir, "README.md") {
+			empty = false
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("check whether the level %s is empty: %w", level, err)
+	}
+	return empty, nil
+}
+
+// pruneEmpty removes the empty folders inside dir, deepest first, then dir itself when it is empty.
+// A folder that holds a file stays.
+func pruneEmpty(dir string) error {
+	var dirs []string
+	err := filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fs.SkipAll
+		}
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			dirs = append(dirs, f)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("list the folders of %s: %w", dir, err)
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		os.Remove(dirs[i]) // fails, and keeps the folder, when it holds anything
+	}
+	return nil
 }

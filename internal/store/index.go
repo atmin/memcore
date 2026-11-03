@@ -243,6 +243,9 @@ func entries(dir, folder string, dirs bool) ([]string, error) {
 // It returns "" when the document has no frontmatter or no description, so one bad document never stops a read.
 func description(file string) (string, error) {
 	f, err := os.Open(file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil // a skill folder without its SKILL.md
+	}
 	if err != nil {
 		return "", err
 	}

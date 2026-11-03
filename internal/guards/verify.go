@@ -46,6 +46,7 @@ var (
 // verifier checks documents of one repo, and keeps what they share.
 type verifier struct {
 	repo       string
+	gone       []string               // paths that count as removed: files, or folders with all they hold
 	names      map[string]bool        // the names of the memories in the repo
 	glossaries map[string][]forbidden // the forbidden words of each glossary, by its path
 }
@@ -76,6 +77,68 @@ func newVerifier(repo string) (*verifier, error) {
 		return nil, fmt.Errorf("list the memories: %w", err)
 	}
 	return v, nil
+}
+
+// Faults returns the faults of every markdown document in the repo except the indexes, as if the
+// removed paths were gone: a file, or a folder with everything in it. A command compares the faults
+// with and without a removal, so only the faults that the removal adds stop it.
+func Faults(repo string, removed []string) ([]Finding, error) {
+	v, err := newVerifier(repo)
+	if err != nil {
+		return nil, err
+	}
+	v.gone = removed
+	for name := range v.names {
+		for _, g := range removed {
+			if path.Base(path.Dir(g)) == "memories" && path.Base(g) == name+".md" {
+				delete(v.names, name)
+			}
+		}
+	}
+	var faults []Finding
+	err = filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(f, ".md") {
+			return nil
+		}
+		rel, err := filepath.Rel(repo, f)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if v.isGone(rel) || isIndex(rel) {
+			return nil
+		}
+		content, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		r, err := v.check(rel, content)
+		if err != nil {
+			return err
+		}
+		faults = append(faults, r.Faults...)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("check the documents: %w", err)
+	}
+	return faults, nil
+}
+
+// isGone reports whether a path counts as removed.
+func (v *verifier) isGone(p string) bool {
+	for _, g := range v.gone {
+		if p == g || strings.HasPrefix(p, g+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // VerifyContent checks one document as it would sit at path, a path relative to repo.
@@ -279,6 +342,9 @@ func (v *verifier) deadLink(p, target string) bool {
 	if strings.HasPrefix(t, "/") {
 		full = filepath.Join(v.repo, filepath.FromSlash(t))
 	}
+	if rel, err := filepath.Rel(v.repo, full); err == nil && v.isGone(filepath.ToSlash(rel)) {
+		return true
+	}
 	_, err := os.Stat(full)
 	return err != nil
 }
@@ -425,4 +491,18 @@ func maskCode(s string) string {
 		i = closing
 	}
 	return string(b)
+}
+
+// isIndex reports whether a path is the generated index of a level, which a write regenerates.
+// A README.md inside a skill is a document.
+func isIndex(p string) bool {
+	if path.Base(p) != "README.md" {
+		return false
+	}
+	folder := path.Dir(p)
+	if folder == "." {
+		return true
+	}
+	_, ok := store.LevelOf(folder)
+	return ok
 }

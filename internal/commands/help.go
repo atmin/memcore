@@ -77,6 +77,19 @@ type: feedback
 Write the tests of a step before its code, and commit them with it.
 EOF
 `,
+	"forget": `memcore forget <path or name> --reason <text>
+
+Removes one document, and records the reason. Name a memory by its name, and any other
+document by its path, as orient lists it. A skill goes by its folder or its SKILL.md, with
+everything in the folder.
+
+forget refuses while another document links to the one it removes, and names that document:
+revise it first. A level left with no document goes too. When the document was never pushed,
+the removal folds into the commit that added it at the next push, so neither remains.
+For example:
+
+  memcore forget tests-before-code --reason "The plan template now says it."
+`,
 	"verify": `memcore verify <path>
 
 Checks a document, or every document under a path, for dead references and forbidden

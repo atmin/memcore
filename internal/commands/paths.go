@@ -77,9 +77,9 @@ func resolve(repo, arg string) (string, error) {
 			return found, noSymlink(repo, found)
 		}
 	}
-	p := path.Clean(filepath.ToSlash(arg))
-	if path.IsAbs(p) || p == "." || p == ".." || strings.HasPrefix(p, "../") || p == ".git" || strings.HasPrefix(p, ".git/") {
-		return "", inputErrf("%s is not a path in the memory repo", arg)
+	p, err := cleanPath(arg)
+	if err != nil {
+		return "", err
 	}
 	if err := noSymlink(repo, p); err != nil {
 		return "", err
@@ -137,4 +137,13 @@ func exactCase(repo, p string) error {
 		dir = filepath.Join(dir, part)
 	}
 	return nil
+}
+
+// cleanPath returns a path in the memory repo with slashes, cleaned, and refuses one that leaves the repo or enters .git.
+func cleanPath(arg string) (string, error) {
+	p := path.Clean(filepath.ToSlash(arg))
+	if path.IsAbs(p) || p == "." || p == ".." || strings.HasPrefix(p, "../") || p == ".git" || strings.HasPrefix(p, ".git/") {
+		return "", inputErrf("%s is not a path in the memory repo", arg)
+	}
+	return p, nil
 }
