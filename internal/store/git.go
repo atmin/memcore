@@ -22,7 +22,13 @@ var repoVariables = []string{
 // Git runs the installed git in dir and returns its standard output.
 // The error holds the arguments and the standard error of git, in English.
 func Git(dir string, args ...string) (string, error) {
+	return GitStdin(dir, "", args...)
+}
+
+// GitStdin runs the installed git in dir with stdin as its standard input, like Git.
+func GitStdin(dir, stdin string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = dir
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); !slices.Contains(repoVariables, name) {

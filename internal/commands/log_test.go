@@ -171,3 +171,60 @@ func TestLogOutsideRepo(t *testing.T) {
 		t.Error("a failed init left ~/memory")
 	}
 }
+
+// kept lists the kept refs of a memory repo, by the commit that each keeps.
+func kept(t *testing.T, repo string) map[string]bool {
+	t.Helper()
+	refs := map[string]bool{}
+	for _, sha := range strings.Fields(gitT(t, repo, "for-each-ref", "--format=%(objectname)", "refs/memcore/seen/")) {
+		refs[sha] = true
+	}
+	return refs
+}
+
+func TestKeptRefs(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+
+	remember(t, dev, "small-commits", "Read before you commit: one change per commit.")
+	first := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	if !kept(t, repo)[first] {
+		t.Errorf("the commit of remember, %s, has no kept ref", first)
+	}
+
+	before := len(kept(t, repo))
+	var asked string
+	if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push"); err != nil {
+		t.Fatalf("push: %v\n%s", err, out)
+	}
+	if after := len(kept(t, repo)); after < before {
+		t.Errorf("push left %d kept refs of %d", after, before)
+	}
+	if e := last(t, repo); !kept(t, repo)[e.Commit] || len(e.Pushed) == 0 || !kept(t, repo)[e.Pushed[len(e.Pushed)-1]] {
+		t.Errorf("a push whose tip is its commit, %s, left it without a kept ref", e.Commit)
+	}
+
+	for ref := range kept(t, repo) {
+		gitT(t, repo, "update-ref", "-d", "refs/memcore/seen/"+ref)
+	}
+	if out, err := run(t, dev, "", "orient"); err != nil {
+		t.Fatalf("orient: %v\n%s", err, out)
+	}
+	if !kept(t, repo)[first] {
+		t.Errorf("orient saw the accepted commit %s, and it has no kept ref", first)
+	}
+
+	remember(t, dev, "tests-first", "Read before you write code: the tests come first.")
+	second := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	gitT(t, repo, "reset", "-q", "--hard", "HEAD~1")
+	gitT(t, repo, "reflog", "expire", "--expire=now", "--all")
+	gitT(t, repo, "gc", "-q", "--prune=now")
+	if _, err := store.Git(repo, "cat-file", "-e", second); err != nil {
+		t.Errorf("the rewritten commit %s is gone: %v", second, err)
+	}
+
+	if out := gitT(t, remote, "for-each-ref", "refs/memcore/"); strings.TrimSpace(out) != "" {
+		t.Errorf("the remote holds kept refs: %s", out)
+	}
+}

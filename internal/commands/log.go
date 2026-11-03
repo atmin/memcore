@@ -80,6 +80,9 @@ func Run(env Env, name string, args []string) error {
 		if lerr := appendEvent(repo, e); lerr != nil {
 			fmt.Fprintf(env.Err, "warning: %v\n", lerr)
 		}
+		if kerr := keep(repo, e); kerr != nil {
+			fmt.Fprintf(env.Err, "warning: %v\n", kerr)
+		}
 	}
 	return err
 }
@@ -153,6 +156,31 @@ func appendEvent(repo string, e *Event) error {
 	defer f.Close()
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("append to the use log: %w", err)
+	}
+	return nil
+}
+
+// keep makes a ref under refs/memcore/seen/ for each commit of an event, accepted or not,
+// so no rewrite and no garbage collection loses a version that a session saw. push never sends these refs.
+func keep(repo string, e *Event) error {
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		return nil
+	}
+	var b strings.Builder
+	seen := map[string]bool{}
+	for _, list := range [][]string{{e.Commit, e.Accepted}, e.Made, e.Dropped, e.Folded, e.Pushed} {
+		for _, sha := range list {
+			if sha != "" && !seen[sha] {
+				seen[sha] = true
+				fmt.Fprintf(&b, "update refs/memcore/seen/%s %s\n", sha, sha)
+			}
+		}
+	}
+	if b.Len() == 0 {
+		return nil
+	}
+	if _, err := store.GitStdin(repo, b.String(), "update-ref", "--stdin"); err != nil {
+		return fmt.Errorf("keep the logged commits: %w", err)
 	}
 	return nil
 }

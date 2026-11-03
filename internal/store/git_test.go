@@ -55,3 +55,17 @@ func TestGitIgnoresRepoVariables(t *testing.T) {
 		t.Errorf("toplevel = %q, want %q", got, want)
 	}
 }
+
+func TestGitStdin(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Git(dir, "init", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := GitStdin(dir, "hello\n", "hash-object", "--stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(out), "ce013625030ba8dba906f756967f9e9ca394464a"; got != want {
+		t.Errorf("hash = %s, want %s", got, want)
+	}
+}
