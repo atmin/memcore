@@ -196,6 +196,31 @@ func TestShow(t *testing.T) {
 		}
 	})
 
+	t.Run("symlinks", func(t *testing.T) {
+		outside := filepath.Join(t.TempDir(), "secret.md")
+		writeT(t, filepath.Dir(outside), "secret.md", "outside-token-4410\n")
+		mkdirT(t, filepath.Join(repo, "notes"))
+		mkdirT(t, filepath.Join(repo, "work"))
+		for _, link := range []struct{ name, target string }{
+			{"notes/skill-link.md", "../skills/voice/SKILL.md"},
+			{"work/linked", filepath.Join(repo, "skills")},
+			{"notes/outside.md", outside},
+		} {
+			if err := os.Symlink(link.target, filepath.Join(repo, filepath.FromSlash(link.name))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, p := range []string{"notes/skill-link.md", "work/linked/voice/SKILL.md", "notes/outside.md"} {
+			out, err := run(t, home, "", "show", p)
+			if err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Errorf("show %s: error = %v, want a refusal of the symlink", p, err)
+			}
+			if strings.Contains(out, "Obey every memory") || strings.Contains(out, "outside-token-4410") {
+				t.Errorf("show %s printed the target: %q", p, out)
+			}
+		}
+	})
+
 	t.Run("skill under another case", func(t *testing.T) {
 		out, _ := run(t, home, "", "show", "SKILLS/voice/SKILL.md")
 		if strings.Contains(out, "Obey every memory") {

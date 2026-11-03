@@ -164,25 +164,6 @@ func budgetWarning(level string, n int) string {
 	return fmt.Sprintf("warning: %s has %d lines in orient, over the budget of %d: a sleep pass consolidates it", title, n, budget)
 }
 
-// noSymlink refuses a path in the repo whose folders or file include a symlink, so a write stays inside the repo.
-func noSymlink(repo, p string) error {
-	cur := repo
-	for _, part := range strings.Split(p, "/") {
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("check %s: %w", p, err)
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("%s in the memory repo is a symlink, so remember wrote nothing: the person replaces it with a folder or a file", strings.TrimPrefix(cur, repo+string(filepath.Separator)))
-		}
-	}
-	return nil
-}
-
 // write writes the memory at rel, regenerates the indexes, and commits the paths: rel and the index of each level.
 // The paths have no changes before the write, so on a failure it restores them from HEAD.
 func write(repo, rel string, content []byte, paths []string) error {

@@ -72,6 +72,9 @@ func runShow(env Env, args []string) error {
 	}
 	full := filepath.Join(repo, filepath.FromSlash(p))
 	env.event().Paths = []string{p}
+	if err := noSymlink(repo, p); err != nil {
+		return err
+	}
 
 	if isSkill(p) {
 		content, ok := accepted(repo, p)
