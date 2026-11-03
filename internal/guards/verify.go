@@ -66,7 +66,9 @@ func newVerifier(repo string) (*verifier, error) {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && strings.HasSuffix(p, ".md") && filepath.Base(filepath.Dir(p)) == "memories" {
-			v.names[strings.TrimSuffix(d.Name(), ".md")] = true
+			if rel, err := filepath.Rel(repo, p); err == nil && store.IsMemory(filepath.ToSlash(rel)) {
+				v.names[strings.TrimSuffix(d.Name(), ".md")] = true
+			}
 		}
 		return nil
 	})

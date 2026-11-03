@@ -83,6 +83,13 @@ type Frontmatter struct {
 	Lists  map[string][]string
 }
 
+// HasFrontmatter reports whether a text starts with a frontmatter, by the rule of ParseFrontmatter:
+// a first line of --- with any trailing spaces or carriage return.
+func HasFrontmatter(text string) bool {
+	first, _, _ := strings.Cut(text, "\n")
+	return strings.TrimRight(first, " \r") == "---"
+}
+
 // ParseFrontmatter reads the frontmatter of a document and returns it with the body.
 // It reads leniently: a plain value may hold ": " or " #", and a value may be single-quoted.
 // It reads a block list and a flow list, and refuses any other YAML, such as a nested map.

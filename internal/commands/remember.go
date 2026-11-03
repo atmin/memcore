@@ -163,6 +163,9 @@ func findMemory(repo, name string) (string, error) {
 			if err != nil {
 				return err
 			}
+			if !store.IsMemory(filepath.ToSlash(rel)) {
+				return nil // a file in a skill, such as an example of a memory
+			}
 			found = filepath.ToSlash(rel)
 			return fs.SkipAll
 		}

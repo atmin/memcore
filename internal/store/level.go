@@ -72,3 +72,17 @@ func Path(level string) []string {
 	}
 	return append(levels, "")
 }
+
+// IsMemory reports whether a path is a memory: a markdown file in the memories folder of a level.
+// A file under the memories folder of a skill is part of the skill.
+func IsMemory(p string) bool {
+	if path.Base(path.Dir(p)) != "memories" || path.Ext(p) != ".md" {
+		return false
+	}
+	folder := path.Dir(path.Dir(p))
+	if folder == "." {
+		folder = ""
+	}
+	_, ok := LevelOf(folder)
+	return ok
+}

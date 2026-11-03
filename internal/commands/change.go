@@ -82,6 +82,10 @@ func apply(repo string, c change) (string, error) {
 		return "", fmt.Errorf("the working tree of the memory repo has changes that are not committed, so memcore wrote nothing: the person commits or discards them:\n%s", strings.TrimRight(dirty, "\n"))
 	}
 
+	if unchanged(repo, c) {
+		return "", errNoChange
+	}
+
 	var created []string // the folders that the change creates
 	err = func() error {
 		for _, f := range c.writes {
@@ -145,4 +149,64 @@ func docLevel(p string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// commitMessage returns the commit message of a command that changes one document. When the queue holds the
+// last change of the document, the message makes a fixup of that change, which push folds into it.
+// Otherwise it is "<command>: <path>". The reason goes in the body.
+func commitMessage(repo, rel, command, reason string) (string, error) {
+	plain := command + ": " + rel + "\n\n" + reason
+	out, err := store.Git(repo, "--literal-pathspecs", "log", "-1", "--format=%H%x00%s", "--", rel)
+	if err != nil {
+		return "", fmt.Errorf("find the last change of %s: %w", rel, err)
+	}
+	sha, subject, ok := strings.Cut(strings.TrimSpace(out), "\x00")
+	if !ok {
+		return plain, nil
+	}
+	if accepted, ok := revParse(repo, acceptedRef); ok {
+		pushed, err := isAncestor(repo, sha, accepted)
+		if err != nil {
+			return "", fmt.Errorf("check whether the last change of %s is pushed: %w", rel, err)
+		}
+		if pushed {
+			return plain, nil
+		}
+	}
+	return "fixup! " + subject + "\n\n" + plain, nil
+}
+
+// errNoChange means that a change would leave every file as it is, so apply made no commit.
+var errNoChange = errors.New("the change leaves every file as it is")
+
+// unchanged reports whether every file of a change already holds its content and mode, and every removal is gone.
+func unchanged(repo string, c change) bool {
+	for _, f := range c.writes {
+		full := filepath.Join(repo, filepath.FromSlash(f.path))
+		info, err := os.Stat(full)
+		if err != nil || info.Mode().Perm() != f.mode.Perm() {
+			return false
+		}
+		if b, err := os.ReadFile(full); err != nil || string(b) != string(f.content) {
+			return false
+		}
+	}
+	for _, r := range c.removes {
+		if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(r))); err == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// docKind returns the kind folder of a document by its path: memories, skills, bin, plans or notes,
+// or "" for a conventions file, a glossary or an index. A file inside a skill is of kind skills.
+func docKind(p string) string {
+	parts := strings.Split(p, "/")
+	for _, part := range parts[:len(parts)-1] {
+		if slices.Contains([]string{"memories", "skills", "bin", "plans", "notes"}, part) {
+			return part
+		}
+	}
+	return ""
 }

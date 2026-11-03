@@ -2,9 +2,11 @@ package commands
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -61,4 +63,78 @@ func placeAt(dir, at, home string) (string, error) {
 		return "", inputErrf("%s is not on the path from %s to ~, so memcore places nothing there", at, title(level))
 	}
 	return there, nil
+}
+
+// resolve returns the path in the memory repo of a document, named by its path or, for a memory, by its name.
+// The path rules of show apply, and the document must exist.
+func resolve(repo, arg string) (string, error) {
+	if !strings.Contains(arg, "/") {
+		found, err := findMemory(repo, arg)
+		if err != nil {
+			return "", err
+		}
+		if found != "" {
+			return found, noSymlink(repo, found)
+		}
+	}
+	p := path.Clean(filepath.ToSlash(arg))
+	if path.IsAbs(p) || p == "." || p == ".." || strings.HasPrefix(p, "../") || p == ".git" || strings.HasPrefix(p, ".git/") {
+		return "", inputErrf("%s is not a path in the memory repo", arg)
+	}
+	if err := noSymlink(repo, p); err != nil {
+		return "", err
+	}
+	info, err := os.Stat(filepath.Join(repo, filepath.FromSlash(p)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", inputErrf("no document at %s: memcore orient lists the documents", arg)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", p, err)
+	}
+	if info.IsDir() {
+		return "", inputErrf("%s is a folder, not a document", p)
+	}
+	return p, exactCase(repo, p)
+}
+
+// parseInterleaved parses flags that may come before or after the positional arguments, and returns those.
+func parseInterleaved(flags *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := flags.Parse(args); err != nil {
+			return nil, err
+		}
+		if flags.NArg() == 0 {
+			return pos, nil
+		}
+		pos = append(pos, flags.Arg(0))
+		args = flags.Args()[1:]
+	}
+}
+
+// exactCase refuses a path whose spelling differs from the one on disk, as a.MD for a.md on a file system
+// that ignores case. A write under the other spelling would miss git, and its rollback could remove the file.
+func exactCase(repo, p string) error {
+	dir := repo
+	for _, part := range strings.Split(p, "/") {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", dir, err)
+		}
+		found := ""
+		for _, e := range entries {
+			if e.Name() == part {
+				found = part
+				break
+			}
+			if strings.EqualFold(e.Name(), part) {
+				found = e.Name()
+			}
+		}
+		if found != part {
+			return inputErrf("no document at %s: the repo spells it with other cases, as %s", p, found)
+		}
+		dir = filepath.Join(dir, part)
+	}
+	return nil
 }

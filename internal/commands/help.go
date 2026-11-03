@@ -55,6 +55,28 @@ Write the tests of a step before its code.
 **How to apply:** Name the tests in the plan, and commit them in the step with their code.
 EOF
 `,
+	"revise": `memcore revise <path or name> --reason <text> < document
+
+Replaces one document with the whole new version on standard input, and records the reason.
+Name a memory by its name, and any other document by its path, as orient lists it.
+
+For a memory, the input has the frontmatter of memcore remember, with the same name: a new
+name is memcore forget, then memcore remember. memcore keeps the sessions and adds this one.
+A plan, a note or a skill keeps its frontmatter, and a script keeps its mode.
+
+When the last change of the document is not pushed yet, the revision folds into that change
+at the next push. Example:
+
+memcore revise tests-before-code --reason "The tests go in the same commit." <<'EOF'
+---
+name: tests-before-code
+description: Read before you write code: the tests of a step come first, in its commit.
+type: feedback
+---
+
+Write the tests of a step before its code, and commit them with it.
+EOF
+`,
 	"verify": `memcore verify <path>
 
 Checks a document, or every document under a path, for dead references and forbidden
