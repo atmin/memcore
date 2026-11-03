@@ -28,21 +28,12 @@ func Fetch(repo string) error {
 	if !hasAccepted(repo) {
 		return nil
 	}
-	_, err = store.Git(repo, "rebase", "-q", acceptedRef)
-	if err == nil {
-		return nil
+	err = rebase(repo, "-q", acceptedRef)
+	var ce *conflictError
+	if errors.As(err, &ce) {
+		return fmt.Errorf("the review queue and the accepted history change the same documents, so memcore left the queue as it was: %s", strings.Join(ce.paths, ", "))
 	}
-	if !rebasing(repo) {
-		return fmt.Errorf("rebase the review queue: %w", err)
-	}
-	out, _ = store.Git(repo, "diff", "--name-only", "--diff-filter=U")
-	if _, aerr := store.Git(repo, "rebase", "--abort"); aerr != nil {
-		return fmt.Errorf("rebase the review queue: %w; abort the rebase: %v", err, aerr)
-	}
-	if paths := strings.Fields(out); len(paths) > 0 {
-		return fmt.Errorf("the review queue and the accepted history change the same documents, so memcore left the queue as it was: %s", strings.Join(paths, ", "))
-	}
-	return fmt.Errorf("rebase the review queue: %w", err)
+	return err
 }
 
 // rebasing reports whether a rebase is in progress in the repo.

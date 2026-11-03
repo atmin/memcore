@@ -43,6 +43,34 @@ func TestFetch(t *testing.T) {
 		}
 	})
 
+	t.Run("both sides add a memory at one level", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		gitT(t, repo, "push", "-q", "origin", "main")
+		other := secondClone(t, remote)
+		t.Setenv("MEMCORE_REPO", other)
+		remember(t, dev, "from-elsewhere", "Read when you work on another machine.")
+		gitT(t, other, "push", "-q", "origin", "main")
+		t.Setenv("MEMCORE_REPO", "")
+		remember(t, dev, "from-here", "Read when you work on this machine.")
+
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		index := readT(t, filepath.Join(repo, "dev", "README.md"))
+		ix, err := store.Lines(repo, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if index != store.Render(ix) || !strings.Contains(index, "from-elsewhere") || !strings.Contains(index, "from-here") {
+			t.Errorf("dev/README.md =\n%s\nwant both memories, as generated", index)
+		}
+		if got := strings.TrimSpace(gitT(t, repo, "rev-list", "--count", "origin/main..main")); got != "1" {
+			t.Errorf("queue holds %s commits, want 1", got)
+		}
+		clean(t, repo)
+	})
+
 	t.Run("a conflict stops with the path", func(t *testing.T) {
 		_, repo, remote := newMemory(t)
 		gitT(t, repo, "push", "-q", "origin", "main")
