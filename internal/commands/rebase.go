@@ -30,7 +30,7 @@ func rebase(repo string, args ...string) error {
 
 // rebaseEditor is rebase with a sequence editor, the command that writes the todo of an interactive rebase.
 func rebaseEditor(repo, editor string, args ...string) error {
-	_, err := store.Git(repo, append([]string{"-c", "core.editor=true", "-c", "sequence.editor=" + editor, "-c", "rebase.rescheduleFailedExec=false", "rebase"}, args...)...)
+	_, err := store.Git(repo, append([]string{"-c", "core.editor=true", "-c", "sequence.editor=" + editor, "-c", "rebase.rescheduleFailedExec=false", "rebase", "--empty=drop"}, args...)...)
 	done, stuck := -1, 0
 	for err != nil {
 		// A deliberate stop moves the rebase on. The same stop three times means no progress.
@@ -159,7 +159,7 @@ func settle(repo string) error {
 	}
 }
 
-// levelFolders returns every level of the working tree that has an index or a document.
+// levelFolders returns every level of the working tree that has an index or holds a file.
 func levelFolders(repo string) ([]string, error) {
 	var levels []string
 	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
@@ -184,11 +184,7 @@ func levelFolders(repo string) ([]string, error) {
 		if !ok {
 			return nil
 		}
-		ix, err := store.Lines(repo, level)
-		if err != nil {
-			return err
-		}
-		if _, err := os.Stat(filepath.Join(f, "README.md")); err == nil || len(ix.Lines) > 0 {
+		if _, err := os.Stat(filepath.Join(f, "README.md")); err == nil || holdsFile(f) {
 			levels = append(levels, level)
 		}
 		return nil

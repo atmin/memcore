@@ -29,6 +29,11 @@ func runInbox(env Env, args []string) error {
 		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)
 		fmt.Fprintf(env.Out, "The remote no longer holds these accepted commits. memcore recover drops them here and keeps the queue:\n%s", indent(lost))
 	}
+	if stale, err := staleIndexes(repo); err != nil {
+		fmt.Fprintf(env.Err, "warning: %v\n", err)
+	} else if len(stale) > 0 {
+		fmt.Fprintf(env.Out, "These indexes differ from their documents, and memcore push regenerates them:\n%s", indent(strings.Join(stale, "\n")))
+	}
 	_, queue, err := queueOf(repo)
 	if err != nil {
 		return err

@@ -329,3 +329,112 @@ func TestFold(t *testing.T) {
 		}
 	})
 }
+
+func TestStaleIndex(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	remember(t, dev, "small-commits", "Read before you commit: one change per commit.")
+	writeT(t, repo, "dev/memories/by-hand.md", memoryText("by-hand", "Read when you edit by hand.", "A fact."))
+	writeT(t, repo, "lab/notes/trial.md", "---\nname: trial\ndescription: \"Read when you try the lab.\"\n---\n")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: documents by hand")
+
+	out, err := run(t, home, "", "inbox")
+	if err != nil {
+		t.Fatalf("inbox: %v\n%s", err, out)
+	}
+	for _, p := range []string{"dev/README.md", "lab/README.md", "  README.md"} {
+		if !strings.Contains(out, p) {
+			t.Errorf("inbox = %q, want the stale index %s", out, p)
+		}
+	}
+
+	writeT(t, repo, "dev/README.md", "# ~/dev\n\nAn edit by hand.\n")
+	before := gitT(t, repo, "rev-parse", "HEAD")
+	var asked string
+	if _, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push"); err == nil || !strings.Contains(err.Error(), "dev/README.md") {
+		t.Errorf("push over an uncommitted index: error = %v, want a refusal that names it", err)
+	}
+	if got := readT(t, filepath.Join(repo, "dev", "README.md")); got != "# ~/dev\n\nAn edit by hand.\n" {
+		t.Errorf("the uncommitted index = %q, want it as the person left it", got)
+	}
+	if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+		t.Error("the refused push moved HEAD")
+	}
+	gitT(t, repo, "checkout", "--", "dev/README.md")
+
+	pushYes(t, home)
+	history := subjects(t, remote)
+	for _, s := range []string{"index: dev/README.md", "index: lab/README.md", "index: README.md"} {
+		if !strings.Contains(history, s) {
+			t.Errorf("remote history = %q, want %s", history, s)
+		}
+	}
+	if out, _ := run(t, home, "", "inbox"); strings.Contains(out, "README.md") {
+		t.Errorf("inbox after the push = %q, want no stale index", out)
+	}
+}
+
+func TestStaleIndexEdges(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	t.Run("a stale index and a fixup", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		remember(t, dev, "a-fact", "Read when you test a fact.")
+		if out, err := run(t, dev, memoryText("a-fact", "Read when you test a fact.", "Sharper."), "revise", "a-fact", "--reason", "Sharper."); err != nil {
+			t.Fatalf("revise: %v\n%s", err, out)
+		}
+		writeT(t, repo, "dev/memories/by-hand.md", memoryText("by-hand", "Read before you deploy on Fridays.", "A fact."))
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", "test: a memory by hand")
+		if out, _ := run(t, home, "", "inbox"); !strings.Contains(out, "dev/README.md") {
+			t.Fatalf("inbox = %q, want the stale index dev/README.md", out)
+		}
+		pushYes(t, home)
+		if got := gitT(t, remote, "show", "main:dev/README.md"); !strings.Contains(got, "by-hand") {
+			t.Errorf("remote index =\n%s\nwant the memory by hand", got)
+		}
+		for _, sha := range strings.Fields(gitT(t, remote, "rev-list", "main")) {
+			if parents := strings.Fields(gitT(t, remote, "rev-list", "--parents", "-n", "1", sha)); len(parents) > 1 {
+				if diff := gitT(t, remote, "diff", "--stat", parents[1], sha); strings.TrimSpace(diff) == "" {
+					t.Errorf("the remote holds an empty commit %s", sha)
+				}
+			}
+		}
+	})
+
+	t.Run("a level with only a helper", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		writeT(t, repo, "lab/bin/helper.sh", "# A helper, not a script.\n")
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", "test: a helper by hand")
+		if out, _ := run(t, home, "", "inbox"); !strings.Contains(out, "lab/README.md") {
+			t.Errorf("inbox = %q, want the missing index lab/README.md", out)
+		}
+		pushYes(t, home)
+		if _, err := store.Git(remote, "cat-file", "-e", "main:lab/README.md"); err != nil {
+			t.Errorf("the remote has no lab/README.md: %v", err)
+		}
+	})
+
+	t.Run("a failed index commit leaves the tree clean", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		writeT(t, repo, "dev/notes/n.md", "---\nname: n\ndescription: \"Read when you test.\"\n---\n")
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", "test: a note by hand")
+		hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
+		writeT(t, filepath.Dir(hook), "pre-commit", "#!/bin/sh\nexit 1\n")
+		if err := os.Chmod(hook, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		var asked string
+		if _, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push"); err == nil {
+			t.Error("push with a failing hook: no error")
+		}
+		clean(t, repo)
+		os.Remove(hook)
+		pushYes(t, home)
+	})
+}
