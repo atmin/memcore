@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/atmin/memcore/internal/store"
@@ -11,7 +10,7 @@ import (
 // A fetch that fails only warns, so the person sees the queue offline too.
 func runInbox(env Env, args []string) error {
 	if len(args) != 0 {
-		return errors.New("usage: memcore inbox")
+		return usageErr("usage: memcore inbox")
 	}
 	repo, err := openRepo()
 	if err != nil {

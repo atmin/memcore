@@ -60,7 +60,7 @@ func isSkill(p string) bool {
 // runShow prints a document by its path in the memory repo. It prints a skill from the accepted history.
 func runShow(env Env, args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: memcore show <path>")
+		return usageErr("usage: memcore show <path>")
 	}
 	repo, err := openRepo()
 	if err != nil {
@@ -68,7 +68,7 @@ func runShow(env Env, args []string) error {
 	}
 	p := path.Clean(filepath.ToSlash(args[0]))
 	if path.IsAbs(p) || p == ".." || strings.HasPrefix(p, "../") || p == ".git" || strings.HasPrefix(p, ".git/") {
-		return fmt.Errorf("%s is not a path in the memory repo", args[0])
+		return inputErrf("%s is not a path in the memory repo", args[0])
 	}
 	full := filepath.Join(repo, filepath.FromSlash(p))
 	env.event().Paths = []string{p}
@@ -90,13 +90,13 @@ func runShow(env Env, args []string) error {
 
 	info, err := os.Stat(full)
 	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("no document at %s: memcore orient lists the documents", p)
+		return inputErrf("no document at %s: memcore orient lists the documents", p)
 	}
 	if err != nil {
 		return fmt.Errorf("read %s: %w", p, err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("%s is a folder: memcore show %s prints its index", p, path.Join(p, "README.md"))
+		return inputErrf("%s is a folder: memcore show %s prints its index", p, path.Join(p, "README.md"))
 	}
 	content, err := os.ReadFile(full)
 	if err != nil {

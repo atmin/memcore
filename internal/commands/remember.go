@@ -1,9 +1,9 @@
 package commands
 
 import (
-	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -22,13 +22,13 @@ const budget = 40
 // runRemember places, checks, indexes and commits a memory that it reads from standard input.
 func runRemember(env Env, args []string) error {
 	flags := flag.NewFlagSet("remember", flag.ContinueOnError)
-	flags.SetOutput(env.Err)
+	flags.SetOutput(io.Discard)
 	isNew := flags.Bool("new", false, "write the memory even when near-duplicates exist")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return usageErr(err.Error())
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: memcore remember [--new] < memory.md")
+		return usageErr("usage: memcore remember [--new] < memory.md")
 	}
 	repo, err := memoryRepo()
 	if err != nil {
@@ -67,7 +67,7 @@ func runRemember(env Env, args []string) error {
 		return err
 	}
 	if taken != "" {
-		return fmt.Errorf("the name %s is taken by %s: choose another name", m.Name, taken)
+		return inputErrf("the name %s is taken by %s: choose another name", m.Name, taken)
 	}
 	if !*isNew {
 		dups, err := nearDuplicates(repo, level, m.Description)
@@ -79,7 +79,7 @@ func runRemember(env Env, args []string) error {
 			for _, d := range dups {
 				fmt.Fprintf(env.Out, "- %s: %s\n", d.Path, d.Text)
 			}
-			return errors.New("near-duplicates exist, so remember wrote nothing: if the fact is new, run memcore remember --new")
+			return usageErr("near-duplicates exist, so remember wrote nothing: if the fact is new, run memcore remember --new")
 		}
 	}
 
@@ -88,7 +88,7 @@ func runRemember(env Env, args []string) error {
 		for _, f := range found {
 			fmt.Fprintf(env.Out, "%s:%d: %s\n", rel, f.Line, f.Message)
 		}
-		return errors.New("the memory holds a likely secret, so remember wrote nothing: remove the secret, then remember again")
+		return usageErr("the memory holds a likely secret, so remember wrote nothing: remove the secret, then remember again")
 	}
 	report, err := guards.VerifyContent(repo, rel, content)
 	if err != nil {
@@ -98,7 +98,7 @@ func runRemember(env Env, args []string) error {
 		for _, f := range report.Faults {
 			fmt.Fprintf(env.Out, "%s:%d: fault: %s\n", f.Path, f.Line, f.Message)
 		}
-		return fmt.Errorf("%d faults, so remember wrote nothing", len(report.Faults))
+		return inputErrf("%d faults, so remember wrote nothing", len(report.Faults))
 	}
 	levels := store.Path(level)
 	for _, l := range levels {

@@ -1,0 +1,142 @@
+package commands
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/atmin/memcore/internal/store"
+)
+
+// helps holds the help of each command: its input and format, with one minimal valid input.
+var helps = map[string]string{
+	"orient": `memcore orient
+
+Takes no input. It prints the commands, the voice skill to follow, and the indexes
+from the working directory up to the root. Run it at the start of every session.
+`,
+	"show": `memcore show <path>
+
+Prints one document by its path in the memory repo, as orient lists it.
+A skill prints as the person accepted it. For example:
+
+  memcore show dev/memories/tests-before-code.md
+`,
+	"remember": `memcore remember [--new] < memory.md
+
+Reads one memory from standard input: a frontmatter between two --- lines, then the body.
+
+  name         the topic, in lower case with hyphens, unique in the memory repo
+  description  one line that says when to read the memory, such as "Read before you ..."
+  type         user, feedback, project or reference
+  sessions     leave it out: memcore fills it from the session of the agent
+
+The body states one fact. A feedback memory ends with **Why:** and **How to apply:**.
+Link another memory with [[name]].
+
+memcore places the memory at the level of the working directory. When memories on the
+path share most words of the description, it lists them and writes nothing, unless --new.
+
+Example:
+
+memcore remember <<'EOF'
+---
+name: tests-before-code
+description: Read before you write code: the tests of a step come first.
+type: feedback
+---
+
+Write the tests of a step before its code.
+
+**Why:** A test written after the code proves what the code does, not what it should do.
+**How to apply:** Name the tests in the plan, and commit them in the step with their code.
+EOF
+`,
+	"verify": `memcore verify <path>
+
+Checks a document, or every document under a path, for dead references and forbidden
+words, and warns on a description that names no moment to read. For example:
+
+  memcore verify dev/memories/tests-before-code.md
+`,
+	"inbox": `memcore inbox
+
+Takes no input. It fetches, then lists the unpushed commits, which wait for the review
+of the person.
+`,
+	"push": `memcore push
+
+Only the person runs it, at a terminal. It fetches, asks, then pushes the unpushed commits.
+`,
+	"help": `memcore help [<command>]
+
+Lists the commands, or shows the input of one command, with an example. For example:
+
+  memcore help remember
+`,
+	"init": `memcore init <remote>
+
+Only the person runs it. It creates the memory repo when the remote is empty, and clones
+the remote otherwise. For example:
+
+  memcore init git@example.com:you/memory.git
+`,
+}
+
+// help returns the help of a command.
+func help(c Command) string {
+	if h, ok := helps[c.Name]; ok {
+		return h
+	}
+	return fmt.Sprintf("memcore %s\n\n%s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+}
+
+// runHelp lists the commands, or prints the help of one.
+func runHelp(env Env, args []string) error {
+	if len(args) > 1 {
+		return usageErr("usage: memcore help [<command>]")
+	}
+	if len(args) == 1 {
+		for _, c := range Table() {
+			if c.Name == args[0] {
+				_, err := io.WriteString(env.Out, help(c))
+				return err
+			}
+		}
+	}
+	for _, c := range Table() {
+		fmt.Fprintf(env.Out, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+	}
+	fmt.Fprintln(env.Out, "\nmemcore help <command> shows the input of a command, with an example.")
+	if len(args) == 1 {
+		return usageErr(fmt.Sprintf("no command %q", args[0]))
+	}
+	return nil
+}
+
+// inputError is a wrong argument or a wrong input, which Run ends with the pointer to the help.
+type inputError struct{ err error }
+
+func (e *inputError) Error() string { return e.err.Error() }
+func (e *inputError) Unwrap() error { return e.err }
+
+// usageErr returns the error of a wrong argument.
+func usageErr(msg string) error {
+	return &inputError{errors.New(msg)}
+}
+
+// inputErrf returns an input error with a formatted message.
+func inputErrf(format string, a ...any) error {
+	return &inputError{fmt.Errorf(format, a...)}
+}
+
+// isInput reports whether an error comes from a wrong argument or a wrong input.
+func isInput(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ie *inputError
+	var se *store.InputError
+	return errors.As(err, &ie) || errors.As(err, &se)
+}

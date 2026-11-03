@@ -41,6 +41,11 @@ func inputErrorf(format string, args ...any) error {
 	return &InputError{format: format, args: args}
 }
 
+// inputText returns an InputError whose message quotes no input.
+func inputText(msg string) error {
+	return &InputError{format: strings.ReplaceAll(msg, "%", "%%")}
+}
+
 func (e *InputError) Error() string {
 	return fmt.Sprintf(e.format, e.args...)
 }
@@ -89,7 +94,7 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 		if err := sc.Err(); err != nil {
 			return fm, "", fmt.Errorf("read the frontmatter: %w", err)
 		}
-		return fm, "", errors.New("no frontmatter: the first line is not ---")
+		return fm, "", inputText("no frontmatter: the first line is not ---")
 	}
 	list := "" // the key whose list the next items extend
 	closed := false
@@ -151,7 +156,7 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 		return fm, "", fmt.Errorf("read the frontmatter: %w", err)
 	}
 	if !closed {
-		return fm, "", errors.New("the frontmatter has no closing ---")
+		return fm, "", inputText("the frontmatter has no closing ---")
 	}
 	var body strings.Builder
 	for sc.Scan() {
@@ -168,7 +173,7 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 // A plain value may hold ": " or " #", because memcore reads input leniently and writes it back canonically.
 func parseValue(raw string) (string, error) {
 	if raw == "" {
-		return "", errors.New("empty value")
+		return "", inputText("empty value")
 	}
 	if strings.HasPrefix(raw, `"`) {
 		v, err := unquote(raw)
@@ -381,7 +386,7 @@ func ParseMemory(r io.Reader) (Memory, error) {
 	}
 	for _, key := range []string{"name", "description", "type"} {
 		if fm.Values[key] == "" {
-			return Memory{}, fmt.Errorf("parse the memory: missing key %q", key)
+			return Memory{}, inputText(fmt.Sprintf("parse the memory: missing key %q", key))
 		}
 	}
 	m := Memory{

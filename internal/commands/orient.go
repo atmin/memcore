@@ -13,7 +13,7 @@ import (
 // runOrient prints the commands, the pinned parts of the voice skill, and the indexes from the working directory to the root.
 func runOrient(env Env, args []string) error {
 	if len(args) != 0 {
-		return errors.New("usage: memcore orient")
+		return usageErr("usage: memcore orient")
 	}
 	repo, err := openRepo()
 	if err != nil {
@@ -47,7 +47,9 @@ func runOrient(env Env, args []string) error {
 			yours = append(yours, c.Name)
 		}
 	}
-	fmt.Fprintf(&w, "\nOnly the person runs %s.\n\n", strings.Join(yours, " and "))
+	fmt.Fprintf(&w, "\nOnly the person runs %s.\n", strings.Join(yours, " and "))
+	fmt.Fprintln(&w, "Before you first use a command, run memcore help <command>: it shows the input, with an example.")
+	fmt.Fprintln(&w)
 
 	if voice, ok := accepted(repo, voicePath); ok {
 		fmt.Fprintln(&w, "Follow the voice skill in every reply and every document:")

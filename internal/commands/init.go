@@ -22,7 +22,7 @@ const initMessage = "init: create the memory repo"
 // runInit sets up the memory repo: it creates it when the remote is empty, and clones the remote otherwise.
 func runInit(env Env, args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: memcore init <remote>")
+		return usageErr("usage: memcore init <remote>")
 	}
 	remote := args[0]
 	if !filepath.IsAbs(remote) {

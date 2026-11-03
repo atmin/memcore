@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -63,10 +65,16 @@ func Run(env Env, name string, args []string) error {
 	}
 	env.Event = e
 	var err error
-	if cmd == nil {
+	switch {
+	case cmd == nil:
 		err = fmt.Errorf("%w %q", ErrUnknown, name)
-	} else {
+	case slices.Contains(args, "--help") || slices.Contains(args, "-h"):
+		_, err = io.WriteString(env.Out, help(*cmd))
+	default:
 		err = cmd.Run(env, args)
+	}
+	if isInput(err) {
+		err = fmt.Errorf("%w; memcore help %s shows the input", err, name)
 	}
 	e.Time = time.Now().UTC().Format(time.RFC3339)
 	e.Outcome = "ok"

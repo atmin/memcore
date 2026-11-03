@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -13,7 +12,7 @@ import (
 // It pushes the tip that it counted, so a commit that lands while it asks waits for the next push.
 func runPush(env Env, args []string) error {
 	if len(args) != 0 {
-		return errors.New("usage: memcore push")
+		return usageErr("usage: memcore push")
 	}
 	repo, err := openRepo()
 	if err != nil {

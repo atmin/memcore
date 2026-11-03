@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +13,7 @@ import (
 // runVerify checks the documents at a path, relative to the working directory or to the memory repo.
 func runVerify(env Env, args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: memcore verify <path>")
+		return usageErr("usage: memcore verify <path>")
 	}
 	target := args[0]
 	if !filepath.IsAbs(target) {
@@ -29,7 +28,7 @@ func runVerify(env Env, args []string) error {
 	}
 	target, err := filepath.EvalSymlinks(target)
 	if err != nil {
-		return fmt.Errorf("find %s: %w", args[0], err)
+		return inputErrf("find %s: %w", args[0], err)
 	}
 	repo, err := toplevel(target)
 	if err != nil {
