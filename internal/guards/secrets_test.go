@@ -65,3 +65,40 @@ func TestSecretsPosition(t *testing.T) {
 		t.Errorf("Secrets = %+v, want one at line 2, column 9", got)
 	}
 }
+
+func TestRedact(t *testing.T) {
+	// The tokens are built from parts, so no scanner takes this file for a leak.
+	key := "-----BEGIN " + "OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\nAAAAMwAAAAtzc2gtZWQyNTUxOQAAACBkZXZpY2Uta2V5\n"
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"cloud access key", "key " + "AKIA" + "IOSFODNN7EXAMPLE" + " here", "key [secret:cloud-access-key] here"},
+		{"hosting token", "token " + "ghp_" + strings.Repeat("a1B2", 9), "token [secret:hosting-token]"},
+		{"chat token", "xoxb-" + "1234567890-abcdef", "[secret:chat-token]"},
+		{"api key", "use sk-" + "ant-" + strings.Repeat("Q7w", 8) + ".", "use [secret:api-key]."},
+		{"bearer token", "Authorization: Bearer " + "abc.def-ghi_jkl.mnopqrstu", "Authorization: [secret:bearer-token]"},
+		{"connection string", "postgres://app:" + "s3cret" + "@db.example.com/shop", "[secret:connection-string-with-a-password]db.example.com/shop"},
+		{"random string", "id q8ZtV3nRk2LpX9wYb7HcJ4mFs6DgT1aE0uNvQ5yK ok", "id [secret:random-string] ok"},
+		{"prose", "The API takes a bearer token in a header.", "The API takes a bearer token in a header."},
+		{"two on one line", "AKIA" + "IOSFODNN7EXAMPLE and " + "ghp_" + strings.Repeat("a1B2", 9), "[secret:cloud-access-key] and [secret:hosting-token]"},
+		{"private key block", "before\n" + key + "-----END " + "OPENSSH PRIVATE KEY-----\nafter", "before\n[secret:private-key]\nafter"},
+		{"private key without its end", "before\n" + key, "before\n[secret:private-key]"},
+		{"a key inside a connection string", "postgres://" + "AKIA" + "IOSFODNN7EXAMPLE" + ":plain" + "secret@db/shop", "[secret:connection-string-with-a-password]db/shop"},
+		{"a token inside a private key block", "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "ghp_" + strings.Repeat("a1B2", 9) + "\nMIIEpAIBAAKCAQEA\n-----END " + "RSA PRIVATE KEY-----", "[secret:private-key]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Redact(tt.text)
+			if got != tt.want {
+				t.Errorf("Redact =\n%q\nwant\n%q", got, tt.want)
+			}
+			for _, part := range []string{"b3BlbnNzaC1rZXktdjEA", "ZGV2aWNlLWtleQ", "plainsecret", "MIIEpAIBAAKCAQEA"} {
+				if strings.Contains(got, part) {
+					t.Errorf("%q survives", part)
+				}
+			}
+		})
+	}
+}
