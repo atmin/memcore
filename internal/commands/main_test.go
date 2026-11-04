@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HOME", empty)
+	// No test starts a process in the background. recordStarts records the starts of one test.
+	startBackground = func(string, ...string) error { return nil }
 	code := m.Run()
 	os.RemoveAll(empty)
 	os.Exit(code)

@@ -37,7 +37,8 @@ type Event struct {
 	Pushed   []string       `json:"pushed,omitempty"`
 	Words    map[string]int `json:"words,omitempty"` // the words that orient printed: the header, then each level
 
-	inputs []string // text from standard input, which redact removes from the error
+	inputs  []string // text from standard input, which redact removes from the error
+	started bool     // the command started a snapshot itself, so Run starts no second one
 }
 
 // Run runs one command of the table, then appends its event to the use log of the memory repo.
@@ -90,6 +91,11 @@ func Run(env Env, name string, args []string) error {
 		}
 		if kerr := keep(repo, e); kerr != nil {
 			fmt.Fprintf(env.Err, "warning: %v\n", kerr)
+		}
+		if _, serr := os.Stat(filepath.Join(repo, ".git")); serr == nil {
+			if berr := autoSnapshot(repo, name, e.started); berr != nil {
+				fmt.Fprintf(env.Err, "warning: %v\n", berr)
+			}
 		}
 	}
 	return err

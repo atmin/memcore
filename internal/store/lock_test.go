@@ -82,3 +82,20 @@ func TestLockWaits(t *testing.T) {
 	}
 	unlock2()
 }
+
+func TestTryLockFile(t *testing.T) {
+	repo := t.TempDir()
+	unlock, ok, err := TryLockFile(repo, "schedule")
+	if err != nil || !ok {
+		t.Fatalf("TryLockFile: %v, %v", ok, err)
+	}
+	if _, ok, err := TryLockFile(repo, "schedule"); err != nil || ok {
+		t.Errorf("a second TryLockFile = %v, %v, want false at once", ok, err)
+	}
+	unlock()
+	if unlock2, ok, err := TryLockFile(repo, "schedule"); err != nil || !ok {
+		t.Errorf("TryLockFile after the release = %v, %v", ok, err)
+	} else {
+		unlock2()
+	}
+}

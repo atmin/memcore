@@ -36,6 +36,31 @@ func LockFile(repo, name string) (func(), error) {
 	return hold(f, path)
 }
 
+// TryLockFile takes an exclusive flock on a named file of the local state, like LockFile, but tries once.
+// It returns false at once when another process holds the lock.
+func TryLockFile(repo, name string) (func(), bool, error) {
+	if err := os.MkdirAll(StateDir(repo), 0o755); err != nil {
+		return nil, false, fmt.Errorf("create the local state: %w", err)
+	}
+	path := filepath.Join(StateDir(repo), name)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, false, fmt.Errorf("open the lock %s: %w", path, err)
+	}
+	fd := int(f.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("take the lock %s: %w", path, err)
+	}
+	return func() {
+		syscall.Flock(fd, syscall.LOCK_UN)
+		f.Close()
+	}, true, nil
+}
+
 // LockDir takes an exclusive flock on a directory itself. init holds it on home,
 // because the memory repo and its lock file do not exist yet.
 func LockDir(dir string) (func(), error) {
