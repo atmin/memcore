@@ -2,6 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/atmin/memcore/internal/store"
@@ -25,6 +27,12 @@ func runInbox(env Env, args []string) error {
 	if err := Fetch(repo); err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\nThe queue below may sit behind the accepted history.\n", err)
 	}
+	return report(env, repo)
+}
+
+// report prints what waits on the person, without a fetch: a rewritten remote, stale indexes, the files that keep
+// auto-memory on, and the queue. The caller holds the write lock.
+func report(env Env, repo string) error {
 	if m, ok, err := readMarker(repo); err == nil && ok {
 		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)
 		fmt.Fprintf(env.Out, "The remote no longer holds these accepted commits. memcore recover drops them here and keeps the queue:\n%s", indent(lost))
@@ -33,6 +41,9 @@ func runInbox(env Env, args []string) error {
 		fmt.Fprintf(env.Err, "warning: %v\n", err)
 	} else if len(stale) > 0 {
 		fmt.Fprintf(env.Out, "These indexes differ from their documents, and memcore push regenerates them:\n%s", indent(strings.Join(stale, "\n")))
+	}
+	if err := reportBlockers(env, repo); err != nil {
+		fmt.Fprintf(env.Err, "warning: %v\n", err)
 	}
 	_, queue, err := queueOf(repo)
 	if err != nil {
@@ -79,4 +90,34 @@ func indent(out string) string {
 		}
 	}
 	return b.String()
+}
+
+// reportBlockers lists the files that keep auto-memory on, once an import has run.
+func reportBlockers(env Env, repo string) error {
+	if _, err := os.Stat(filepath.Join(store.StateDir(repo), "import.json")); err != nil {
+		return nil
+	}
+	claude, err := claudeDir()
+	if err != nil {
+		return err
+	}
+	rec, err := readImportRecord(repo)
+	if err != nil {
+		return err
+	}
+	blockers, err := importBlockers(rec, claude)
+	if err != nil || len(blockers) == 0 {
+		return err
+	}
+	// After the switch, auto-memory is off, and a changed file only waits for the next init.
+	if tree, err := readSettings(filepath.Join(claude, "settings.json")); err == nil && tree.get("autoMemoryEnabled") != nil && tree.get("autoMemoryEnabled").kind == 'f' {
+		fmt.Fprintln(env.Out, "These files of auto-memory are not in the memory repo as they are now:")
+	} else {
+		fmt.Fprintln(env.Out, "Auto-memory stays on, because these files are not in the memory repo:")
+	}
+	for _, b := range blockers {
+		fmt.Fprintf(env.Out, "  %s: %s\n", tilde(b.file), b.reason)
+	}
+	fmt.Fprintln(env.Out, "Fix a file and run memcore init again, or let init leave the files out.")
+	return nil
 }

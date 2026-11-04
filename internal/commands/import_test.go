@@ -289,3 +289,81 @@ func TestImportSafety(t *testing.T) {
 		}
 	})
 }
+
+func TestImportBlockers(t *testing.T) {
+	home, repo, _ := newMemory(t)
+	claude := filepath.Join(home, ".claude")
+	shop := mkdirT(t, filepath.Join(home, "dev", "shop"))
+	autoMemory(t, claude, shop, "good.md", flat("good", "Read when you test.", "user", "Good."))
+	autoMemory(t, claude, shop, "leaky.md", flat("leaky", "Read when you test.", "user", "token ghp_"+strings.Repeat("a1B2", 9)))
+
+	if out, _ := run(t, home, "", "inbox"); strings.Contains(out, "Auto-memory") {
+		t.Errorf("inbox before any import =\n%s\nwant no word of auto-memory", out)
+	}
+	if complete, _ := importNow(t, home, repo, claude); complete {
+		t.Fatal("complete = true with a file left out")
+	}
+	out, err := run(t, home, "", "inbox")
+	if err != nil || !strings.Contains(out, "Auto-memory stays on") || !strings.Contains(out, "leaky.md: it holds a likely secret") {
+		t.Errorf("inbox: %v\n%s\nwant the file that keeps auto-memory on, with its reason", err, out)
+	}
+
+	var asked string
+	if ok, err := acceptExclusions(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(false, &asked)}, repo); err != nil || ok {
+		t.Errorf("acceptExclusions with no = %v, %v", ok, err)
+	}
+	if out, _ := run(t, home, "", "inbox"); !strings.Contains(out, "leaky.md: it holds a likely secret") {
+		t.Errorf("inbox after a no =\n%s\nwant the file still listed", out)
+	}
+
+	var shown strings.Builder
+	if ok, err := acceptExclusions(Env{Dir: home, Out: &shown, Confirm: answer(true, &asked)}, repo); err != nil || !ok {
+		t.Errorf("acceptExclusions with yes = %v, %v", ok, err)
+	}
+	if !strings.Contains(shown.String(), "leaky.md") || asked == "" {
+		t.Errorf("acceptExclusions showed\n%s\nand asked %q, want the file and one question", shown.String(), asked)
+	}
+	if out, _ := run(t, home, "", "inbox"); strings.Contains(out, "Auto-memory stays on") {
+		t.Errorf("inbox after a yes =\n%s\nwant no blocker", out)
+	}
+	if complete, _ := importNow(t, home, repo, claude); !complete {
+		t.Error("complete = false after the person accepted the file")
+	}
+}
+
+func TestAcceptExclusionsRace(t *testing.T) {
+	home, repo, _ := newMemory(t)
+	claude := filepath.Join(home, ".claude")
+	shop := mkdirT(t, filepath.Join(home, "dev", "shop"))
+	leaky := autoMemory(t, claude, shop, "leaky.md", flat("leaky", "Read when you test.", "user", "token ghp_"+strings.Repeat("a1B2", 9)))
+	importNow(t, home, repo, claude)
+	ok, err := acceptExclusions(Env{Dir: home, Out: &strings.Builder{}, Confirm: func(string) (bool, error) {
+		// Auto-memory writes while the person answers.
+		writeT(t, filepath.Dir(leaky), "leaky.md", flat("leaky", "Read when you test.", "user", "token ghp_"+strings.Repeat("c3D4", 9)))
+		autoMemory(t, claude, shop, "fresh.md", flat("fresh", "Read when you test.", "user", "Fresh."))
+		return true, nil
+	}}, repo)
+	if err != nil || ok {
+		t.Errorf("acceptExclusions = %v, %v, want false: the files changed after the person saw them", ok, err)
+	}
+	out, _ := run(t, home, "", "inbox")
+	if !strings.Contains(out, "leaky.md") || !strings.Contains(out, "fresh.md") {
+		t.Errorf("inbox =\n%s\nwant the changed file and the new file listed", out)
+	}
+}
+
+func TestBlockersAfterTheSwitch(t *testing.T) {
+	home, repo, _ := newMemory(t)
+	claude := filepath.Join(home, ".claude")
+	shop := mkdirT(t, filepath.Join(home, "dev", "shop"))
+	src := autoMemory(t, claude, shop, "fact.md", flat("fact", "Read when you test.", "user", "A fact."))
+	if complete, _ := importNow(t, home, repo, claude); !complete {
+		t.Fatal("complete = false")
+	}
+	writeT(t, claude, "settings.json", "{\n  \"autoMemoryEnabled\": false\n}\n")
+	writeT(t, filepath.Dir(src), "fact.md", flat("fact", "Read when you test.", "user", "A changed fact."))
+	out, _ := run(t, home, "", "inbox")
+	if strings.Contains(out, "stays on") || !strings.Contains(out, "fact.md: it changed since its import") {
+		t.Errorf("inbox =\n%s\nwant the changed file, without a claim that auto-memory is on", out)
+	}
+}

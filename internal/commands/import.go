@@ -406,7 +406,8 @@ func settlePending(repo string, rec *importRecord) error {
 // blocker is a source file that keeps auto-memory on, with the reason.
 type blocker struct {
 	file, reason string
-	changed      bool // the file imported, then changed
+	changed      bool   // the file imported, then changed
+	hash         string // the file as importBlockers read it
 }
 
 // importBlockers returns the source files that are neither imported as they are now nor accepted by the person.
@@ -430,11 +431,11 @@ func importBlockers(rec importRecord, claude string) ([]blocker, error) {
 		switch {
 		case seen && o.Hash == hash && (o.Path != "" || o.Accepted):
 		case seen && o.Path != "":
-			blockers = append(blockers, blocker{f, "it changed since its import", true})
+			blockers = append(blockers, blocker{f, "it changed since its import", true, hash})
 		case seen && o.Hash == hash && o.Reason != "":
-			blockers = append(blockers, blocker{f, o.Reason, false})
+			blockers = append(blockers, blocker{f, o.Reason, false, hash})
 		default:
-			blockers = append(blockers, blocker{f, "it is not imported yet", false})
+			blockers = append(blockers, blocker{f, "it is not imported yet", false, hash})
 		}
 	}
 	return blockers, nil
@@ -551,4 +552,54 @@ func writeImportRecord(repo string, rec importRecord) error {
 		return fmt.Errorf("write the record of the import: %w", err)
 	}
 	return nil
+}
+
+// acceptExclusions lists the files that keep auto-memory on, and asks once at the terminal whether to leave them
+// out. A yes marks each as accepted, as it is now. It returns whether the import is complete.
+func acceptExclusions(env Env, repo string) (bool, error) {
+	claude, err := claudeDir()
+	if err != nil {
+		return false, err
+	}
+	unlock, err := lockWrite(repo)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	rec, err := readImportRecord(repo)
+	if err != nil {
+		return false, err
+	}
+	blockers, err := importBlockers(rec, claude)
+	if err != nil {
+		return false, err
+	}
+	if len(blockers) == 0 {
+		return true, nil
+	}
+	fmt.Fprintln(env.Out, "These files of auto-memory are not in the memory repo:")
+	for _, b := range blockers {
+		fmt.Fprintf(env.Out, "  %s: %s\n", tilde(b.file), b.reason)
+	}
+	if env.Confirm == nil {
+		return false, errors.New("accept the files left out: no terminal to ask at")
+	}
+	ok, err := env.Confirm("Leave them out, and turn auto-memory off? [y/N] ")
+	if err != nil || !ok {
+		return false, err
+	}
+	// The person accepted each file as the list showed it. A file that changed or appeared since stays a blocker.
+	for _, b := range blockers {
+		o := rec.Files[b.file]
+		o.Hash, o.Accepted = b.hash, true
+		if o.Path == "" && o.Reason == "" {
+			o.Reason = "accepted as it is"
+		}
+		rec.Files[b.file] = o
+	}
+	if err := writeImportRecord(repo, rec); err != nil {
+		return false, err
+	}
+	blockers, err = importBlockers(rec, claude)
+	return len(blockers) == 0, err
 }
