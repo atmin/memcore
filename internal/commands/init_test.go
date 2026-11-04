@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -336,6 +337,168 @@ func TestInitClaude(t *testing.T) {
 		}
 		if _, err := os.Lstat(filepath.Join(home, ".local", "bin", "hello")); err == nil {
 			t.Error("the dry run linked a script")
+		}
+	})
+}
+
+func TestOnboard(t *testing.T) {
+	home := newHome(t)
+	remote := bareRemote(t)
+	repo := filepath.Join(home, "memory")
+	claude := filepath.Join(home, ".claude")
+	settings := filepath.Join(claude, "settings.json")
+	exe := fakeMemcore(t)
+	yours := `{
+  "theme": "dark",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo hello"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+	writeT(t, claude, "settings.json", yours)
+	shop := mkdirT(t, filepath.Join(home, "dev", "shop"))
+	web := mkdirT(t, filepath.Join(home, "dev", "web"))
+	autoMemory(t, claude, shop, "deploy_day.md", nested("deploy_day", "Read before you deploy the shop.", "project", "s1", "Fridays. See [[ci_rules]]."))
+	shopCI := autoMemory(t, claude, shop, "ci_rules.md", flat("ci-rules", "Read before you change CI.", "feedback", "Keep CI green."))
+	autoMemory(t, claude, web, "deploy.md", flat("deploy-day", "Read before you deploy the web.", "project", "Mondays."))
+	autoMemory(t, claude, web, "leaky.md", flat("leaky", "Read when you test.", "user", "token ghp_"+strings.Repeat("a1B2", 9)))
+	autoMemory(t, claude, filepath.Join(home, "gone"), "a.md", flat("gone-fact", "Read when you test.", "user", "Gone."))
+	writeT(t, filepath.Join(claude, "projects", projectFolder(shop)), "s1.jsonl", said("s1", shop, "Use small commits."))
+	writeT(t, filepath.Join(claude, "projects", projectFolder(shop)), "s1/subagents/agent-a1.jsonl",
+		`{"type":"user","timestamp":"t","isSidechain":true,"sessionId":"s1","agentId":"a1","cwd":"`+shop+`","message":{"role":"user","content":"Find it."}}`+"\n")
+
+	// initRun runs init with an answer for each kind of question, and returns the output and the questions.
+	initRun := func(t *testing.T, exclusions, change bool) (string, []string) {
+		t.Helper()
+		var asked []string
+		confirm := func(q string) (bool, error) {
+			asked = append(asked, q)
+			if strings.Contains(q, "Leave them out") {
+				return exclusions, nil
+			}
+			return change, nil
+		}
+		out, err := runWith(t, Env{Dir: home, Confirm: confirm}, "init", remote)
+		if err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		return out, asked
+	}
+	settingsOf := func(t *testing.T) map[string]any {
+		t.Helper()
+		var v map[string]any
+		if err := json.Unmarshal([]byte(readT(t, settings)), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	t.Run("1: a no to the exclusions keeps auto-memory on", func(t *testing.T) {
+		out, asked := initRun(t, false, true)
+		if len(asked) != 2 {
+			t.Errorf("asked %q, want the exclusions, then the settings", asked)
+		}
+		got := readT(t, settings)
+		for _, want := range []string{"echo hello", "'" + exe + "' hook session-start", "'" + exe + "' hook prompt", "'" + exe + "' hook session-end", "Edit(~/memory/**)", "Bash(memcore push *)"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("settings =\n%s\nwant %q", got, want)
+			}
+		}
+		if _, ok := settingsOf(t)["autoMemoryEnabled"]; ok {
+			t.Error("autoMemoryEnabled is set while files stay out")
+		}
+		for _, want := range []string{"+++ ~/.claude/settings.json, after the change", `+            "command": "'` + exe + `' hook session-start"`, `+      "Bash(memcore push *)"`, `+      "Edit(~/memory/**)"`} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output =\n%s\nwant the diff line %q", out, want)
+			}
+		}
+		if !strings.Contains(out, "Auto-memory stays on") || !strings.Contains(out, "leaky.md") || !strings.Contains(out, "names no directory") {
+			t.Errorf("output =\n%s\nwant the report of the files left out", out)
+		}
+		for _, f := range []string{"dev/shop/memories/deploy-day.md", "dev/shop/memories/ci-rules.md", "dev/web/memories/deploy-day-web.md"} {
+			if _, err := os.Stat(filepath.Join(repo, f)); err != nil {
+				t.Errorf("%s: %v", f, err)
+			}
+		}
+		if got := readT(t, filepath.Join(repo, "dev/shop/memories/deploy-day.md")); !strings.Contains(got, "[[ci-rules]]") || !strings.Contains(got, "claude:s1") {
+			t.Errorf("deploy-day =\n%s", got)
+		}
+		log := gitT(t, repo, "log", "--format=%s")
+		if !strings.Contains(log, "init: import the auto-memory of ~/dev/shop\n") || !strings.Contains(log, "init: import the auto-memory of ~/dev/web\n") {
+			t.Errorf("log =\n%s\nwant one import per project", log)
+		}
+		files := gitT(t, repo, "ls-tree", "-r", "--name-only", "transcripts")
+		if !strings.Contains(files, "s1.jsonl") || !strings.Contains(files, "subagents/agent-a1.jsonl") {
+			t.Errorf("transcripts =\n%s", files)
+		}
+	})
+
+	t.Run("2: a changed source keeps auto-memory on", func(t *testing.T) {
+		writeT(t, filepath.Dir(shopCI), "ci_rules.md", flat("ci-rules", "Read before you change CI.", "feedback", "Keep CI fast and green."))
+		out, _ := initRun(t, false, true)
+		if _, ok := settingsOf(t)["autoMemoryEnabled"]; ok {
+			t.Error("autoMemoryEnabled is set while a source changed")
+		}
+		if !strings.Contains(out, "ci_rules.md: it changed since its import") {
+			t.Errorf("output =\n%s\nwant the changed file", out)
+		}
+	})
+
+	t.Run("3: a yes to both turns auto-memory off", func(t *testing.T) {
+		out, asked := initRun(t, true, true)
+		if len(asked) != 2 {
+			t.Errorf("asked %q, want two questions", asked)
+		}
+		if settingsOf(t)["autoMemoryEnabled"] != false {
+			t.Errorf("settings =\n%s\nwant auto-memory off", readT(t, settings))
+		}
+		if strings.Contains(out, "Auto-memory stays on") {
+			t.Errorf("output =\n%s\nwant no blocker", out)
+		}
+		if !strings.Contains(out, `+  "autoMemoryEnabled": false`) {
+			t.Errorf("output =\n%s\nwant the diff of the setting", out)
+		}
+	})
+
+	t.Run("4: a fourth run finds nothing new", func(t *testing.T) {
+		head := gitT(t, repo, "rev-parse", "HEAD")
+		transcripts := gitT(t, repo, "rev-parse", "transcripts")
+		before := readT(t, settings)
+		_, asked := initRun(t, true, true)
+		if len(asked) != 0 {
+			t.Errorf("asked %q, want nothing", asked)
+		}
+		if gitT(t, repo, "rev-parse", "HEAD") != head || gitT(t, repo, "rev-parse", "transcripts") != transcripts || readT(t, settings) != before {
+			t.Error("the fourth run changed something")
+		}
+	})
+
+	t.Run("5: --undo keeps your settings", func(t *testing.T) {
+		replaceT(t, settings, `"theme": "dark",`, `"theme": "dark",`+"\n  \"model\": \"opus\",")
+		out, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", "--undo")
+		if err != nil {
+			t.Fatalf("init --undo: %v\n%s", err, out)
+		}
+		got := readT(t, settings)
+		if !strings.Contains(got, `"model": "opus"`) || !strings.Contains(got, "echo hello") {
+			t.Errorf("settings =\n%s\nwant your setting and your hook", got)
+		}
+		for _, want := range []string{`-            "command": "'` + exe + `' hook session-end"`, `-      "Bash(memcore recover *)"`, `-  "autoMemoryEnabled": false`} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output =\n%s\nwant the diff line %q", out, want)
+			}
+		}
+		if strings.Contains(got, "memcore") || strings.Contains(got, "autoMemoryEnabled") {
+			t.Errorf("settings =\n%s\nwant nothing of init", got)
 		}
 	})
 }
