@@ -456,3 +456,190 @@ func writeInitRecord(repo string, rec initRecord) error {
 	}
 	return writeAtomic(filepath.Join(store.StateDir(repo), "init.json"), append(b, '\n'))
 }
+
+// del removes a key of an object, when it holds the key.
+func (n *jsonNode) del(key string) {
+	if i := slices.Index(n.keys, key); i >= 0 {
+		n.keys = slices.Delete(n.keys, i, i+1)
+		n.items = slices.Delete(n.items, i, i+1)
+	}
+}
+
+// pruneEmpty removes the key of an object whose value is an empty object or an empty array.
+func (n *jsonNode) pruneEmpty(key string) {
+	if c := n.get(key); c != nil && (c.kind == '{' || c.kind == '[') && len(c.items) == 0 {
+		n.del(key)
+	}
+}
+
+// undoSettings removes what init added to the settings, as the record says: each addition that is present and
+// unchanged. It names each addition that changed since, and leaves it. It shows the diff and asks once.
+func undoSettings(env Env, repo, settings string) error {
+	rec, err := readInitRecord(repo)
+	if err != nil {
+		return err
+	}
+	old, err := os.ReadFile(settings)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read the settings %s: %w", settings, err)
+	}
+	tree, err := parseSettings(old)
+	if err != nil {
+		return err
+	}
+	var left initRecord // the conflicts, which stay in the record
+	var conflicts []string
+	hooks := tree.get("hooks")
+	for _, h := range rec.Hooks {
+		var groups *jsonNode
+		if hooks != nil && hooks.kind == '{' {
+			groups = hooks.get(h.Event)
+		}
+		if groups == nil || groups.kind != '[' {
+			continue // you removed it
+		}
+		if i := slices.IndexFunc(groups.items, func(g *jsonNode) bool { return g.compact() == h.Entry }); i >= 0 {
+			groups.items = slices.Delete(groups.items, i, i+1)
+			continue
+		}
+		// A hook that still runs memcore for the same event, by another path or in another form, changed since init.
+		arg := hookArg(h.Entry)
+		if arg != "" && slices.ContainsFunc(groups.items, func(g *jsonNode) bool { return runsHook(g, arg) }) {
+			left.Hooks = append(left.Hooks, h)
+			conflicts = append(conflicts, fmt.Sprintf("the %s hook of memcore changed since init", h.Event))
+		}
+	}
+	if perms := tree.get("permissions"); perms != nil && perms.kind == '{' {
+		if deny := perms.get("deny"); deny != nil && deny.kind == '[' {
+			deny.items = slices.DeleteFunc(deny.items, func(n *jsonNode) bool { return n.kind == '"' && slices.Contains(rec.Deny, n.text) })
+			// A rule for the same tool and the same command, written another way, changed since init.
+			for _, rule := range rec.Deny {
+				key := ruleKey(rule)
+				if slices.ContainsFunc(deny.items, func(n *jsonNode) bool { return n.kind == '"' && strings.HasPrefix(n.text, key) }) {
+					left.Deny = append(left.Deny, rule)
+					conflicts = append(conflicts, fmt.Sprintf("the rule %s changed since init", rule))
+				}
+			}
+		}
+	}
+	// Only a container that init created goes, and only when it is empty.
+	for _, c := range slices.Backward(rec.Created) {
+		parent, key := tree, c
+		if p, k, ok := strings.Cut(c, "."); ok {
+			parent, key = tree.get(p), k
+		}
+		if parent == nil || parent.kind != '{' {
+			continue
+		}
+		parent.pruneEmpty(key)
+		if parent.get(key) != nil {
+			left.Created = append([]string{c}, left.Created...)
+		}
+	}
+	if a := rec.AutoMemory; a != nil {
+		switch cur := tree.get("autoMemoryEnabled"); {
+		case cur == nil:
+		case cur.kind == 'f' && a.Absent:
+			tree.del("autoMemoryEnabled")
+		case cur.kind == 'f':
+			before, err := parseValueJSON(a.Before)
+			if err != nil {
+				return err
+			}
+			tree.set("autoMemoryEnabled", before)
+		default:
+			left.AutoMemory = a
+			conflicts = append(conflicts, "autoMemoryEnabled changed since init")
+		}
+	}
+
+	for _, c := range conflicts {
+		fmt.Fprintf(env.Out, "%s, so --undo leaves it.\n", c)
+	}
+	updated := tree.encode()
+	if old == nil || bytes.Equal(old, updated) {
+		if len(conflicts) == 0 {
+			fmt.Fprintf(env.Out, "%s holds nothing that init added.\n", tilde(settings))
+		}
+		return writeInitRecord(repo, left)
+	}
+	diff, err := settingsDiff(old, updated, tilde(settings))
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(env.Out, diff)
+	if env.Confirm == nil {
+		return errors.New("undo the settings: no terminal to ask at")
+	}
+	ok, err := env.Confirm(fmt.Sprintf("Change %s as above? [y/N] ", tilde(settings)))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintf(env.Out, "%s stays as it was.\n", tilde(settings))
+		return nil
+	}
+	// The person approved the diff of the file as it was. A change meanwhile would be lost, so it stops the write.
+	if now, err := os.ReadFile(settings); err != nil || !bytes.Equal(now, old) {
+		return fmt.Errorf("%s changed while you answered, so --undo changed nothing there: run it again", tilde(settings))
+	}
+	if err := writeAtomic(settings, updated); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Out, "Removed what init added to %s.\n", tilde(settings))
+	return writeInitRecord(repo, left)
+}
+
+// parseValueJSON reads one JSON value of the record, such as the value of a setting before init.
+func parseValueJSON(s string) (*jsonNode, error) {
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	n, err := decodeNode(dec)
+	if err != nil {
+		return nil, fmt.Errorf("read a value of the record of init: %w", err)
+	}
+	return n, nil
+}
+
+// hookArg returns the argument of memcore hook in a recorded matcher group, such as session-start.
+func hookArg(entry string) string {
+	g, err := parseSettings([]byte(entry))
+	if err != nil {
+		return ""
+	}
+	if hs := g.get("hooks"); hs != nil && len(hs.items) > 0 {
+		if c := hs.items[0].get("command"); c != nil {
+			if i := strings.LastIndex(c.text, " hook "); i >= 0 {
+				return c.text[i+len(" hook "):]
+			}
+		}
+	}
+	return ""
+}
+
+// runsHook reports whether a matcher group runs memcore hook with the argument, by any path and in any form.
+func runsHook(g *jsonNode, arg string) bool {
+	if g.kind != '{' {
+		return false
+	}
+	hs := g.get("hooks")
+	if hs == nil {
+		return false
+	}
+	for _, h := range hs.items {
+		if c := h.get("command"); h.kind == '{' && c != nil && strings.Contains(c.text, "memcore") &&
+			(strings.HasSuffix(c.text, " hook "+arg) || strings.Contains(c.text, " hook "+arg+" ")) {
+			return true
+		}
+	}
+	return false
+}
+
+// ruleKey is a rule without its pattern at the end: the tool and the command, as Bash(memcore push.
+func ruleKey(rule string) string {
+	key := strings.TrimSuffix(rule, ")")
+	for _, tail := range []string{" *", ":*", "/**"} {
+		key = strings.TrimSuffix(key, tail)
+	}
+	return key
+}

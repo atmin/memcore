@@ -286,3 +286,138 @@ func TestSettingsSafety(t *testing.T) {
 		}
 	})
 }
+
+func TestUndoSettings(t *testing.T) {
+	original := "{\n  \"theme\": \"dark\"\n}\n"
+	tests := []struct {
+		name      string
+		after     func(t *testing.T, settings string) // a change of the person after init
+		want      []string                            // what the settings hold after the undo
+		wantNot   []string
+		conflicts []string
+	}{
+		{"a plain undo restores the original", nil, nil, []string{"hook", "memcore", "autoMemoryEnabled"}, nil},
+		{"a setting added after init stays", func(t *testing.T, s string) {
+			replaceT(t, s, `"theme": "dark",`, `"theme": "dark",`+"\n  \"model\": \"opus\",")
+		}, []string{`"model": "opus"`}, []string{"hook session-start", "Bash(memcore push *)"}, nil},
+		{"a changed hook and auto-memory turned back on stay", func(t *testing.T, s string) {
+			replaceT(t, s, "hook session-start\"", "hook session-start --quiet\"")
+			replaceT(t, s, `"autoMemoryEnabled": false`, `"autoMemoryEnabled": true`)
+		}, []string{"hook session-start --quiet", `"autoMemoryEnabled": true`}, []string{"hook prompt", "hook session-end"},
+			[]string{"SessionStart", "autoMemoryEnabled"}},
+		{"an addition that you removed is skipped", func(t *testing.T, s string) {
+			replaceT(t, s, `"Bash(memcore drop *)",`, ``)
+		}, nil, []string{"memcore"}, nil},
+		{"a hook with a new path is a conflict", func(t *testing.T, s string) {
+			replaceT(t, s, "'"+exe+"' hook session-start", "/usr/local/bin/memcore hook session-start")
+		}, []string{"/usr/local/bin/memcore hook session-start"}, []string{"hook prompt"}, []string{"SessionStart"}},
+		{"an edited rule is a conflict", func(t *testing.T, s string) {
+			replaceT(t, s, `"Bash(memcore push *)"`, `"Bash(memcore push:*)"`)
+		}, []string{"Bash(memcore push:*)"}, []string{"Bash(memcore drop *)"}, []string{"Bash(memcore push *)"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			settings := filepath.Join(home, ".claude", "settings.json")
+			writeT(t, filepath.Dir(settings), "settings.json", original)
+			tree, err := readSettings(settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var asked string
+			if err := applySettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, &asked)}, repo, settings, tree, claudeChanges(tree, repo, home, exe, true)); err != nil {
+				t.Fatal(err)
+			}
+			if tt.after != nil {
+				tt.after(t, settings)
+			}
+			var out strings.Builder
+			asked = ""
+			if err := undoSettings(Env{Dir: home, Out: &out, Confirm: answer(true, &asked)}, repo, settings); err != nil {
+				t.Fatalf("undo: %v\n%s", err, out.String())
+			}
+			got := readT(t, settings)
+			if tt.after == nil && got != original {
+				t.Errorf("settings =\n%s\nwant the original", got)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("settings =\n%s\nwant %q", got, w)
+				}
+			}
+			for _, w := range tt.wantNot {
+				if strings.Contains(got, w) {
+					t.Errorf("settings =\n%s\nwant no %q", got, w)
+				}
+			}
+			for _, c := range tt.conflicts {
+				if !strings.Contains(out.String(), c) {
+					t.Errorf("output =\n%s\nwant the conflict %q named", out.String(), c)
+				}
+			}
+			if asked == "" {
+				t.Error("undo asked nothing")
+			}
+			// A second undo finds only the conflicts, and changes nothing.
+			before := readT(t, settings)
+			out.Reset()
+			if err := undoSettings(Env{Dir: home, Out: &out, Confirm: answer(true, &asked)}, repo, settings); err != nil {
+				t.Fatal(err)
+			}
+			if readT(t, settings) != before {
+				t.Error("a second undo changed the settings")
+			}
+		})
+	}
+}
+
+// replaceT replaces old with new once in a file, and fails the test when old is missing.
+func replaceT(t *testing.T, p, old, new string) {
+	t.Helper()
+	s := readT(t, p)
+	if !strings.Contains(s, old) {
+		t.Fatalf("%s holds no %q:\n%s", p, old, s)
+	}
+	if err := os.WriteFile(p, []byte(strings.Replace(s, old, new, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestUndoSettingsSafety(t *testing.T) {
+	home, repo, _ := newMemory(t)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	setup := func(t *testing.T, original string) {
+		writeT(t, filepath.Dir(settings), "settings.json", original)
+		tree, err := readSettings(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := applySettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, new(string))}, repo, settings, tree, claudeChanges(tree, repo, home, exe, true)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("containers that you had stay", func(t *testing.T) {
+		original := "{\n  \"hooks\": {},\n  \"permissions\": {\n    \"deny\": []\n  }\n}\n"
+		setup(t, original)
+		if err := undoSettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, new(string))}, repo, settings); err != nil {
+			t.Fatal(err)
+		}
+		if got := readT(t, settings); got != original {
+			t.Errorf("settings =\n%s\nwant the original, with its empty containers", got)
+		}
+	})
+
+	t.Run("a change while you answer stops the write", func(t *testing.T) {
+		setup(t, "{\n  \"theme\": \"dark\"\n}\n")
+		err := undoSettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: func(string) (bool, error) {
+			replaceT(t, settings, `"theme": "dark"`, `"theme": "light"`)
+			return true, nil
+		}}, repo, settings)
+		if err == nil || !strings.Contains(err.Error(), "changed") {
+			t.Errorf("error = %v, want a refusal of settings that changed", err)
+		}
+		if got := readT(t, settings); !strings.Contains(got, "light") || !strings.Contains(got, "hook prompt") {
+			t.Errorf("settings =\n%s\nwant your change, and the hooks still there", got)
+		}
+	})
+}
