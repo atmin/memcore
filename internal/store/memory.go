@@ -116,7 +116,7 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 		}
 		indented := strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
 		if item, ok := strings.CutPrefix(strings.TrimLeft(line, " "), "- "); ok && list != "" {
-			v, err := parseValue(item)
+			v, err := ParseValue(item)
 			if err != nil {
 				return fm, "", fmt.Errorf("frontmatter line %d: %w", n, err)
 			}
@@ -152,7 +152,7 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 			}
 			fm.Lists[key] = items
 		default:
-			v, err := parseValue(raw)
+			v, err := ParseValue(raw)
 			if err != nil {
 				return fm, "", inputErrorf("frontmatter line %d: key %q: %s", n, key, err)
 			}
@@ -176,9 +176,9 @@ func ParseFrontmatter(r io.Reader) (Frontmatter, string, error) {
 	return fm, strings.TrimLeft(body.String(), "\n"), nil
 }
 
-// parseValue reads a value: plain, double-quoted or single-quoted.
+// ParseValue reads a value: plain, double-quoted or single-quoted.
 // A plain value may hold ": " or " #", because memcore reads input leniently and writes it back canonically.
-func parseValue(raw string) (string, error) {
+func ParseValue(raw string) (string, error) {
 	if raw == "" {
 		return "", inputText("empty value")
 	}
@@ -267,7 +267,7 @@ func parseFlow(raw string) ([]string, error) {
 				continue
 			}
 		}
-		v, err := parseValue(strings.TrimSpace(inner[start:i]))
+		v, err := ParseValue(strings.TrimSpace(inner[start:i]))
 		if err != nil {
 			return nil, err
 		}

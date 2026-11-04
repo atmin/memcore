@@ -8,6 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -244,4 +247,62 @@ func resultText(content json.RawMessage) string {
 		parts = append(parts, b.Text)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// ProjectDirs returns every directory under root that Claude Code names folder: its path with each character
+// that is not a letter or a digit as -. A folder that Claude Code named after a long path, with a hash, matches none.
+func ProjectDirs(folder, root string) ([]string, error) {
+	var found []string
+	var walk func(dir string) error
+	walk = func(dir string) error {
+		enc := projectName(dir)
+		if enc == folder {
+			found = append(found, dir)
+			return nil
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return err // a folder that memcore cannot read may hide a candidate
+		}
+		for _, e := range entries {
+			next := filepath.Join(dir, e.Name())
+			if !e.IsDir() {
+				// A link to a folder counts, as the working directory of a session may sit behind one.
+				if info, err := os.Stat(next); e.Type()&fs.ModeSymlink == 0 || err != nil || !info.IsDir() {
+					continue
+				}
+			}
+			n := projectName(next)
+			if strings.HasPrefix(folder, n) && (len(folder) == len(n) || folder[len(n)] == '-') {
+				if err := walk(next); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if n := projectName(root); !strings.HasPrefix(folder, n) {
+		return nil, nil
+	}
+	if err := walk(root); err != nil {
+		return nil, fmt.Errorf("find the directory of %s: %w", folder, err)
+	}
+	return found, nil
+}
+
+// projectName names a directory the way Claude Code names its project folder. Claude Code counts
+// characters in UTF-16, so a character beyond U+FFFF becomes two hyphens.
+func projectName(dir string) string {
+	var b strings.Builder
+	for _, r := range dir {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			b.WriteString("--")
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
 }

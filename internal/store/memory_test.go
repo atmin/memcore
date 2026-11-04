@@ -197,19 +197,19 @@ func TestYAMLQuotes(t *testing.T) {
 		{`"tab\there\nline"`, "tab\there\nline"},
 	}
 	for _, tt := range tests {
-		got, err := parseValue(tt.quoted)
+		got, err := ParseValue(tt.quoted)
 		if err != nil || got != tt.want {
-			t.Errorf("parseValue(%s) = %q, %v; want %q", tt.quoted, got, err, tt.want)
+			t.Errorf("ParseValue(%s) = %q, %v; want %q", tt.quoted, got, err, tt.want)
 		}
-		back, err := parseValue(quote(got))
+		back, err := ParseValue(quote(got))
 		if err != nil || back != got {
-			t.Errorf("parseValue(quote(%q)) = %q, %v", got, back, err)
+			t.Errorf("ParseValue(quote(%q)) = %q, %v", got, back, err)
 		}
 	}
 	for _, v := range []string{"claude:abc", "a: b", "line\nbreak", "- item", " padded"} {
-		back, err := parseValue(formatValue(v))
+		back, err := ParseValue(formatValue(v))
 		if err != nil || back != v {
-			t.Errorf("parseValue(formatValue(%q)) = %q, %v", v, back, err)
+			t.Errorf("ParseValue(formatValue(%q)) = %q, %v", v, back, err)
 		}
 	}
 }
