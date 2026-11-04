@@ -47,6 +47,7 @@ var (
 type verifier struct {
 	repo       string
 	gone       []string               // paths that count as removed: files, or folders with all they hold
+	pending    []string               // paths that count as present: files of a set that is not on disk yet
 	names      map[string]bool        // the names of the memories in the repo
 	glossaries map[string][]forbidden // the forbidden words of each glossary, by its path
 }
@@ -149,6 +150,31 @@ func VerifyContent(repo, p string, content []byte) (Report, error) {
 		return Report{}, err
 	}
 	return v.check(path.Clean(p), content)
+}
+
+// VerifySet checks documents that are not on disk yet as one set, by their paths relative to repo.
+// Each document sees the repo and the others, so a link or a [[name]] to another document of the set holds.
+func VerifySet(repo string, files map[string][]byte) (map[string]Report, error) {
+	v, err := newVerifier(repo)
+	if err != nil {
+		return nil, err
+	}
+	for p := range files {
+		p = path.Clean(p)
+		v.pending = append(v.pending, p)
+		if store.IsMemory(p) {
+			v.names[strings.TrimSuffix(path.Base(p), ".md")] = true
+		}
+	}
+	reports := map[string]Report{}
+	for p, content := range files {
+		r, err := v.check(path.Clean(p), content)
+		if err != nil {
+			return nil, err
+		}
+		reports[p] = r
+	}
+	return reports, nil
 }
 
 // Verify checks one document, or every markdown document under a path relative to repo.
@@ -342,8 +368,16 @@ func (v *verifier) deadLink(p, target string) bool {
 	if strings.HasPrefix(t, "/") {
 		full = filepath.Join(v.repo, filepath.FromSlash(t))
 	}
-	if rel, err := filepath.Rel(v.repo, full); err == nil && v.isGone(filepath.ToSlash(rel)) {
-		return true
+	if rel, err := filepath.Rel(v.repo, full); err == nil {
+		rel = filepath.ToSlash(rel)
+		if v.isGone(rel) {
+			return true
+		}
+		for _, p := range v.pending {
+			if p == rel || strings.HasPrefix(p, rel+"/") {
+				return false
+			}
+		}
 	}
 	_, err := os.Stat(full)
 	return err != nil

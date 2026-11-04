@@ -355,10 +355,13 @@ func writeSnapshotState(repo string, state snapshotState) error {
 	return nil
 }
 
-// count writes a number with its noun, as "1 transcript" or "2 transcripts".
+// count writes a number with its noun, as "1 transcript", "2 transcripts" or "2 memories".
 func count(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun
+	}
+	if stem, ok := strings.CutSuffix(noun, "y"); ok {
+		return fmt.Sprintf("%d %sies", n, stem)
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
 }

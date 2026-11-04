@@ -110,3 +110,24 @@ func TestVerify(t *testing.T) {
 		t.Error("absent path: no error")
 	}
 }
+
+func TestVerifySet(t *testing.T) {
+	repo := t.TempDir()
+	writeT(t, repo, "dev/glossary.md", "# Glossary\n\n- **memory**: one fact. Not: memo.\n")
+	files := map[string][]byte{
+		"dev/memories/a.md": []byte("---\nname: a\ndescription: \"Read when you test.\"\n---\n\nSee [[b]] and [b](b.md) and [the folder](../memories/).\n"),
+		"dev/memories/b.md": []byte("---\nname: b\ndescription: \"Read when you test.\"\n---\n\nSee [[a]].\n"),
+		"dev/memories/c.md": []byte("---\nname: c\ndescription: \"Read when you test.\"\n---\n\nSee [[z]], [z](z.md), and a memo.\n"),
+	}
+	reports, err := VerifySet(repo, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"dev/memories/a.md", "dev/memories/b.md"} {
+		if len(reports[p].Faults) != 0 {
+			t.Errorf("%s: faults %v, want none: the set holds its links", p, reports[p].Faults)
+		}
+	}
+	check(t, "a dead link, a dead reference and a forbidden word", reports["dev/memories/c.md"].Faults,
+		[]string{"dead link", "dead reference [[z]]", "forbidden word"})
+}
