@@ -186,7 +186,9 @@ func runHelp(env Env, args []string) error {
 		}
 	}
 	for _, c := range Table() {
-		fmt.Fprintf(env.Out, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+		if !c.Hidden {
+			fmt.Fprintf(env.Out, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+		}
 	}
 	fmt.Fprintln(env.Out, "\nmemcore help <command> shows the input of a command, with an example.")
 	if len(args) == 1 {

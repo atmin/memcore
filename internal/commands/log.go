@@ -35,7 +35,10 @@ type Event struct {
 	Reason   string         `json:"reason,omitempty"`
 	Folded   []string       `json:"folded,omitempty"`
 	Pushed   []string       `json:"pushed,omitempty"`
-	Words    map[string]int `json:"words,omitempty"` // the words that orient printed: the header, then each level
+	Words    map[string]int `json:"words,omitempty"`  // the words that orient printed: the header, then each level
+	Dir      string         `json:"dir,omitempty"`    // the directory of a hook, as ~/<path>
+	Source   string         `json:"source,omitempty"` // the source of a session start: startup, resume, clear, compact or fork
+	Marks    []string       `json:"marks,omitempty"`  // the marks of a prompt; no field holds the prompt
 
 	inputs  []string // text from standard input, which redact removes from the error
 	started bool     // the command started a snapshot itself, so Run starts no second one

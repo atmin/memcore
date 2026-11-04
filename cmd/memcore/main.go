@@ -37,6 +37,8 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: memcore <command> [arguments]")
 	for _, c := range commands.Table() {
-		fmt.Fprintf(os.Stderr, "  %-18s %s\n", c.Name+" "+c.Args, c.Does)
+		if !c.Hidden {
+			fmt.Fprintf(os.Stderr, "  %-18s %s\n", c.Name+" "+c.Args, c.Does)
+		}
 	}
 }

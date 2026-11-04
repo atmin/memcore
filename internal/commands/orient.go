@@ -42,6 +42,9 @@ func runOrient(env Env, args []string) error {
 	fmt.Fprintln(&w)
 	var yours []string
 	for _, c := range Table() {
+		if c.Hidden {
+			continue
+		}
 		fmt.Fprintf(&w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
 		if c.Yours {
 			yours = append(yours, c.Name)

@@ -22,12 +22,13 @@ type Env struct {
 
 // Command is one row of the command table.
 type Command struct {
-	Name  string
-	Args  string
-	Does  string
-	Yours bool   // only the person runs it
-	Help  string // the input and the format, with one minimal valid input; see help.go
-	Run   func(env Env, args []string) error
+	Name   string
+	Args   string
+	Does   string
+	Yours  bool   // only the person runs it
+	Hidden bool   // only a hook of an agent runs it, so orient, help and the usage leave it out
+	Help   string // the input and the format, with one minimal valid input; see help.go
+	Run    func(env Env, args []string) error
 }
 
 // Table returns the commands in the order that the usage and orient print them.
@@ -45,6 +46,7 @@ func Table() []Command {
 		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},
 		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},
 		{Name: "drop", Args: "<commit> [--reason <text>]", Does: "Removes a commit of the review queue, with its fixups, after the person confirms.", Yours: true, Run: runDrop},
+		{Name: "hook", Args: "session-start|prompt|session-end", Does: "Runs a hook of Claude Code, with the hook input on standard input.", Hidden: true, Run: runHook},
 		{Name: "help", Args: "[<command>]", Does: "Shows the input of a command, with an example.", Run: runHelp},
 		{Name: "init", Args: "<remote>", Does: "Creates the memory repo, ~/memory or $MEMCORE_REPO, when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
 	}
