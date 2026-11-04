@@ -40,6 +40,7 @@ func Table() []Command {
 		{Name: "forget", Args: "<path or name> --reason <text>", Does: "Removes a document, or the folder of a skill, and commits the removal with the reason.", Run: runForget},
 		{Name: "draft", Args: "<kind> [<topic>]", Does: "Starts a plan, a note, a script, a helper, a skill, a conventions file or a glossary from its template, and commits it.", Run: runDraft},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
+		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits, which wait for the review of the person.", Run: runInbox},
 		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},
 		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},
@@ -71,6 +72,18 @@ func memoryRepo() (string, error) {
 		return "", err
 	}
 	return filepath.Join(h, "memory"), nil
+}
+
+// claudeDir returns the folder of Claude Code: $CLAUDE_CONFIG_DIR when it is set, and ~/.claude otherwise.
+func claudeDir() (string, error) {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return filepath.Clean(d), nil
+	}
+	h, err := home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, ".claude"), nil
 }
 
 // tilde writes a path under home with ~ in front, for a message.

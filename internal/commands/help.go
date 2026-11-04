@@ -116,6 +116,14 @@ words, and warns on a description that names no moment to read. For example:
 
   memcore verify dev/memories/tests-before-code.md
 `,
+	"snapshot": `memcore snapshot [--from <dir>]
+
+Takes no input. It commits the new transcripts of Claude Code to the transcripts branch of
+the memory repo, trimmed to the conversation and redacted. memcore never pushes that branch.
+--from reads another folder in the layout of ~/.claude/projects, such as an old copy:
+
+  memcore snapshot --from ~/old-projects
+`,
 	"inbox": `memcore inbox
 
 Takes no input. It fetches, then lists the unpushed commits, which wait for the review

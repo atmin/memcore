@@ -26,7 +26,16 @@ func TestMain(m *testing.M) {
 	os.Unsetenv("CLAUDECODE")
 	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
 	os.Unsetenv("MEMCORE_REPO")
-	os.Exit(m.Run())
+	// No test reads or writes the Claude Code folder of the machine.
+	os.Unsetenv("CLAUDE_CONFIG_DIR")
+	empty, err := os.MkdirTemp("", "memcore-home-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", empty)
+	code := m.Run()
+	os.RemoveAll(empty)
+	os.Exit(code)
 }
 
 // run runs one command in dir and returns what it printed, standard output and standard error together.

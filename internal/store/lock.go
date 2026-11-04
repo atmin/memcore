@@ -20,10 +20,15 @@ func StateDir(repo string) string {
 // Lock takes the write lock of the memory repo, an exclusive flock on .git/memcore/lock.
 // It retries for ten seconds, and returns the function that releases the lock.
 func Lock(repo string) (func(), error) {
+	return LockFile(repo, "lock")
+}
+
+// LockFile takes an exclusive flock on a named file of the local state, such as snapshot.lock, like Lock.
+func LockFile(repo, name string) (func(), error) {
 	if err := os.MkdirAll(StateDir(repo), 0o755); err != nil {
 		return nil, fmt.Errorf("create the local state: %w", err)
 	}
-	path := filepath.Join(StateDir(repo), "lock")
+	path := filepath.Join(StateDir(repo), name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open the write lock: %w", err)

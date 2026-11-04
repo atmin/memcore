@@ -29,6 +29,17 @@ func Git(dir string, args ...string) (string, error) {
 
 // GitStdin runs the installed git in dir with stdin as its standard input, like Git.
 func GitStdin(dir, stdin string, args ...string) (string, error) {
+	return git(dir, stdin, nil, args...)
+}
+
+// GitIndex runs the installed git in dir with index as its index file, like GitStdin.
+// It builds a tree apart from the index of the repo, as a snapshot does.
+func GitIndex(dir, index, stdin string, args ...string) (string, error) {
+	return git(dir, stdin, []string{"GIT_INDEX_FILE=" + index}, args...)
+}
+
+// git runs the installed git without the variables that point it away from dir, then with env.
+func git(dir, stdin string, env []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = dir
@@ -37,7 +48,7 @@ func GitStdin(dir, stdin string, args ...string) (string, error) {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
-	cmd.Env = append(cmd.Env, "LC_ALL=C")
+	cmd.Env = append(append(cmd.Env, env...), "LC_ALL=C")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
