@@ -48,7 +48,7 @@ func Table() []Command {
 		{Name: "drop", Args: "<commit> [--reason <text>]", Does: "Removes a commit of the review queue, with its fixups, after the person confirms.", Yours: true, Run: runDrop},
 		{Name: "hook", Args: "session-start|prompt|session-end", Does: "Runs a hook of Claude Code, with the hook input on standard input.", Hidden: true, Run: runHook},
 		{Name: "help", Args: "[<command>]", Does: "Shows the input of a command, with an example.", Run: runHelp},
-		{Name: "init", Args: "<remote>", Does: "Creates the memory repo, ~/memory or $MEMCORE_REPO, when the remote is empty, and clones the remote otherwise.", Yours: true, Run: runInit},
+		{Name: "init", Args: "[--dry-run] <remote> | --undo", Does: "Sets up the memory repo, ~/memory or $MEMCORE_REPO, and Claude Code: its transcripts, its auto-memory, its hooks and its permissions.", Yours: true, Run: runInit},
 	}
 }
 

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -206,6 +207,135 @@ func TestInit(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(home, "memory", ".git")); err == nil {
 			t.Error("init created .git in a foreign directory")
+		}
+	})
+}
+
+// fakeMemcore puts an executable named memcore first on PATH, and returns its path.
+func fakeMemcore(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	writeT(t, bin, "memcore", "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(bin, "memcore"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return filepath.Join(bin, "memcore")
+}
+
+// claudeHome makes a home with a Claude Code folder: settings, and one project with one memory.
+func claudeHome(t *testing.T) (home, settings string) {
+	t.Helper()
+	home = newHome(t)
+	settings = filepath.Join(home, ".claude", "settings.json")
+	writeT(t, filepath.Dir(settings), "settings.json", "{\n  \"theme\": \"dark\"\n}\n")
+	shop := mkdirT(t, filepath.Join(home, "dev", "shop"))
+	autoMemory(t, filepath.Join(home, ".claude"), shop, "fact.md", flat("shop-fact", "Read when you test the shop.", "user", "A fact."))
+	return home, settings
+}
+
+func TestInitClaude(t *testing.T) {
+	t.Run("a home without Claude Code", func(t *testing.T) {
+		home := newHome(t)
+		out, err := run(t, home, "", "init", bareRemote(t))
+		if err != nil || !strings.Contains(out, "No Claude Code folder") {
+			t.Errorf("init: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("--dry-run without MEMCORE_REPO", func(t *testing.T) {
+		home, _ := claudeHome(t)
+		if _, err := run(t, home, "", "init", "--dry-run", bareRemote(t)); err == nil || !strings.Contains(err.Error(), "MEMCORE_REPO") {
+			t.Errorf("error = %v, want a refusal that names MEMCORE_REPO", err)
+		}
+	})
+
+	t.Run("--dry-run changes no setting and prints the diff", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		exe := fakeMemcore(t)
+		repo := filepath.Join(t.TempDir(), "memory")
+		t.Setenv("MEMCORE_REPO", repo)
+		before := readT(t, settings)
+		out, err := runWith(t, Env{Dir: home, Confirm: func(string) (bool, error) { t.Error("--dry-run asked"); return false, nil }}, "init", "--dry-run", bareRemote(t))
+		if err != nil {
+			t.Fatalf("init --dry-run: %v\n%s", err, out)
+		}
+		if got := readT(t, settings); got != before {
+			t.Errorf("settings =\n%s\nwant them byte for byte", got)
+		}
+		if !strings.Contains(out, "+") || !strings.Contains(out, "'"+exe+"' hook session-start") {
+			t.Errorf("output =\n%s\nwant the diff of the settings", out)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "shop", "memories", "shop-fact.md")); err != nil {
+			t.Errorf("the dry run did not import into MEMCORE_REPO: %v", err)
+		}
+	})
+
+	t.Run("memcore missing from PATH stops before the settings", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		git, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", filepath.Dir(git))
+		before := readT(t, settings)
+		if _, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t)); err == nil || !strings.Contains(err.Error(), "PATH") {
+			t.Errorf("error = %v, want one that names PATH", err)
+		}
+		if got := readT(t, settings); got != before {
+			t.Error("init changed the settings without memcore on PATH")
+		}
+	})
+
+	t.Run("an agent may only rehearse", func(t *testing.T) {
+		home, _ := claudeHome(t)
+		fakeMemcore(t)
+		t.Setenv("CLAUDECODE", "1")
+		if _, err := run(t, home, "", "init", bareRemote(t)); err == nil || !strings.Contains(err.Error(), "CLAUDECODE") {
+			t.Errorf("init by an agent: error = %v, want a refusal", err)
+		}
+		if _, err := os.Stat(filepath.Join(home, "memory")); err == nil {
+			t.Error("the refused init made the memory repo")
+		}
+		if _, err := run(t, home, "", "init", "--undo"); err == nil || !strings.Contains(err.Error(), "CLAUDECODE") {
+			t.Errorf("init --undo by an agent: error = %v, want a refusal", err)
+		}
+		t.Setenv("MEMCORE_REPO", filepath.Join(t.TempDir(), "memory"))
+		if out, err := run(t, home, "", "init", "--dry-run", bareRemote(t)); err != nil {
+			t.Errorf("init --dry-run by an agent: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("init ends with the report of inbox", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		fakeMemcore(t)
+		out, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t))
+		if err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "The review queue holds") || !strings.Contains(out, "init: import the auto-memory of ~/dev/shop") {
+			t.Errorf("output =\n%s\nwant the report of inbox", out)
+		}
+		if got := readT(t, settings); !strings.Contains(got, `"autoMemoryEnabled": false`) {
+			t.Errorf("settings =\n%s\nwant auto-memory off after a complete import", got)
+		}
+	})
+
+	t.Run("--dry-run links no script of the remote", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		if out, err := run(t, dev, "", "draft", "script", "hello", "--description", "Run when you greet."); err != nil {
+			t.Fatalf("draft: %v\n%s", err, out)
+		}
+		gitT(t, repo, "push", "-q", "origin", "main")
+		writeT(t, filepath.Join(home, ".claude"), "settings.json", "{}\n")
+		fakeMemcore(t)
+		t.Setenv("MEMCORE_REPO", filepath.Join(t.TempDir(), "memory"))
+		if out, err := run(t, home, "", "init", "--dry-run", remote); err != nil {
+			t.Fatalf("init --dry-run: %v\n%s", err, out)
+		}
+		if _, err := os.Lstat(filepath.Join(home, ".local", "bin", "hello")); err == nil {
+			t.Error("the dry run linked a script")
 		}
 	})
 }

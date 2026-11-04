@@ -155,10 +155,17 @@ Lists the commands, or shows the input of one command, with an example. For exam
 
   memcore help remember
 `,
-	"init": `memcore init <remote>
+	"init": `memcore init [--dry-run] <remote>
+memcore init --undo
 
-Only the person runs it. It creates the memory repo when the remote is empty, and clones
-the remote otherwise. For example:
+Only the person runs it, at a terminal. It creates the memory repo when the remote is empty,
+and clones the remote otherwise. With Claude Code, it then snapshots the transcripts, imports
+auto-memory, and adds the hooks and the permissions to ~/.claude/settings.json, after it shows
+the diff and asks. It ends with the report of inbox. A second run adds only what is new.
+
+--dry-run builds the memory repo at MEMCORE_REPO, and prints the change of the settings
+without making it. An agent may run it. --undo removes what init added to the settings.
+For example:
 
   memcore init git@example.com:you/memory.git
 `,

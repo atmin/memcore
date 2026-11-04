@@ -12,3 +12,14 @@ func TestConfirmRefusesAnAgent(t *testing.T) {
 		t.Errorf("Confirm = %v, %v; want a refusal that names CLAUDECODE", ok, err)
 	}
 }
+
+func TestAgent(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	if err := Agent(); err != nil {
+		t.Errorf("Agent without CLAUDECODE = %v, want nil", err)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	if err := Agent(); err == nil || !strings.Contains(err.Error(), "CLAUDECODE") {
+		t.Errorf("Agent = %v, want a refusal that names CLAUDECODE", err)
+	}
+}
