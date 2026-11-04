@@ -16,3 +16,5 @@ The structure emerges in three steps:
 3. **Placement.** Sleep places each candidate by co-occurrence, with the same rule as [promotion](sleep.md).
 
 The first review starts with the ten corrections that you repeated most, each with the quote behind it. The rest waits in the review queue.
+
+Today `init` does the parts of onboarding that need no agent. It snapshots the transcripts, and imports the auto-memory of Claude Code. Each file of auto-memory becomes a memory at the level of its project, and keeps its session. `MEMORY.md` is only the index of those files, so `init` skips it, with any fact that it holds alone. A fact that two projects hold stays twice, at each project, until a sleep pass promotes it. The first sleep pass over the snapshots waits for sleep.

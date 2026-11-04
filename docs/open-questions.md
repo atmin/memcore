@@ -1,7 +1,6 @@
 # Open questions
 
 - **Capture.** Should `remember` run only when the agent decides, or should a hook capture every correction and leave the sorting to sleep?
-- **Built-in memory.** Agents with memory of their own, such as Claude Code's auto-memory, keep writing to it. Should `init` turn it off, or should sleep import from it?
 - **Disclosure.** Which of these ideas keep every hop small?
   - A split on overflow, like a b-tree node: when a level passes its budget, documents move into a subfolder and the parent keeps one line for it.
   - A fixed token budget for `orient`.

@@ -12,7 +12,7 @@ The intended remote is a future gitmote. It is serverless, lives in object stora
 - Only you push, and only you purge.
 - You drop a commit of the queue with `memcore drop`, at your terminal, and the drop keeps your reason.
 
-Each commit of memcore names its command and its path, as `remember: dev/memories/tests-before-code.md`. The commands that commit are `remember`, `revise`, `forget` and `draft`. `push` adds `index: <path>` for an index that a hand edit left stale. The body of a `revise` or a `forget` holds its reason. A fixup is `fixup! <subject of its target>`, with its command, its path and its reason in the body. The first commit of a new memory repo is `init: create the memory repo`.
+Each commit of memcore names its command and its path, as `remember: dev/memories/tests-before-code.md`. The commands that commit are `remember`, `revise`, `forget` and `draft`. `push` adds `index: <path>` for an index that a hand edit left stale. The body of a `revise` or a `forget` holds its reason. A fixup is `fixup! <subject of its target>`, with its command, its path and its reason in the body. The first commit of a new memory repo is `init: create the memory repo`. `init` commits each import of auto-memory as `init: import the auto-memory of <dir>`. A snapshot commits to the transcripts branch as `snapshot: <n> transcripts`, never to `main`.
 
 **Fold.** `push` folds the queue with one interactive rebase, and never rewrites the accepted history. A fixup folds into the nearest earlier commit with its subject. A chain that leaves every document as it found it, such as a remember and its forget, goes whole. Indexes are generated, so the fold writes each index again after each commit. A conflict in any other document stops the fold and leaves the queue as it was.
 
@@ -29,7 +29,7 @@ An agent runs as you, so nothing on your machine can stop it from calling `push`
 
 `push` and `purge` sign with that key, so they need you at the keyboard, whoever starts them. You push in bulk at review time, so you type or touch once per review. A background fetch cannot wait for you, so the memory repo also has a read-only credential, which memcore may cache. `inbox` shows which guard protects the remote.
 
-Two more guards stop an agent's mistakes earlier, and you do not rely on them. memcore refuses `push` and `purge` when it finds no controlling terminal or sees the variables that agents set. `init` denies both commands in the agent's permissions where it can. Where the host can forbid force pushes, keep that protection on. Lift it for a purge in the host's own interface.
+Two more guards stop an agent's mistakes earlier, and you do not rely on them. memcore refuses `push` and `purge` when it finds no controlling terminal or sees the variables that agents set. `init` denies `push` in the permissions of Claude Code, with `drop` and `recover`. Where the host can forbid force pushes, keep that protection on. Lift it for a purge in the host's own interface.
 
 ## Purge
 

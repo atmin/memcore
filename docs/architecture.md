@@ -6,7 +6,7 @@ memcore is one Go executable. It runs the installed git and the agent that you a
 
 1. **Commands.** The `memcore` command line. Its output, such as the output of `orient`, is plain text that an agent reads.
 2. **Store.** The memory repo, its indexes and the transcripts branch. memcore changes the store only through the installed git.
-3. **Readers.** One adapter for each agent's transcript format, such as the JSONL files of Claude Code. Each adapter converts its format into one trimmed conversation format.
+3. **Readers.** One adapter for each agent's transcript format, such as the JSONL files of Claude Code. Each adapter converts its format into one trimmed conversation format. The readers also read the auto-memory of Claude Code, and find the directory behind each of its project folders.
 4. **Thinking.** Extraction, merges, promotions and contradiction checks. memcore runs your agent headless for this work, for example with `claude -p` or `codex exec`.
 5. **Guards.** Redaction, `verify`, the write lock, and the confirmation and the key behind `push` and `purge`.
 
@@ -39,5 +39,8 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
   - the use log, `log.jsonl`, with one line per command and no standard input;
   - the checkout of the accepted history, a worktree of the remote-tracking branch;
   - the marker of a remote that lost accepted commits;
-  - the time of the last snapshot.
+  - the state of snapshots, `snapshot.json`, with the time of the last one, and the private index of the transcripts branch;
+  - the record of the import of auto-memory, `import.json`, with the outcome of each file;
+  - the record of what `init` added to the settings of Claude Code, `init.json`, and a copy of each original file;
+  - the log of background work, `background.log`.
 - memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. memcore never pushes these refs.

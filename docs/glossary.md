@@ -16,6 +16,8 @@ The docs use each term below with one meaning only.
 - **session**: one run of an agent, from its start to its exit.
 - **transcript**: the record of one session.
 - **snapshot**: a commit of new transcripts to the transcripts branch.
+- **hook**: a command that an agent runs at a point of a session, such as its start. `init` adds the hooks of memcore to Claude Code.
+- **mark**: a word that you add to a prompt, `#again`, `#wrong` or `#stale`, to say that memory failed you.
 - **sleep pass**: one run of sleep, the consolidation that keeps memory lean.
 - **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch.
 - **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
