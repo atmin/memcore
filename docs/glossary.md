@@ -26,3 +26,4 @@ The docs use each term below with one meaning only.
 - **use log**: the local record of every command of memcore, under `.git/memcore/`, which memcore never commits.
 - **purge**: the removal of content from every commit of the memory repo, which only you run.
 - **promotion**: the move of a document up one level.
+- **milestone**: a stage of the [roadmap](roadmap.md), from M1 to M5, that ends in a state you can use.

@@ -32,6 +32,7 @@ These docs are the design of memcore. An agent that uses memcore loads none of t
 - [Transcripts](docs/transcripts.md): read when you work with transcripts. It covers what a snapshot keeps and how memcore redacts it.
 - [Onboarding](docs/onboarding.md): read when you start from an empty memory repo. It covers the sources and how the structure emerges.
 - [Prior art](docs/prior-art.md): read when you compare memcore with other tools. It covers what exists and what memcore adds.
+- [Roadmap](docs/roadmap.md): read when you plan the next change to memcore. It covers the milestones and their order.
 - [Open questions](docs/open-questions.md): read when you make a decision. It lists what is still open.
 
 ## Skills
