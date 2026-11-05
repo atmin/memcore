@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Use when the person asks for a plan, or before a change that needs more than one commit. It turns a task into small, testable steps that an agent with no context can build.
+description: Use when the person asks for a plan, or before a change of several commits. It writes testable steps for a builder with no context.
 ---
 
 # Plan

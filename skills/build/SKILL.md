@@ -1,6 +1,6 @@
 ---
 name: build
-description: Use when the person hands over an approved plan. It builds every step in a git worktree, with one commit and one review per step, and stops when the work is ready for review.
+description: Use when the person hands over an approved plan. It builds each step in a worktree, with one commit and one review per step.
 ---
 
 # Build
