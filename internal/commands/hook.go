@@ -18,10 +18,12 @@ import (
 type hookInput struct {
 	SessionID string    `json:"session_id"`
 	Cwd       string    `json:"cwd"`
+	Event     string    `json:"hook_event_name"`
 	Source    string    `json:"source"`
 	Prompt    string    `json:"prompt"`
 	ToolName  string    `json:"tool_name"`
 	ToolInput toolInput `json:"tool_input"`
+	Error     string    `json:"error"` // the error of a failed tool call, of which only the start counts
 }
 
 // toolInput holds the fields of a tool call that name what the call reads: the command of Bash,
@@ -45,10 +47,10 @@ var markLines = map[string]string{
 	"stale": "The person marked #stale: a memory is out of date. Find it with memcore orient or memcore show, then revise it or forget it.",
 }
 
-// runHook runs a hook of Claude Code: session-start, prompt or session-end. It reads the hook input on standard input.
+// runHook runs a hook of Claude Code: session-start, prompt, session-end or tool. It reads the hook input on standard input.
 func runHook(env Env, args []string) error {
-	if len(args) != 1 || !slices.Contains([]string{"session-start", "prompt", "session-end"}, args[0]) {
-		return usageErr("usage: memcore hook session-start|prompt|session-end < input.json")
+	if len(args) != 1 || !slices.Contains([]string{"session-start", "prompt", "session-end", "tool"}, args[0]) {
+		return usageErr("usage: memcore hook session-start|prompt|session-end|tool < input.json")
 	}
 	env.event().Hook = args[0]
 	raw, err := io.ReadAll(env.In)
@@ -63,6 +65,9 @@ func runHook(env Env, args []string) error {
 	e := env.event()
 	if in.SessionID != "" {
 		e.Session, e.Agent = in.SessionID, "claude"
+	}
+	if args[0] == "tool" {
+		return hookTool(e, in)
 	}
 	if in.Cwd != "" {
 		env.Dir = in.Cwd
@@ -102,6 +107,44 @@ func runHook(env Env, args []string) error {
 		e.started = true
 		return startBackground(repo, "snapshot")
 	}
+}
+
+// hookTool logs the documents that a tool call read. A call that read none is quiet, so Run logs nothing
+// and starts no process for it. The level of cwd costs a git process, so only a call that read a document looks it up.
+func hookTool(e *Event, in hookInput) error {
+	repo, err := memoryRepo()
+	if err != nil {
+		return err
+	}
+	h, _ := home() // without a home, ~ and $HOME name nothing
+	if ran(in) {
+		e.Paths = toolReads(in, repo, h)
+	}
+	if len(e.Paths) == 0 {
+		e.quiet = true
+		return nil
+	}
+	if in.Cwd != "" {
+		e.Dir = tilde(in.Cwd)
+	}
+	if in.Cwd != "" && h != "" {
+		if level, err := store.Level(in.Cwd, h); err == nil {
+			e.Level = title(level)
+		}
+	}
+	return nil
+}
+
+// ran reports whether a tool call ran, so that it read what it names: any call after PostToolUse,
+// and a Bash call after PostToolUseFailure whose command ran and exited.
+func ran(in hookInput) bool {
+	switch in.Event {
+	case "PostToolUse":
+		return true
+	case "PostToolUseFailure":
+		return in.ToolName == "Bash" && strings.HasPrefix(in.Error, "Exit code ")
+	}
+	return false
 }
 
 // findMarks returns the marks in a prompt. A mark stands as a whole word: no letter, digit or underscore

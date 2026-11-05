@@ -27,7 +27,7 @@ type Event struct {
 	Accepted string         `json:"accepted,omitempty"` // the accepted commit then, which serves skills and the voice
 	Level    string         `json:"level,omitempty"`    // the level of the working directory, as ~ or ~/<level>
 	Command  string         `json:"command"`
-	Hook     string         `json:"hook,omitempty"` // the argument of memcore hook: session-start, prompt or session-end
+	Hook     string         `json:"hook,omitempty"` // the argument of memcore hook: session-start, prompt, session-end or tool
 	Paths    []string       `json:"paths,omitempty"`
 	Outcome  string         `json:"outcome"` // ok or error
 	Error    string         `json:"error,omitempty"`
@@ -44,6 +44,14 @@ type Event struct {
 
 	inputs  []string // text from standard input, which redact removes from the error
 	started bool     // the command started a snapshot itself, so Run starts no second one
+	quiet   bool     // a tool call read no document, so Run logs nothing
+}
+
+// Late reports whether a call is hook tool, which runs after every tool call of an agent. Run finds its level and
+// its commits after the command, and only when it logs a line. Run returns no error for it and prints no warning,
+// so the agent never sees it.
+func Late(name string, args []string) bool {
+	return name == "hook" && len(args) == 1 && args[0] == "tool"
 }
 
 // Run runs one command of the table, then appends its event to the use log of the memory repo.
@@ -60,14 +68,10 @@ func Run(env Env, name string, args []string) error {
 	if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
 		e.Session, e.Agent = id, "claude"
 	}
-	if h, err := home(); err == nil {
-		if level, err := store.Level(env.Dir, h); err == nil {
-			e.Level = title(level)
-		}
-	}
 	repo, rerr := memoryRepo()
-	if rerr == nil {
-		e.Commit, e.Accepted = headCommit(repo), acceptedCommit(repo)
+	late := Late(name, args)
+	if !late {
+		locate(e, env.Dir, repo, rerr == nil)
 	}
 	env.Event = e
 	var err error
@@ -82,6 +86,15 @@ func Run(env Env, name string, args []string) error {
 	if isInput(err) {
 		err = fmt.Errorf("%w; memcore help %s shows the input", err, name)
 	}
+	warnings := env.Err
+	if late {
+		if e.quiet || rerr != nil {
+			return nil // nothing to log
+		}
+		// A read changes no commit, so the commits after the command equal the commits before it.
+		locate(e, env.Dir, repo, rerr == nil)
+		warnings = io.Discard
+	}
 	e.Time = time.Now().UTC().Format(time.RFC3339)
 	e.Outcome = "ok"
 	if err != nil {
@@ -92,18 +105,35 @@ func Run(env Env, name string, args []string) error {
 			e.Commit = headCommit(repo) // init made the first commit
 		}
 		if lerr := appendEvent(repo, e); lerr != nil {
-			fmt.Fprintf(env.Err, "warning: %v\n", lerr)
+			fmt.Fprintf(warnings, "warning: %v\n", lerr)
 		}
 		if kerr := keep(repo, e); kerr != nil {
-			fmt.Fprintf(env.Err, "warning: %v\n", kerr)
+			fmt.Fprintf(warnings, "warning: %v\n", kerr)
 		}
 		if _, serr := os.Stat(filepath.Join(repo, ".git")); serr == nil {
 			if berr := autoSnapshot(repo, name, e.started); berr != nil {
-				fmt.Fprintf(env.Err, "warning: %v\n", berr)
+				fmt.Fprintf(warnings, "warning: %v\n", berr)
 			}
 		}
 	}
+	if late {
+		return nil
+	}
 	return err
+}
+
+// locate fills the level of the working directory, when the event has none, and the commits of the memory repo.
+func locate(e *Event, dir, repo string, hasRepo bool) {
+	if e.Level == "" {
+		if h, err := home(); err == nil {
+			if level, err := store.Level(dir, h); err == nil {
+				e.Level = title(level)
+			}
+		}
+	}
+	if hasRepo {
+		e.Commit, e.Accepted = headCommit(repo), acceptedCommit(repo)
+	}
 }
 
 // title writes a level as orient titles it: ~ for the root, ~/<level> otherwise.
