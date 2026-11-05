@@ -126,7 +126,8 @@ the memory repo, trimmed to the conversation and redacted. memcore never pushes 
 `,
 	"inbox": `memcore inbox
 
-Takes no input. It fetches, then lists the unpushed commits, which wait for the review
+Takes no input. It fetches, then prints a summary of the newest week in three lines, as
+memcore stats measures it. Then it lists the unpushed commits, which wait for the review
 of the person.
 `,
 	"stats": `memcore stats

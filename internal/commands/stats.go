@@ -138,6 +138,31 @@ func runStats(env Env, args []string) error {
 	return nil
 }
 
+// summary returns the three lines of week 0 that start inbox: use and context cost, review, friction and marks.
+// A log without a line in week 0 gives zeros.
+func summary(repo string, now time.Time) (string, error) {
+	events, _, err := readLog(repo)
+	if err != nil {
+		return "", err
+	}
+	facts, _, err := commitFacts(repo, loggedCommits(events))
+	if err != nil {
+		return "", err
+	}
+	w := week{end: now}
+	if weeks := measure(events, facts, now); len(weeks) > 0 {
+		w = weeks[0]
+	}
+	r := w.review
+	var b strings.Builder
+	fmt.Fprintf(&b, "This week: %s, %.1f reads per session, %s around memcore, about %s of orient per session.\n",
+		plural(w.sessions, "session"), w.perSession(), plural(w.around, "read"), plural(tokens(w.words), "token"))
+	fmt.Fprintf(&b, "Review: %s pushed, %d dropped. %s\n", plural(r.pushed, "commit"), r.dropped, acceptedText(r, true))
+	fmt.Fprintf(&b, "Friction: %s. Marks: %d #again, %d #wrong, %d #stale. memcore stats shows more.\n",
+		plural(w.failed, "failed call"), w.marks[0], w.marks[1], w.marks[2])
+	return b.String(), nil
+}
+
 // readLog returns the events of the use log, in the order of the file, and the count of the lines that do not
 // parse: a line that is not an event, a blank line included, or whose time is not RFC 3339. A missing log holds no event.
 func readLog(repo string) ([]Event, int, error) {
@@ -647,16 +672,13 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	r := w.review
 	fmt.Fprintf(b, "  Review: %s created, %s. %d pushed, %d dropped, %s.\n",
 		plural(r.created, "commit"), ofThem(r.createdFixups), r.pushed, r.dropped, ofThem(r.droppedFixups))
-	if r.accepted == 0 {
-		b.WriteString("  Accepted memories: 0.\n")
-	} else {
-		soFar := ""
-		if time.Duration(k)*weekLength < mistakeWindow {
-			soFar = " so far" // a push of this week may still gain mistakes
-		}
+	// A push of weeks 0 and 1 may still gain mistakes.
+	fmt.Fprintf(b, "  %s", acceptedText(r, time.Duration(k)*weekLength < mistakeWindow))
+	if r.accepted > 0 {
 		precision := int(math.Round(float64(r.accepted-r.mistakes) * 100 / float64(r.accepted)))
-		fmt.Fprintf(b, "  Accepted memories: %d, with %s%s. Precision: %d%%.\n", r.accepted, plural(r.mistakes, "mistake"), soFar, precision)
+		fmt.Fprintf(b, " Precision: %d%%.", precision)
 	}
+	b.WriteString("\n")
 	switch r.missing {
 	case 0:
 	case 1:
@@ -664,12 +686,8 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	default:
 		fmt.Fprintf(b, "  %d logged commits are missing from git.\n", r.missing)
 	}
-	perSession := 0.0
-	if w.sessions > 0 {
-		perSession = math.Round(float64(w.reads)*10/float64(w.sessions)) / 10
-	}
 	fmt.Fprintf(b, "  Use: %s, %s, %.1f per session, %d of them around memcore.\n",
-		plural(w.sessions, "session"), plural(w.reads, "read"), perSession, w.around)
+		plural(w.sessions, "session"), plural(w.reads, "read"), w.perSession(), w.around)
 	writeCounts(b, w.top, 0)
 	fmt.Fprintf(b, "  Context: orient printed %s per session, about %s.\n", plural(w.words, "word"), plural(tokens(w.words), "token"))
 	for _, c := range w.costs {
@@ -685,6 +703,27 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "  Friction: %s.\n", plural(w.failed, "failed call"))
 	writeCounts(b, w.errors, w.moreErrors)
 	fmt.Fprintf(b, "  Marks: %d #again, %d #wrong, %d #stale.\n", w.marks[0], w.marks[1], w.marks[2])
+}
+
+// acceptedText says how many memories the pushes accepted, and how many of them were mistakes.
+// soFar says that the mistakes can still grow.
+func acceptedText(r review, soFar bool) string {
+	if r.accepted == 0 {
+		return "Accepted memories: 0."
+	}
+	more := ""
+	if soFar {
+		more = " so far"
+	}
+	return fmt.Sprintf("Accepted memories: %d, with %s%s.", r.accepted, plural(r.mistakes, "mistake"), more)
+}
+
+// perSession returns the reads per session of a week, rounded to one decimal, or 0 without a session.
+func (w week) perSession() float64 {
+	if w.sessions == 0 {
+		return 0
+	}
+	return math.Round(float64(w.reads)*10/float64(w.sessions)) / 10
 }
 
 // writeCounts writes one line for each count, with the numbers aligned, then the count of the rest.

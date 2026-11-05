@@ -641,3 +641,85 @@ func TestUnread(t *testing.T) {
 		}
 	})
 }
+
+func TestInboxSummary(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	setClock(t, statsNow)
+	home, remote := newHome(t), bareRemote(t)
+	repo := filepath.Join(home, "memory")
+	out, err := run(t, home, "", "init", remote)
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "This week:") {
+		t.Errorf("init printed a summary:\n%s", out)
+	}
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	remember(t, dev, "a-fact", "Read when you test a fact.")
+	pushed := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	remember(t, dev, "b-fact", "Read before you deploy on Fridays.")
+	dropped := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	if out, err := run(t, dev, memoryText("a-fact", "Read when you test a fact.", "Sharper."), "revise", "a-fact", "--reason", "Sharper."); err != nil {
+		t.Fatalf("revise: %v\n%s", err, out)
+	}
+	revised := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+
+	for _, c := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{
+			name: "a scripted log",
+			lines: []string{
+				`{"time":"` + ago(8*day) + `","session":"s0","command":"show","paths":["dev/memories/a-fact.md"],"outcome":"ok"}`,
+				`{"time":"` + ago(26*time.Hour) + `","session":"s1","command":"hook","hook":"session-start","outcome":"ok","words":{"header":575,"~/dev":100}}`,
+				`{"time":"` + ago(25*time.Hour) + `","session":"s1","command":"show","paths":["dev/memories/a-fact.md"],"outcome":"ok"}`,
+				`{"time":"` + ago(25*time.Hour) + `","session":"s2","command":"orient","outcome":"ok","words":{"header":575,"~":300}}`,
+				`{"time":"` + ago(24*time.Hour) + `","session":"s2","command":"hook","hook":"tool","paths":["dev/memories/a-fact.md","dev/memories/b-fact.md"],"outcome":"ok"}`,
+				`{"time":"` + ago(23*time.Hour) + `","session":"s2","command":"revise","paths":["skills/plan/SKILL.md"],"outcome":"error","error":"2 faults, so revise wrote nothing; memcore help revise shows the input"}`,
+				`{"time":"` + ago(22*time.Hour) + `","session":"s2","command":"hook","hook":"prompt","outcome":"ok","marks":["wrong"]}`,
+				`{"time":"` + ago(21*time.Hour) + `","command":"push","outcome":"ok","pushed":["` + pushed + `"]}`,
+				`{"time":"` + ago(20*time.Hour) + `","command":"drop","outcome":"ok","dropped":["` + dropped + `"]}`,
+				`{"time":"` + ago(19*time.Hour) + `","session":"s1","command":"revise","paths":["dev/memories/a-fact.md"],"outcome":"ok","made":["` + revised + `"]}`,
+			},
+			want: "This week: 2 sessions, 1.5 reads per session, 2 reads around memcore, about 1033 tokens of orient per session.\n" +
+				"Review: 1 commit pushed, 1 dropped. Accepted memories: 1, with 1 mistake so far.\n" +
+				"Friction: 1 failed call. Marks: 0 #again, 1 #wrong, 0 #stale. memcore stats shows more.\n\n",
+		},
+		{
+			name:  "an empty log",
+			lines: nil,
+			want: "This week: 0 sessions, 0.0 reads per session, 0 reads around memcore, about 0 tokens of orient per session.\n" +
+				"Review: 0 commits pushed, 0 dropped. Accepted memories: 0.\n" +
+				"Friction: 0 failed calls. Marks: 0 #again, 0 #wrong, 0 #stale. memcore stats shows more.\n\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			writeLog(t, repo, c.lines...)
+			out, err := run(t, home, "", "inbox")
+			if err != nil {
+				t.Fatalf("inbox: %v\n%s", err, out)
+			}
+			if !strings.HasPrefix(out, c.want+"The review queue holds 4 unpushed commits") {
+				t.Errorf("output:\n%s\nwant it to start with:\n%s", out, c.want)
+			}
+		})
+	}
+
+	t.Run("a log that cannot be read warns, and inbox lists the queue", func(t *testing.T) {
+		log := filepath.Join(store.StateDir(repo), "log.jsonl")
+		if err := os.Remove(log); err != nil {
+			t.Fatal(err)
+		}
+		mkdirT(t, log)
+		out, err := run(t, home, "", "inbox")
+		if err != nil {
+			t.Fatalf("inbox: %v\n%s", err, out)
+		}
+		if !strings.HasPrefix(out, "warning: read the use log: ") || strings.Contains(out, "This week:") ||
+			!strings.Contains(out, "The review queue holds 4 unpushed commits") {
+			t.Errorf("output:\n%s\nwant a warning, no summary, and the queue", out)
+		}
+	})
+}

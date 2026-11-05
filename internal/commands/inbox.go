@@ -9,8 +9,8 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// runInbox fetches, rebases the review queue, and lists the unpushed commits.
-// A fetch that fails only warns, so the person sees the queue offline too.
+// runInbox fetches, rebases the review queue, prints the summary of the week, and lists the unpushed commits.
+// A fetch or a summary that fails only warns, so the person sees the queue offline too.
 func runInbox(env Env, args []string) error {
 	if len(args) != 0 {
 		return usageErr("usage: memcore inbox")
@@ -26,6 +26,11 @@ func runInbox(env Env, args []string) error {
 	defer unlock()
 	if err := Fetch(repo); err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\nThe queue below may sit behind the accepted history.\n", err)
+	}
+	if text, err := summary(repo, clock().UTC()); err != nil {
+		fmt.Fprintf(env.Err, "warning: %v\n", err)
+	} else {
+		fmt.Fprintf(env.Out, "%s\n", text)
 	}
 	return report(env, repo)
 }
