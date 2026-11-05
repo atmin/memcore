@@ -723,3 +723,102 @@ func TestInboxSummary(t *testing.T) {
 		}
 	})
 }
+
+func TestMeasureEndToEnd(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	memory := "dev/memories/a-fact.md"
+	var asked string
+	yes := Env{Dir: home, Confirm: answer(true, &asked)}
+	// as runs one command in a session, or as the person when the session is empty, and fails the test on an error.
+	as := func(session string, env Env, stdin string, args ...string) string {
+		t.Helper()
+		t.Setenv("CLAUDE_CODE_SESSION_ID", session)
+		env.In = strings.NewReader(stdin)
+		out, err := runWith(t, env, args...)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return out
+	}
+	start := func(session string) string {
+		return hookJSON(map[string]string{"session_id": session, "cwd": dev, "hook_event_name": "SessionStart", "source": "startup"})
+	}
+	in := func(dir string) Env { return Env{Dir: dir} }
+
+	first := as("s1", in(home), start("s1"), "hook", "session-start")
+	as("s1", in(dev), memoryText("a-fact", "Read when you test a fact.", "A fact."), "remember")
+	as("s1", in(home), "", "show", memory)
+	as("s1", in(dev), memoryText("a-fact", "Read when you test a fact.", "A sharper fact."), "revise", "a-fact", "--reason", "Sharper.")
+	second := as("s2", in(home), start("s2"), "hook", "session-start")
+	as("s2", in(home), "", "show", memory)
+	as("s2", in(home), toolJSON("PostToolUse", dev, "Bash", map[string]string{"command": "sed -n 1,5p ~/memory/" + memory},
+		map[string]any{"session_id": "s2"}), "hook", "tool")
+	as("s2", in(home), hookJSON(map[string]string{"session_id": "s2", "cwd": dev, "hook_event_name": "UserPromptSubmit", "prompt": "That is #wrong."}), "hook", "prompt")
+	as("s2", in(dev), memoryText("b-fact", "Read before you deploy on Fridays.", "Never on Fridays."), "remember")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "s2")
+	if out, err := run(t, dev, "no frontmatter\n", "revise", "b-fact", "--reason", "A test."); err == nil {
+		t.Fatalf("revise of a document without frontmatter succeeded:\n%s", out)
+	}
+	as("", yes, "", "push")
+	as("s1", in(dev), "", "draft", "plan", "launch", "--description", "Read when you launch the app.")
+	as("", yes, "", "drop", sha(t, repo, "draft: dev/plans/launch.md"), "--reason", "Not yet.")
+	as("s2", in(dev), memoryText("a-fact", "Read when you test a fact.", "The sharpest fact."), "revise", "a-fact", "--reason", "Sharpest.")
+
+	all := events(t, repo)
+	var tool Event
+	for _, e := range all {
+		if e.Hook == "tool" {
+			tool = e
+		}
+		if e.Command == "push" && len(e.Folded) == 0 {
+			t.Errorf("push = %+v, want a fold of the fixup", e)
+		}
+	}
+	now := eventTime(all[len(all)-1]).Add(time.Minute)
+	setClock(t, now)
+
+	// The words of orient follow its text, so the test counts them in what the session starts printed.
+	// The second print is the last one: the header, then the level of ~/dev, then the root.
+	atDev, atRoot := strings.Index(second, "\n~/dev\n"), strings.Index(second, "\n~\n")
+	if atDev < 0 || atRoot < atDev {
+		t.Fatalf("the second session start printed no ~/dev before ~:\n%s", second)
+	}
+	estimate := func(n int) int { return (n*4 + 1) / 3 }                             // words × 4 ÷ 3, rounded
+	perSession := (len(strings.Fields(first)) + len(strings.Fields(second)) + 1) / 2 // two sessions printed orient
+	context := fmt.Sprintf("  Context: orient printed %d words per session, about %d tokens.\n", perSession, estimate(perSession))
+	header := len(strings.Fields(second[:atDev]))
+	context += fmt.Sprintf("    header: %d words, about %d tokens\n", header, estimate(header))
+	for _, level := range []struct{ name, block string }{{"~", second[atRoot:]}, {"~/dev", second[atDev:atRoot]}} {
+		n := len(strings.Fields(level.block))
+		context += fmt.Sprintf("    %s: %d words, about %d tokens, %s of 40\n", level.name, n, estimate(n), plural(strings.Count(level.block, "\n- "), "line"))
+	}
+
+	out := as("", in(home), "", "stats")
+	want := "memcore stats to " + stamp(now) + ", in weeks of 7 days, newest first.\n" +
+		"\nThe 7 days to " + stamp(now) + ":\n" +
+		"  Capture of memories: 2 remembered, 2 revised, 0 forgotten. Other documents: 1 drafted, 0 revised, 0 forgotten.\n" +
+		"  Review: 5 commits created, 1 of them a fixup. 2 pushed, 1 dropped, 0 of them fixups.\n" +
+		"  Accepted memories: 2, with 1 mistake so far. Precision: 50%.\n" +
+		"  Use: 2 sessions, 3 reads, 1.5 per session, 1 of them around memcore.\n" +
+		"      3  dev/memories/a-fact.md\n" +
+		context +
+		"  Friction: 1 failed call.\n" +
+		"      1  revise: parse the memory: no frontmatter: the first line is not ---; memcore help revise shows the input\n" +
+		"  Marks: 0 #again, 1 #wrong, 0 #stale.\n" +
+		"\nMemories with no logged read in 30 days:\n" +
+		"  The use log starts on " + eventTime(all[0]).Format("2006-01-02") + ", so this needs 30 days of it.\n" +
+		"The log holds reads around memcore since " + stamp(eventTime(tool)) + ".\n"
+	if out != want {
+		t.Errorf("stats:\n%s\nwant:\n%s", out, want)
+	}
+
+	wantSummary := "This week: 2 sessions, 1.5 reads per session, 1 read around memcore, " +
+		fmt.Sprintf("about %d tokens of orient per session.\n", estimate(perSession)) +
+		"Review: 2 commits pushed, 1 dropped. Accepted memories: 2, with 1 mistake so far.\n" +
+		"Friction: 1 failed call. Marks: 0 #again, 1 #wrong, 0 #stale. memcore stats shows more.\n\n"
+	if out := as("", in(home), "", "inbox"); !strings.HasPrefix(out, wantSummary+"The review queue holds 1 unpushed commit") {
+		t.Errorf("inbox:\n%s\nwant it to start with:\n%s", out, wantSummary)
+	}
+}
