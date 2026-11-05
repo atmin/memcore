@@ -28,7 +28,34 @@ const (
 	weekCount  = 4                  // stats prints weeks 0 to 3
 	topReads   = 5                  // stats lists the five most-read memories
 	topErrors  = 5                  // stats lists the five largest groups of failed calls
+	// mistakeWindow is the time after a push in which a revise or a forget of a memory makes it a mistake.
+	mistakeWindow = 14 * 24 * time.Hour
 )
+
+// queueSubjects start the subjects of the commits that agents add to the review queue.
+var queueSubjects = []string{"remember:", "revise:", "forget:", "draft:"}
+
+// fixupSubject starts the subject of a fixup, which push folds into the commit that it names.
+const fixupSubject = "fixup! "
+
+// fact is what git holds about a logged commit: its subject, and the paths that it changes.
+type fact struct {
+	subject string
+	changes []fileStatus
+}
+
+// fileStatus is a path that a commit changes, with its status letter from git diff-tree, such as A, M or D.
+type fileStatus struct{ status, path string }
+
+// review counts the commits of the review queue in a week, and the memories that its pushes accepted.
+type review struct {
+	created, createdFixups int // the commits of remember, revise, forget and draft, with the fixups among them
+	pushed                 int
+	dropped, droppedFixups int
+	accepted               int // the pairs of a push and a memory that one of its commits adds or modifies
+	mistakes               int // the accepted memories that a revise or a forget changed within 14 days
+	missing                int // the logged commits of the week that git lacks
+}
 
 // tally counts the committed lines of remember, draft, revise and forget for one kind of document.
 type tally struct{ remembered, drafted, revised, forgotten int }
@@ -51,6 +78,7 @@ type week struct {
 	end              time.Time // the week holds the times after end minus 7 days, up to end
 	lines            int       // the lines of the use log in the week
 	memories, others tally     // capture
+	review           review
 	sessions         int
 	reads            int      // the reads with a session
 	around           int      // the reads with a session that hook tool logged
@@ -77,6 +105,10 @@ func runStats(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	facts, _, err := commitFacts(repo, loggedCommits(events))
+	if err != nil {
+		return err
+	}
 	now := clock().UTC()
 	var b strings.Builder
 	fmt.Fprintf(&b, "memcore stats to %s, in weeks of 7 days, newest first.\n", stamp(now))
@@ -90,8 +122,8 @@ func runStats(env Env, args []string) error {
 	if len(events) == 0 && broken == 0 {
 		b.WriteString("\nThe use log is empty.\n")
 	}
-	for _, w := range measure(events, now) {
-		writeWeek(&b, w)
+	for k, w := range measure(events, facts, now) {
+		writeWeek(&b, w, k)
 	}
 	if _, err := io.WriteString(env.Out, b.String()); err != nil {
 		return fmt.Errorf("write the stats: %w", err)
@@ -134,8 +166,87 @@ func readLog(repo string) ([]Event, int, error) {
 	}
 }
 
+// loggedCommits returns the commits that the review counts: those in made, pushed and dropped, sorted, once each.
+func loggedCommits(events []Event) []string {
+	var shas []string
+	for _, e := range events {
+		for _, list := range [][]string{e.Made, e.Pushed, e.Dropped} {
+			shas = append(shas, list...)
+		}
+	}
+	slices.Sort(shas)
+	return slices.Compact(shas)
+}
+
+// shaRE matches a full commit id, in SHA-1 or SHA-256.
+var shaRE = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// commitFacts reads the subject and the changed paths of each commit from git. It runs one git cat-file to find
+// the commits that git lacks, and returns their count, then one git diff-tree for the rest. --always gives a
+// commit that changes nothing its subject too. Both outputs part at NUL bytes, so every path stays exact.
+func commitFacts(repo string, shas []string) (map[string]fact, int, error) {
+	facts := map[string]fact{}
+	missing := 0
+	var asked []string
+	for _, sha := range slices.Compact(slices.Sorted(slices.Values(shas))) {
+		if shaRE.MatchString(sha) {
+			asked = append(asked, sha)
+		} else {
+			missing++ // no commit of git has such a name
+		}
+	}
+	if len(asked) == 0 {
+		return facts, missing, nil
+	}
+	out, err := store.GitStdin(repo, strings.Join(asked, "\n")+"\n", "cat-file", "--batch-check")
+	if err != nil {
+		return nil, 0, fmt.Errorf("find the logged commits: %w", err)
+	}
+	have := map[string]bool{}
+	var found []string
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if f := strings.Fields(line); len(f) == 3 && f[1] == "commit" {
+			have[f[0]] = true
+			found = append(found, f[0])
+		} else {
+			missing++
+		}
+	}
+	if len(found) == 0 {
+		return facts, missing, nil
+	}
+	out, err = store.GitStdin(repo, strings.Join(found, "\n")+"\n",
+		"diff-tree", "--stdin", "-z", "-r", "--root", "--no-renames", "--name-status", "--always", "--format=%H%x00%s")
+	if err != nil {
+		return nil, 0, fmt.Errorf("read the logged commits: %w", err)
+	}
+	// Each commit prints its id and its subject, then a status letter and a path for each change.
+	parts := strings.Split(out, "\x00")
+	current := ""
+	for i := 0; i < len(parts); {
+		token := strings.TrimPrefix(parts[i], "\n")
+		switch {
+		case token == "":
+			i++
+		case current != "" && len(token) == 1 && i+1 < len(parts):
+			f := facts[current]
+			f.changes = append(f.changes, fileStatus{token, parts[i+1]})
+			facts[current] = f
+			i += 2
+		case have[token] && i+1 < len(parts):
+			current = token
+			facts[current] = fact{subject: parts[i+1]}
+			i += 2
+		default:
+			return nil, 0, fmt.Errorf("read the logged commits: git diff-tree printed %q", token)
+		}
+	}
+	return facts, missing, nil
+}
+
 // measure computes the weeks 0 to 3 before now, newest first. It leaves out a week that ends before the log starts.
-func measure(events []Event, now time.Time) []week {
+// facts holds what git says about the logged commits, and a commit without facts counts as missing.
+func measure(events []Event, facts map[string]fact, now time.Time) []week {
 	times := make([]time.Time, len(events))
 	var start time.Time
 	for i, e := range events {
@@ -155,36 +266,67 @@ func measure(events []Event, now time.Time) []week {
 		}
 		weeks = append(weeks, week{end: end})
 	}
-	// The order of time decides the last print of orient, and parallel calls append out of that order.
-	order := make([]int, len(events))
-	for i := range order {
-		order[i] = i
+	// The order of time decides the last print of orient, and what follows a push. Parallel calls append out of
+	// that order, and the log keeps whole seconds, so lines of one second keep the order of the file.
+	lines := make([]logLine, len(events))
+	for i, e := range events {
+		lines[i] = logLine{Event: e, at: times[i]}
 	}
-	sort.SliceStable(order, func(a, b int) bool { return times[order[a]].Before(times[order[b]]) })
-	in := make([][]Event, len(weeks))
-	for _, i := range order {
-		d := now.Sub(times[i])
+	sort.SliceStable(lines, func(a, b int) bool { return lines[a].at.Before(lines[b].at) })
+	// A revise or a forget of a memory after its push makes a mistake, even in a later week.
+	changed := map[string][]logLine{}
+	in := make([][]logLine, len(weeks))
+	for i := range lines {
+		lines[i].place = i
+		l := lines[i]
+		d := now.Sub(l.at)
 		if d < 0 {
-			continue // a line after the call belongs to no week
+			continue // a line after the call counts nowhere
+		}
+		if (l.Command == "revise" || l.Command == "forget") && len(l.Made) > 0 && len(l.Paths) > 0 {
+			changed[l.Paths[0]] = append(changed[l.Paths[0]], l)
 		}
 		if k := int(d / weekLength); k < len(weeks) {
-			in[k] = append(in[k], events[i])
+			in[k] = append(in[k], l)
 		}
 	}
 	for k := range weeks {
-		weeks[k].add(in[k])
+		weeks[k].add(in[k], facts, changed)
 	}
 	return weeks
 }
 
-// add counts the events of a week, oldest first.
-func (w *week) add(events []Event) {
+// logLine is a line of the use log with its time, and its place in the order of time.
+type logLine struct {
+	Event
+	at    time.Time
+	place int
+}
+
+// add counts the lines of a week, oldest first. changed holds the committed revise and forget lines of each path,
+// in the whole log up to the call.
+func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]logLine) {
+	lacked := map[string]bool{}
+	lookup := func(sha string) (fact, bool) {
+		f, ok := facts[sha]
+		if !ok && !lacked[sha] {
+			lacked[sha] = true
+			w.review.missing++
+		}
+		return f, ok
+	}
 	sessions, printers := map[string]bool{}, map[string]bool{}
 	reads, groups := map[string]int{}, map[string]int{}
 	last := map[string]cost{}
 	printed := 0
-	for _, e := range events {
+	for _, l := range lines {
+		e := l.Event
 		w.lines++
+		for _, list := range [][]string{e.Made, e.Pushed, e.Dropped} {
+			for _, sha := range list {
+				lookup(sha) // a logged commit that git lacks counts as missing, though no number needs it
+			}
+		}
 		if e.Session != "" {
 			sessions[e.Session] = true
 		}
@@ -202,6 +344,30 @@ func (w *week) add(events []Event) {
 				t.revised++
 			case "forget":
 				t.forgotten++
+			}
+		}
+		if slices.Contains([]string{"remember", "revise", "forget", "draft"}, e.Command) {
+			for _, sha := range e.Made {
+				w.review.created++
+				if f, ok := lookup(sha); ok && strings.HasPrefix(f.subject, fixupSubject) {
+					w.review.createdFixups++
+				}
+			}
+		}
+		switch {
+		case e.Command == "push":
+			w.review.push(l, lookup, changed)
+		case e.Command == "drop" && e.Outcome == "ok":
+			for _, sha := range e.Dropped {
+				f, ok := lookup(sha)
+				switch {
+				case !ok:
+				case strings.HasPrefix(f.subject, fixupSubject):
+					w.review.dropped++
+					w.review.droppedFixups++
+				case isQueueSubject(f.subject):
+					w.review.dropped++
+				}
 			}
 		}
 		if e.Session != "" {
@@ -262,6 +428,45 @@ func (w *week) add(events []Event) {
 	}
 }
 
+// push counts the queue commits of a push line, whatever its outcome, and the memories that it accepted.
+// A memory that a committed revise or forget changed within 14 days after the push is an accepted mistake.
+func (r *review) push(l logLine, lookup func(string) (fact, bool), changed map[string][]logLine) {
+	memories := map[string]bool{}
+	for _, sha := range l.Pushed {
+		f, ok := lookup(sha)
+		if !ok {
+			continue
+		}
+		if isQueueSubject(f.subject) {
+			r.pushed++
+		}
+		for _, c := range f.changes {
+			if (c.status == "A" || c.status == "M") && store.IsMemory(c.path) {
+				memories[c.path] = true
+			}
+		}
+	}
+	for p := range memories {
+		r.accepted++
+		for _, c := range changed[p] {
+			if c.place > l.place && !c.at.After(l.at.Add(mistakeWindow)) {
+				r.mistakes++
+				break
+			}
+		}
+	}
+}
+
+// isQueueSubject reports whether a subject is that of a commit that an agent added to the review queue.
+func isQueueSubject(subject string) bool {
+	for _, s := range queueSubjects {
+		if strings.HasPrefix(subject, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // readsOf returns the reads of a line: the path of a successful show, or the paths that hook tool logged.
 func readsOf(e Event) []string {
 	switch {
@@ -316,8 +521,8 @@ func normalize(e Event) string {
 	return digitsRE.ReplaceAllString(msg, "<n>")
 }
 
-// writeWeek writes the numbers of one week.
-func writeWeek(b *strings.Builder, w week) {
+// writeWeek writes the numbers of week k.
+func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "\nThe 7 days to %s:\n", stamp(w.end))
 	if w.lines == 0 {
 		b.WriteString("  No call of memcore.\n")
@@ -326,6 +531,26 @@ func writeWeek(b *strings.Builder, w week) {
 	m, o := w.memories, w.others
 	fmt.Fprintf(b, "  Capture of memories: %d remembered, %d revised, %d forgotten. Other documents: %d drafted, %d revised, %d forgotten.\n",
 		m.remembered, m.revised, m.forgotten, o.drafted, o.revised, o.forgotten)
+	r := w.review
+	fmt.Fprintf(b, "  Review: %s created, %s. %d pushed, %d dropped, %s.\n",
+		plural(r.created, "commit"), ofThem(r.createdFixups), r.pushed, r.dropped, ofThem(r.droppedFixups))
+	if r.accepted == 0 {
+		b.WriteString("  Accepted memories: 0.\n")
+	} else {
+		soFar := ""
+		if time.Duration(k)*weekLength < mistakeWindow {
+			soFar = " so far" // a push of this week may still gain mistakes
+		}
+		precision := int(math.Round(float64(r.accepted-r.mistakes) * 100 / float64(r.accepted)))
+		fmt.Fprintf(b, "  Accepted memories: %d, with %s%s. Precision: %d%%.\n", r.accepted, plural(r.mistakes, "mistake"), soFar, precision)
+	}
+	switch r.missing {
+	case 0:
+	case 1:
+		b.WriteString("  1 logged commit is missing from git.\n")
+	default:
+		fmt.Fprintf(b, "  %d logged commits are missing from git.\n", r.missing)
+	}
 	perSession := 0.0
 	if w.sessions > 0 {
 		perSession = math.Round(float64(w.reads)*10/float64(w.sessions)) / 10
@@ -361,6 +586,14 @@ func writeCounts(b *strings.Builder, counts []ranked, rest int) {
 	if rest > 0 {
 		fmt.Fprintf(b, "      and %d more\n", rest)
 	}
+}
+
+// ofThem says how many of the commits before it are fixups.
+func ofThem(fixups int) string {
+	if fixups == 1 {
+		return "1 of them a fixup"
+	}
+	return fmt.Sprintf("%d of them fixups", fixups)
 }
 
 // tokens estimates the tokens of English text from its words: words × 4 ÷ 3, rounded.

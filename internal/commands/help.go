@@ -135,6 +135,8 @@ Takes no input. It measures whether memory helps, from the use log and git histo
 and calls no agent. For each week of 7 days up to now, newest first, it prints:
 
   capture   the memories and the other documents written, by command
+  review    the commits of the queue created, pushed and dropped, and the accepted memories:
+            a memory revised or forgotten within 14 days after its push is a mistake
   use       the sessions, the reads per session, and the five most-read memories
   context   the words and the estimated tokens that orient printed
   friction  the failed calls of memcore, grouped by error
