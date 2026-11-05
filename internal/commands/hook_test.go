@@ -32,7 +32,7 @@ func TestHook(t *testing.T) {
 			t.Errorf("output =\n%s\nwant orient of ~/dev", out)
 		}
 		e := last(t, repo)
-		if e.Command != "hook" || e.Session != "s9" || e.Agent != "claude" || e.Dir != "~/dev" || e.Source != "startup" || e.Level != "~/dev" {
+		if e.Command != "hook" || e.Hook != "session-start" || e.Session != "s9" || e.Agent != "claude" || e.Dir != "~/dev" || e.Source != "startup" || e.Level != "~/dev" {
 			t.Errorf("event = %+v", e)
 		}
 		if e.Commit == "" || len(e.Words) == 0 {
@@ -63,7 +63,7 @@ func TestHook(t *testing.T) {
 				t.Fatalf("hook: %v\n%s", err, out)
 			}
 			e := last(t, repo)
-			if !slices.Equal(e.Marks, tt.want) || e.Session != "s9" {
+			if !slices.Equal(e.Marks, tt.want) || e.Session != "s9" || e.Hook != "prompt" {
 				t.Errorf("event = %+v, want the marks %v", e, tt.want)
 			}
 			if got := strings.Count(out, "The person marked"); got != len(tt.want) {
@@ -98,6 +98,9 @@ func TestHook(t *testing.T) {
 		}
 		if len(*calls) != 1 || !slices.Equal((*calls)[0], []string{"snapshot"}) {
 			t.Errorf("starts = %v, want one snapshot", *calls)
+		}
+		if e := last(t, repo); e.Hook != "session-end" {
+			t.Errorf("event = %+v, want the hook session-end", e)
 		}
 	})
 

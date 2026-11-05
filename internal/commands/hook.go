@@ -40,6 +40,7 @@ func runHook(env Env, args []string) error {
 	if len(args) != 1 || !slices.Contains([]string{"session-start", "prompt", "session-end"}, args[0]) {
 		return usageErr("usage: memcore hook session-start|prompt|session-end < input.json")
 	}
+	env.event().Hook = args[0]
 	raw, err := io.ReadAll(env.In)
 	if err != nil {
 		return fmt.Errorf("read the hook input: %w", err)

@@ -125,15 +125,21 @@ func runRemember(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	n := 0
-	for _, kind := range []string{store.KindMemories, store.KindSkills, store.KindScripts, store.KindConventions, store.KindGlossary} {
-		n += len(ix.Of(kind))
-	}
-	if w := budgetWarning(level, n); w != "" {
+	if w := budgetWarning(level, budgetLines(ix)); w != "" {
 		fmt.Fprintln(env.Out, w)
 	}
 	fmt.Fprintf(env.Out, "Remembered %s.\n", rel)
 	return nil
+}
+
+// budgetLines returns the lines of a level that orient prints and the budget counts:
+// one for each memory, skill, script, conventions file and glossary.
+func budgetLines(ix store.Index) int {
+	n := 0
+	for _, kind := range []string{store.KindMemories, store.KindSkills, store.KindScripts, store.KindConventions, store.KindGlossary} {
+		n += len(ix.Of(kind))
+	}
+	return n
 }
 
 // budgetWarning says that a level has more lines in orient than the budget, or "" when it has not.

@@ -27,6 +27,7 @@ type Event struct {
 	Accepted string         `json:"accepted,omitempty"` // the accepted commit then, which serves skills and the voice
 	Level    string         `json:"level,omitempty"`    // the level of the working directory, as ~ or ~/<level>
 	Command  string         `json:"command"`
+	Hook     string         `json:"hook,omitempty"` // the argument of memcore hook: session-start, prompt or session-end
 	Paths    []string       `json:"paths,omitempty"`
 	Outcome  string         `json:"outcome"` // ok or error
 	Error    string         `json:"error,omitempty"`
@@ -36,6 +37,7 @@ type Event struct {
 	Folded   []string       `json:"folded,omitempty"`
 	Pushed   []string       `json:"pushed,omitempty"`
 	Words    map[string]int `json:"words,omitempty"`  // the words that orient printed: the header, then each level
+	Lines    map[string]int `json:"lines,omitempty"`  // the lines that orient printed for each level and that the budget counts
 	Dir      string         `json:"dir,omitempty"`    // the directory of a hook, as ~/<path>
 	Source   string         `json:"source,omitempty"` // the source of a session start: startup, resume, clear, compact or fork
 	Marks    []string       `json:"marks,omitempty"`  // the marks of a prompt; no field holds the prompt

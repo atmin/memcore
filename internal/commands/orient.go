@@ -37,7 +37,7 @@ func runOrient(env Env, args []string) error {
 	}
 
 	var w strings.Builder
-	words := map[string]int{}
+	words, counts := map[string]int{}, map[string]int{}
 	fmt.Fprintf(&w, "memcore keeps the long-term memory of your agents, in %s. Touch it only through these commands:\n", tilde(repo))
 	fmt.Fprintln(&w)
 	var yours []string
@@ -91,9 +91,10 @@ func runOrient(env Env, args []string) error {
 		}
 		block := fmt.Sprintf("\n%s\n%s\n", title(l), strings.Join(lines, "\n"))
 		words[title(l)] = len(strings.Fields(block))
+		counts[title(l)] = budgetLines(ix)
 		w.WriteString(block)
 	}
-	env.event().Words = words
+	env.event().Words, env.event().Lines = words, counts
 	_, err = io.WriteString(env.Out, w.String())
 	return err
 }

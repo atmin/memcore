@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,36 @@ func TestOrient(t *testing.T) {
 		}
 		if !strings.Contains(out, "1 plan and 3 notes") {
 			t.Errorf("output = %q, want the bare note counted", out)
+		}
+	})
+
+	t.Run("the lines of each level", func(t *testing.T) {
+		web := mkdirT(t, filepath.Join(dev, "web"))
+		remember(t, web, "cache-headers", "Read when you set the cache headers of a page.")
+		remember(t, web, "image-sizes", "Read when you add an image to a page.")
+		writeT(t, repo, "dev/web/skills/deploy/SKILL.md", "---\nname: deploy\ndescription: \"Use when you deploy the site.\"\n---\n")
+		writeT(t, repo, "dev/web/plans/launch.md", "---\nname: launch\ndescription: \"Read when you launch the site.\"\n---\n")
+		out, err := run(t, web, "", "orient")
+		if err != nil {
+			t.Fatalf("orient: %v\n%s", err, out)
+		}
+		at := strings.LastIndex(out, "\n~\n")
+		if at < 0 {
+			t.Fatalf("output has no root level:\n%s", out)
+		}
+		root := 0
+		for _, line := range strings.Split(out[at:], "\n") {
+			if strings.HasPrefix(line, "- ") {
+				root++
+			}
+		}
+		e := last(t, repo)
+		want := map[string]int{"~/dev/web": 3, "~/dev": 1, "~": root}
+		if root == 0 || !maps.Equal(e.Lines, want) {
+			t.Errorf("lines = %v, want %v", e.Lines, want)
+		}
+		if _, ok := e.Words["header"]; !ok || len(e.Words) != 4 {
+			t.Errorf("words = %v, want the header and three levels", e.Words)
 		}
 	})
 }
