@@ -16,10 +16,20 @@ import (
 
 // hookInput is the input that Claude Code gives a hook on standard input. See its docs, page hooks.
 type hookInput struct {
-	SessionID string `json:"session_id"`
-	Cwd       string `json:"cwd"`
-	Source    string `json:"source"`
-	Prompt    string `json:"prompt"`
+	SessionID string    `json:"session_id"`
+	Cwd       string    `json:"cwd"`
+	Source    string    `json:"source"`
+	Prompt    string    `json:"prompt"`
+	ToolName  string    `json:"tool_name"`
+	ToolInput toolInput `json:"tool_input"`
+}
+
+// toolInput holds the fields of a tool call that name what the call reads: the command of Bash,
+// the file of Read and the path of Grep.
+type toolInput struct {
+	Command  string `json:"command"`
+	FilePath string `json:"file_path"`
+	Path     string `json:"path"`
 }
 
 // marks are the words that the person adds to a prompt, in the order that the hook reports them.
