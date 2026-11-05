@@ -129,6 +129,17 @@ the memory repo, trimmed to the conversation and redacted. memcore never pushes 
 Takes no input. It fetches, then lists the unpushed commits, which wait for the review
 of the person.
 `,
+	"stats": `memcore stats
+
+Takes no input. It measures whether memory helps, from the use log and git history,
+and calls no agent. For each week of 7 days up to now, newest first, it prints:
+
+  capture   the memories and the other documents written, by command
+  use       the sessions, the reads per session, and the five most-read memories
+  context   the words and the estimated tokens that orient printed
+  friction  the failed calls of memcore, grouped by error
+  marks     the count of #again, #wrong and #stale
+`,
 	"push": `memcore push
 
 Only the person runs it, at a terminal. It refuses uncommitted changes, fetches, and folds

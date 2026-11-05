@@ -57,6 +57,7 @@ func TestOrient(t *testing.T) {
 		}
 		for _, want := range []string{
 			"memcore remember",
+			"memcore stats",
 			"run memcore help <command>",
 			"## Always",
 			"## Talking",

@@ -54,7 +54,7 @@ func TestHelp(t *testing.T) {
 
 	t.Run("the list", func(t *testing.T) {
 		out, err := run(t, home, "", "help")
-		if err != nil || !strings.Contains(out, "remember") || !strings.Contains(out, "memcore help <command>") {
+		if err != nil || !strings.Contains(out, "remember") || !strings.Contains(out, "memcore stats") || !strings.Contains(out, "memcore help <command>") {
 			t.Errorf("help: %v, output %q, want the list of commands", err, out)
 		}
 		out, err = run(t, home, "", "help", "nope")
@@ -75,6 +75,7 @@ func TestHelp(t *testing.T) {
 			{home, "", []string{"verify"}},
 			{home, "", []string{"inbox", "extra"}},
 			{home, "", []string{"push", "extra"}},
+			{home, "", []string{"stats", "extra"}},
 			{dev, memoryText("tests-before-code", "Read when the name is taken.", "A fact."), []string{"remember"}},
 			{dev, memoryText("code-tests-first", "Read before you write code: the tests of a step come first.", "A fact."), []string{"remember"}},
 			{dev, memoryText("leaky", "Read when you test a secret.", "ghp_"+strings.Repeat("a1B2", 9)), []string{"remember"}},
