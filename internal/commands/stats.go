@@ -30,6 +30,8 @@ const (
 	topErrors  = 5                  // stats lists the five largest groups of failed calls
 	// mistakeWindow is the time after a push in which a revise or a forget of a memory makes it a mistake.
 	mistakeWindow = 14 * 24 * time.Hour
+	unreadWindow  = 30 * 24 * time.Hour // stats lists the memories with no logged read in 30 days
+	unreadList    = 20                  // and names 20 of them at most
 )
 
 // queueSubjects start the subjects of the commits that agents add to the review queue.
@@ -124,6 +126,11 @@ func runStats(env Env, args []string) error {
 	}
 	for k, w := range measure(events, facts, now) {
 		writeWeek(&b, w, k)
+	}
+	if len(events) > 0 {
+		if err := writeUnread(&b, repo, events, now); err != nil {
+			return err
+		}
 	}
 	if _, err := io.WriteString(env.Out, b.String()); err != nil {
 		return fmt.Errorf("write the stats: %w", err)
@@ -247,15 +254,8 @@ func commitFacts(repo string, shas []string) (map[string]fact, int, error) {
 // measure computes the weeks 0 to 3 before now, newest first. It leaves out a week that ends before the log starts.
 // facts holds what git says about the logged commits, and a commit without facts counts as missing.
 func measure(events []Event, facts map[string]fact, now time.Time) []week {
-	times := make([]time.Time, len(events))
-	var start time.Time
-	for i, e := range events {
-		times[i], _ = time.Parse(time.RFC3339, e.Time) // readLog keeps only lines with a valid time
-		if i == 0 || times[i].Before(start) {
-			start = times[i]
-		}
-	}
-	if len(events) == 0 {
+	start, ok := logStart(events)
+	if !ok {
 		return nil
 	}
 	var weeks []week
@@ -270,7 +270,7 @@ func measure(events []Event, facts map[string]fact, now time.Time) []week {
 	// that order, and the log keeps whole seconds, so lines of one second keep the order of the file.
 	lines := make([]logLine, len(events))
 	for i, e := range events {
-		lines[i] = logLine{Event: e, at: times[i]}
+		lines[i] = logLine{Event: e, at: eventTime(e)}
 	}
 	sort.SliceStable(lines, func(a, b int) bool { return lines[a].at.Before(lines[b].at) })
 	// A revise or a forget of a memory after its push makes a mistake, even in a later week.
@@ -465,6 +465,119 @@ func isQueueSubject(subject string) bool {
 		}
 	}
 	return false
+}
+
+// eventTime returns the time of a line. readLog keeps only lines with a valid time.
+func eventTime(e Event) time.Time {
+	t, _ := time.Parse(time.RFC3339, e.Time)
+	return t
+}
+
+// logStart returns the time of the oldest line, and false when the log has none.
+func logStart(events []Event) (time.Time, bool) {
+	var start time.Time
+	for i, e := range events {
+		if t := eventTime(e); i == 0 || t.Before(start) {
+			start = t
+		}
+	}
+	return start, len(events) > 0
+}
+
+// writeUnread writes the memories with no logged read in 30 days, or why it cannot list them yet.
+// Then it names the time of the first read around memcore, because before it only show logged reads.
+func writeUnread(b *strings.Builder, repo string, events []Event, now time.Time) error {
+	start, _ := logStart(events)
+	if start.After(now.Add(-unreadWindow)) {
+		fmt.Fprintf(b, "\nMemories with no logged read in 30 days:\n  The use log starts on %s, so this needs 30 days of it.\n",
+			start.UTC().Format("2006-01-02"))
+	} else {
+		paths, err := unread(repo, events, now)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "\nMemories with no logged read in 30 days: %d.\n", len(paths))
+		for _, p := range paths[:min(len(paths), unreadList)] {
+			fmt.Fprintf(b, "  %s\n", p)
+		}
+		if len(paths) > unreadList {
+			fmt.Fprintf(b, "  and %d more\n", len(paths)-unreadList)
+		}
+	}
+	var first time.Time
+	for _, e := range events {
+		if t := eventTime(e); e.Command == "hook" && e.Hook == "tool" && (first.IsZero() || t.Before(first)) {
+			first = t
+		}
+	}
+	if first.IsZero() {
+		b.WriteString("The log holds no read around memcore yet.\n")
+	} else {
+		fmt.Fprintf(b, "The log holds reads around memcore since %s.\n", stamp(first))
+	}
+	return nil
+}
+
+// unread returns the memories at HEAD that no read of the use log names in the 30 days before now, sorted.
+// A memory counts only when its addition is older than 30 days: the author date of the newest commit that adds it,
+// since a fold keeps author dates. Every read counts, with a session or without one.
+func unread(repo string, events []Event, now time.Time) ([]string, error) {
+	since := now.Add(-unreadWindow)
+	read := map[string]bool{}
+	for _, e := range events {
+		if t := eventTime(e); t.After(since) && !t.After(now) {
+			for _, p := range readsOf(e) {
+				read[p] = true
+			}
+		}
+	}
+	out, err := store.Git(repo, "ls-tree", "-z", "-r", "--name-only", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("list the memories: %w", err)
+	}
+	added, err := additions(repo)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if at, ok := added[p]; ok && store.IsMemory(p) && !read[p] && at.Before(since) {
+			paths = append(paths, p)
+		}
+	}
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// additions returns the author date of the newest commit on HEAD that adds each path. The format starts with a NUL,
+// so the empty field before each date tells it from a path.
+func additions(repo string) (map[string]time.Time, error) {
+	out, err := store.Git(repo, "log", "-z", "--no-renames", "--diff-filter=A", "--name-only", "--format=%x00%at", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("read the additions of the memories: %w", err)
+	}
+	added := map[string]time.Time{}
+	var at time.Time
+	parts := strings.Split(out, "\x00")
+	for i := 0; i < len(parts); i++ {
+		switch {
+		case parts[i] == "" && i+1 < len(parts) && parts[i+1] != "":
+			i++
+			sec, err := strconv.ParseInt(parts[i], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("read the additions of the memories: git log printed %q", parts[i])
+			}
+			at = time.Unix(sec, 0)
+			if i+1 < len(parts) {
+				parts[i+1] = strings.TrimPrefix(parts[i+1], "\n") // a line break ends the date
+			}
+		case parts[i] != "":
+			if _, ok := added[parts[i]]; !ok { // git log prints the newest commit first
+				added[parts[i]] = at
+			}
+		}
+	}
+	return added, nil
 }
 
 // readsOf returns the reads of a line: the path of a successful show, or the paths that hook tool logged.

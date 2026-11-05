@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -242,6 +243,10 @@ The 7 days to 2026-11-26 10:00 UTC:
     ~: 200 words, about 267 tokens, 12 lines of 40
   Friction: 0 failed calls.
   Marks: 0 #again, 0 #wrong, 0 #stale.
+
+Memories with no logged read in 30 days:
+  The use log starts on 2026-11-25, so this needs 30 days of it.
+The log holds reads around memcore since 2026-12-09 11:00 UTC.
 `
 		if out != want {
 			t.Errorf("output:\n%s\nwant:\n%s", out, want)
@@ -548,4 +553,91 @@ func TestCommitFacts(t *testing.T) {
 	if facts, missing, err := commitFacts(repo, nil); err != nil || len(facts) != 0 || missing != 0 {
 		t.Errorf("commitFacts of no commit = %v, %d, %v; want none", facts, missing, err)
 	}
+}
+
+func TestUnread(t *testing.T) {
+	repo := t.TempDir()
+	gitT(t, repo, "init", "-q", "-b", "main")
+	commitAt := func(when time.Time, subject string) {
+		t.Helper()
+		t.Setenv("GIT_AUTHOR_DATE", when.Format(time.RFC3339))
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", subject)
+	}
+	for _, p := range []string{
+		"m/memories/old.md", "m/memories/read.md", "m/memories/around.md", "m/memories/long-ago.md",
+		"m/memories/back.md", "my café/memories/menu.md", "m/plans/p.md", "m/README.md",
+	} {
+		writeT(t, repo, p, "A fact.\n")
+	}
+	commitAt(statsNow.Add(-40*day), "init: the memories of 40 days ago")
+	if err := os.Remove(filepath.Join(repo, "m", "memories", "back.md")); err != nil {
+		t.Fatal(err)
+	}
+	commitAt(statsNow.Add(-35*day), "forget: m/memories/back.md")
+	writeT(t, repo, "m/memories/back.md", "A fact again.\n")
+	writeT(t, repo, "m/memories/new.md", "A new fact.\n")
+	commitAt(statsNow.Add(-10*day), "remember: m/memories/new.md")
+
+	events := []Event{
+		{Time: ago(31 * day), Command: "show", Paths: []string{"m/memories/long-ago.md"}, Outcome: "ok"},
+		{Time: ago(10 * day), Session: "s1", Command: "show", Paths: []string{"m/memories/read.md"}, Outcome: "ok"},
+		{Time: ago(5 * day), Session: "s1", Command: "hook", Hook: "tool", Paths: []string{"m/memories/around.md"}, Outcome: "ok"},
+		{Time: ago(3 * day), Command: "hook", Hook: "tool", Outcome: "error", Error: "read the hook input: unexpected end of JSON input"},
+		{Time: ago(4 * day), Command: "show", Paths: []string{"m/memories/old.md"}, Outcome: "error", Error: "no document"},
+	}
+
+	t.Run("the memories with no read", func(t *testing.T) {
+		got, err := unread(repo, events, statsNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"m/memories/long-ago.md", "m/memories/old.md", "my café/memories/menu.md"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("unread = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("the first read around memcore", func(t *testing.T) {
+		var out strings.Builder
+		if err := writeUnread(&out, repo, events, statsNow); err != nil {
+			t.Fatal(err)
+		}
+		want := "\nMemories with no logged read in 30 days: 3.\n" +
+			"  m/memories/long-ago.md\n  m/memories/old.md\n  my café/memories/menu.md\n" +
+			"The log holds reads around memcore since 2026-12-05 10:00 UTC.\n"
+		if out.String() != want {
+			t.Errorf("output:\n%q\nwant:\n%q", out.String(), want)
+		}
+	})
+
+	t.Run("a young log lists nothing, and a log without hook tool says so", func(t *testing.T) {
+		young := []Event{{Time: ago(20 * day), Command: "show", Paths: []string{"m/memories/read.md"}, Outcome: "ok"}}
+		var out strings.Builder
+		if err := writeUnread(&out, repo, young, statsNow); err != nil {
+			t.Fatal(err)
+		}
+		want := "\nMemories with no logged read in 30 days:\n" +
+			"  The use log starts on 2026-11-20, so this needs 30 days of it.\n" +
+			"The log holds no read around memcore yet.\n"
+		if out.String() != want {
+			t.Errorf("output:\n%q\nwant:\n%q", out.String(), want)
+		}
+	})
+
+	t.Run("20 paths at most, then the count of the rest", func(t *testing.T) {
+		for i := range 20 {
+			writeT(t, repo, fmt.Sprintf("n/memories/fact-%02d.md", i), "A fact.\n")
+		}
+		commitAt(statsNow.Add(-40*day), "init: 20 more memories")
+		var out strings.Builder
+		if err := writeUnread(&out, repo, events, statsNow); err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+		if len(lines) != 24 || lines[1] != "Memories with no logged read in 30 days: 23." ||
+			lines[2] != "  m/memories/long-ago.md" || lines[21] != "  n/memories/fact-16.md" || lines[22] != "  and 3 more" {
+			t.Errorf("output:\n%s", out.String())
+		}
+	})
 }

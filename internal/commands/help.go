@@ -141,6 +141,8 @@ and calls no agent. For each week of 7 days up to now, newest first, it prints:
   context   the words and the estimated tokens that orient printed
   friction  the failed calls of memcore, grouped by error
   marks     the count of #again, #wrong and #stale
+
+Then it lists the memories with no logged read in 30 days.
 `,
 	"push": `memcore push
 
