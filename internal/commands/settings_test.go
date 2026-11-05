@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,11 +63,12 @@ func TestClaudeChanges(t *testing.T) {
 		autoOff   bool
 		additions int // hooks, rules and the setting
 	}{
-		{"no file", "", false, 3 + 4},
-		{"an empty file", "{}", true, 3 + 4 + 1},
-		{"a hook and a rule of yours", yours, false, 3 + 4},
-		{"a rule already there", `{"permissions":{"deny":["Bash(memcore push *)"]}}`, false, 3 + 3},
-		{"auto-memory already off", `{"autoMemoryEnabled":false}`, true, 3 + 4},
+		{"no file", "", false, 5 + 4},
+		{"an empty file", "{}", true, 5 + 4 + 1},
+		{"a hook and a rule of yours", yours, false, 5 + 4},
+		{"a rule already there", `{"permissions":{"deny":["Bash(memcore push *)"]}}`, false, 5 + 3},
+		{"auto-memory already off", `{"autoMemoryEnabled":false}`, true, 5 + 4},
+		{"a tool hook of yours with another matcher", `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"'` + exe + `' hook tool"}]}]}}`, false, 5 + 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,15 +82,27 @@ func TestClaudeChanges(t *testing.T) {
 			}
 			v := settingsOf(t, tree)
 			hooks := v["hooks"].(map[string]any)
-			for event, cmd := range map[string]string{"SessionStart": "session-start", "UserPromptSubmit": "prompt", "SessionEnd": "session-end"} {
-				groups := hooks[event].([]any)
+			for _, ev := range []struct{ event, arg, matcher string }{
+				{"SessionStart", "session-start", ""},
+				{"UserPromptSubmit", "prompt", ""},
+				{"SessionEnd", "session-end", ""},
+				{"PostToolUse", "tool", "Bash|Read|Grep"},
+				{"PostToolUseFailure", "tool", "Bash|Read|Grep"},
+			} {
+				groups := hooks[ev.event].([]any)
 				last := groups[len(groups)-1].(map[string]any)
-				if _, ok := last["matcher"]; ok {
-					t.Errorf("%s has a matcher, want none", event)
+				if m, ok := last["matcher"]; ev.matcher == "" && ok || ev.matcher != "" && m != ev.matcher {
+					t.Errorf("%s has the matcher %v, want %q", ev.event, m, ev.matcher)
 				}
 				h := last["hooks"].([]any)[0].(map[string]any)
-				if h["type"] != "command" || h["command"] != "'"+exe+"' hook "+cmd {
-					t.Errorf("%s hook = %v", event, h)
+				if h["type"] != "command" || h["command"] != "'"+exe+"' hook "+ev.arg {
+					t.Errorf("%s hook = %v", ev.event, h)
+				}
+			}
+			if strings.Contains(tt.in, `"matcher":"Bash"`) {
+				groups := hooks["PostToolUse"].([]any)
+				if len(groups) != 2 || groups[0].(map[string]any)["matcher"] != "Bash" {
+					t.Errorf("PostToolUse = %v, want your group, then the group of init", groups)
 				}
 			}
 			deny := strings.Join(func() []string {
@@ -116,8 +130,8 @@ func TestClaudeChanges(t *testing.T) {
 				t.Errorf("autoMemoryEnabled = %v, want it absent while the import is not complete", v["autoMemoryEnabled"])
 			}
 			wantCreated := map[string]string{
-				"no file":                    "hooks hooks.SessionStart hooks.UserPromptSubmit hooks.SessionEnd permissions permissions.deny",
-				"a hook and a rule of yours": "hooks.UserPromptSubmit hooks.SessionEnd",
+				"no file":                    "hooks hooks.SessionStart hooks.UserPromptSubmit hooks.SessionEnd hooks.PostToolUse hooks.PostToolUseFailure permissions permissions.deny",
+				"a hook and a rule of yours": "hooks.UserPromptSubmit hooks.SessionEnd hooks.PostToolUse hooks.PostToolUseFailure",
 			}
 			if w, ok := wantCreated[tt.name]; ok && strings.Join(add.Created, " ") != w {
 				t.Errorf("created = %q, want %q", add.Created, w)
@@ -183,8 +197,13 @@ func TestApplySettings(t *testing.T) {
 			t.Errorf("kept = %v, want one copy of the original", kept)
 		}
 		rec := readInitRecordT(t, repo)
-		if len(rec.Hooks) != 3 || len(rec.Deny) != 4 || rec.AutoMemory == nil || !rec.AutoMemory.Absent {
+		if len(rec.Hooks) != 5 || len(rec.Deny) != 4 || rec.AutoMemory == nil || !rec.AutoMemory.Absent {
 			t.Errorf("record = %+v", rec)
+		}
+		for _, ev := range []string{"PostToolUse", "PostToolUseFailure"} {
+			if !slices.ContainsFunc(rec.Hooks, func(h hookAddition) bool { return h.Event == ev && strings.Contains(h.Entry, "hook tool") }) {
+				t.Errorf("record = %+v, want the tool hook of %s", rec, ev)
+			}
 		}
 	})
 
@@ -204,7 +223,7 @@ func TestApplySettings(t *testing.T) {
 		if got := readT(t, settings); !strings.Contains(got, "hook session-end") {
 			t.Errorf("settings =\n%s\nwant the hooks back", got)
 		}
-		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 3 || len(rec.Deny) != 4 {
+		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 5 || len(rec.Deny) != 4 {
 			t.Errorf("record = %+v, want each addition once", rec)
 		}
 	})
@@ -226,8 +245,20 @@ func TestSettingsSafety(t *testing.T) {
 			t.Fatal(err)
 		}
 		add := claudeChanges(tree, "/home/a/memory", "/home/a", exe, false)
-		if len(add.Hooks) != 3 {
-			t.Errorf("hooks added = %v, want all three: a hook for startup alone misses the other sources", add.Hooks)
+		if len(add.Hooks) != 5 {
+			t.Errorf("hooks added = %v, want all five: a hook for startup alone misses the other sources", add.Hooks)
+		}
+	})
+
+	t.Run("a tool hook for every tool does not count", func(t *testing.T) {
+		in := `{"hooks":{"PostToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"'` + exe + `' hook tool"}]}]}}`
+		tree, err := parseSettings([]byte(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		add := claudeChanges(tree, "/home/a/memory", "/home/a", exe, false)
+		if len(add.Hooks) != 5 {
+			t.Errorf("hooks added = %v, want all five: the matcher of the tool hooks is Bash|Read|Grep", add.Hooks)
 		}
 	})
 
@@ -314,6 +345,9 @@ func TestUndoSettings(t *testing.T) {
 		{"an edited rule is a conflict", func(t *testing.T, s string) {
 			replaceT(t, s, `"Bash(memcore push *)"`, `"Bash(memcore push:*)"`)
 		}, []string{"Bash(memcore push:*)"}, []string{"Bash(memcore drop *)"}, []string{"Bash(memcore push *)"}},
+		{"a changed matcher is a conflict", func(t *testing.T, s string) {
+			replaceT(t, s, `"matcher": "Bash|Read|Grep"`, `"matcher": "Bash"`)
+		}, []string{`"matcher": "Bash"`, "hook tool"}, []string{"hook prompt", "PostToolUseFailure", "Bash|Read|Grep"}, []string{"the PostToolUse hook"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -369,6 +403,44 @@ func TestUndoSettings(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a record from before M3 gains the tool hooks, and --undo removes all five", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		settings := filepath.Join(home, ".claude", "settings.json")
+		original := "{\n  \"theme\": \"dark\"\n}\n"
+		writeT(t, filepath.Dir(settings), "settings.json", original)
+		apply := func() {
+			t.Helper()
+			tree, err := readSettings(settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := applySettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, new(string))}, repo, settings, tree, claudeChanges(tree, repo, home, exe, true)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Before M3, init added the first three hooks.
+		all := hookEvents
+		t.Cleanup(func() { hookEvents = all })
+		hookEvents = all[:3]
+		apply()
+		hookEvents = all
+		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 3 || strings.Contains(readT(t, settings), "hook tool") {
+			t.Fatalf("record = %+v, want the three hooks from before M3", rec)
+		}
+
+		apply()
+		rec := readInitRecordT(t, repo)
+		if len(rec.Hooks) != 5 || strings.Count(readT(t, settings), "hook tool") != 2 {
+			t.Errorf("record = %+v, settings =\n%s\nwant the two tool hooks added", rec, readT(t, settings))
+		}
+		if err := undoSettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, new(string))}, repo, settings); err != nil {
+			t.Fatal(err)
+		}
+		if got := readT(t, settings); got != original {
+			t.Errorf("settings =\n%s\nwant the original", got)
+		}
+	})
 }
 
 // replaceT replaces old with new once in a file, and fails the test when old is missing.

@@ -219,8 +219,20 @@ type autoMemoryChange struct {
 	Before string `json:"before,omitempty"` // its value, as JSON
 }
 
-// hookEvents are the hooks that init adds: each event of Claude Code, with the argument of memcore hook.
-var hookEvents = [][2]string{{"SessionStart", "session-start"}, {"UserPromptSubmit", "prompt"}, {"SessionEnd", "session-end"}}
+// hookEvent is a hook that init adds: an event of Claude Code, the argument of memcore hook, and the matcher of its group.
+// An empty matcher runs the hook for every source of the event. A matcher of names and | runs it for those tools only.
+type hookEvent struct {
+	event, arg, matcher string
+}
+
+// hookEvents are the hooks that init adds.
+var hookEvents = []hookEvent{
+	{"SessionStart", "session-start", ""},
+	{"UserPromptSubmit", "prompt", ""},
+	{"SessionEnd", "session-end", ""},
+	{"PostToolUse", "tool", "Bash|Read|Grep"},
+	{"PostToolUseFailure", "tool", "Bash|Read|Grep"},
+}
 
 // claudeChanges adds the hooks, the deny rules, and autoMemoryEnabled false when autoOff, to the settings in place.
 // It adds nothing that the settings hold already, and returns what it added.
@@ -240,16 +252,19 @@ func claudeChanges(tree *jsonNode, repo, home, exe string, autoOff bool) initRec
 	created(tree, "hooks", "hooks")
 	hooks := tree.child("hooks", '{')
 	for _, h := range hookEvents {
-		command := prefix + "'" + exe + "' hook " + h[1]
-		created(hooks, h[0], "hooks."+h[0])
-		groups := hooks.child(h[0], '[')
-		if hasCommand(groups, command) {
+		command := prefix + "'" + exe + "' hook " + h.arg
+		created(hooks, h.event, "hooks."+h.event)
+		groups := hooks.child(h.event, '[')
+		if hasCommand(groups, command, h.matcher) {
 			continue
 		}
-		// No matcher, so the hook runs for every source of the event.
-		group := object("hooks", &jsonNode{kind: '[', items: []*jsonNode{object("type", str("command"), "command", str(command))}})
+		list := &jsonNode{kind: '[', items: []*jsonNode{object("type", str("command"), "command", str(command))}}
+		group := object("hooks", list)
+		if h.matcher != "" {
+			group = object("matcher", str(h.matcher), "hooks", list)
+		}
 		groups.items = append(groups.items, group)
-		add.Hooks = append(add.Hooks, hookAddition{Event: h[0], Entry: group.compact()})
+		add.Hooks = append(add.Hooks, hookAddition{Event: h.event, Entry: group.compact()})
 	}
 	created(tree, "permissions", "permissions")
 	perms := tree.child("permissions", '{')
@@ -273,14 +288,11 @@ func claudeChanges(tree *jsonNode, repo, home, exe string, autoOff bool) initRec
 	return add
 }
 
-// hasCommand reports whether a matcher group for every source runs command. A group with a matcher, such as
-// startup, runs for some sources only, so it does not count.
-func hasCommand(groups *jsonNode, command string) bool {
+// hasCommand reports whether a matcher group with the matcher runs command. A group with another matcher, such as
+// startup or Bash, runs for other sources or tools, so it does not count.
+func hasCommand(groups *jsonNode, command, matcher string) bool {
 	for _, g := range groups.items {
-		if g.kind != '{' {
-			continue
-		}
-		if m := g.get("matcher"); m != nil && !(m.kind == '"' && (m.text == "" || m.text == "*")) {
+		if g.kind != '{' || !sameMatcher(g.get("matcher"), matcher) {
 			continue
 		}
 		if hs := g.get("hooks"); hs != nil {
@@ -292,6 +304,20 @@ func hasCommand(groups *jsonNode, command string) bool {
 		}
 	}
 	return false
+}
+
+// sameMatcher reports whether the matcher of a group equals a matcher of hookEvents.
+// An empty matcher equals an absent one, "" and "*", which all run the hook for every source.
+func sameMatcher(m *jsonNode, matcher string) bool {
+	switch {
+	case m == nil:
+		return matcher == ""
+	case m.kind != '"':
+		return false
+	case m.text == "" || m.text == "*":
+		return matcher == ""
+	}
+	return m.text == matcher
 }
 
 // denyRules are the permissions that keep an agent away from the memory repo and from the commands of the person.

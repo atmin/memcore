@@ -408,10 +408,13 @@ func TestOnboard(t *testing.T) {
 			t.Errorf("asked %q, want the exclusions, then the settings", asked)
 		}
 		got := readT(t, settings)
-		for _, want := range []string{"echo hello", "'" + exe + "' hook session-start", "'" + exe + "' hook prompt", "'" + exe + "' hook session-end", "Edit(~/memory/**)", "Bash(memcore push *)"} {
+		for _, want := range []string{"echo hello", "'" + exe + "' hook session-start", "'" + exe + "' hook prompt", "'" + exe + "' hook session-end", "'" + exe + "' hook tool", "Edit(~/memory/**)", "Bash(memcore push *)"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("settings =\n%s\nwant %q", got, want)
 			}
+		}
+		if n := strings.Count(got, "'"+exe+"' hook "); n != 5 {
+			t.Errorf("settings =\n%s\nwant five hooks of memcore, not %d", got, n)
 		}
 		if _, ok := settingsOf(t)["autoMemoryEnabled"]; ok {
 			t.Error("autoMemoryEnabled is set while files stay out")
@@ -492,7 +495,7 @@ func TestOnboard(t *testing.T) {
 		if !strings.Contains(got, `"model": "opus"`) || !strings.Contains(got, "echo hello") {
 			t.Errorf("settings =\n%s\nwant your setting and your hook", got)
 		}
-		for _, want := range []string{`-            "command": "'` + exe + `' hook session-end"`, `-      "Bash(memcore recover *)"`, `-  "autoMemoryEnabled": false`} {
+		for _, want := range []string{`-            "command": "'` + exe + `' hook session-end"`, `-            "command": "'` + exe + `' hook tool"`, `-        "matcher": "Bash|Read|Grep",`, `-      "Bash(memcore recover *)"`, `-  "autoMemoryEnabled": false`} {
 			if !strings.Contains(out, want) {
 				t.Errorf("output =\n%s\nwant the diff line %q", out, want)
 			}

@@ -15,7 +15,7 @@ func TestHooksKeepTheRepo(t *testing.T) {
 		tree, _ := parseSettings(nil)
 		claudeChanges(tree, tt.repo, "/home/a", exe, false)
 		got := string(tree.encode())
-		for _, arg := range []string{"session-start", "prompt", "session-end"} {
+		for _, arg := range []string{"session-start", "prompt", "session-end", "tool"} {
 			if !strings.Contains(got, `"command": "`+tt.prefix+arg+`"`) {
 				t.Errorf("repo %s: settings =\n%s\nwant the hook %q", tt.repo, got, tt.prefix+arg)
 			}
