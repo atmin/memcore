@@ -6,7 +6,7 @@
   - A fixed token budget for `orient`.
   - A small pinned set for the rules an agent would not think to look up.
   - Triggers: a memory declares a command or path pattern, and a hook in the agent's harness surfaces it before a matching tool call.
-  - Read tracking, so that sleep promotes what agents open often and rewords what they never follow.
+  - Reads in sleep, so that sleep promotes what agents open often and rewords what they never follow.
 - **Redaction model.** Which small local model, if any, finds personal and production data in mixed languages? Is it bundled with the executable or downloaded on first use?
 - **Local thinking.** A later option runs the thinking on a local model instead of a hosted agent. What form should it take?
 - **Sharing.** Can an organisation's subtree become a team's shared memory, and what does review look like then?

@@ -36,11 +36,12 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
 - Search is a text search over the working tree, plus `git grep` on the transcripts branch. memcore keeps no search index on disk.
 - Local state lives under `.git/memcore/`, and memcore never commits it. It holds:
   - the write lock;
-  - the use log, `log.jsonl`, with one line per command and no standard input;
+  - the use log, `log.jsonl`, with one line per call of memcore and no standard input;
   - the checkout of the accepted history, a worktree of the remote-tracking branch;
   - the marker of a remote that lost accepted commits;
   - the state of snapshots, `snapshot.json`, with the time of the last one, and the private index of the transcripts branch;
   - the record of the import of auto-memory, `import.json`, with the outcome of each file;
   - the record of what `init` added to the settings of Claude Code, `init.json`, and a copy of each original file;
   - the log of background work, `background.log`.
+- The tool hooks of Claude Code run after every call of `Bash`, `Read` and `Grep`. So a tool call that reads no document logs no line, and starts no git process.
 - memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. memcore never pushes these refs.

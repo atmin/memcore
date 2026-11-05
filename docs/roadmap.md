@@ -2,11 +2,11 @@
 
 memcore grows in five milestones, from writing memory to scoring it. Each milestone ends in a state that you can use, and you can stop after any of them. Each milestone becomes one plan, built with the [build](../skills/build/SKILL.md) skill.
 
-**Status:** M1 and M2 exist. M3 is next.
+**Status:** M1, M2 and M3 exist. M4 is next.
 
 ## Goal
 
-memcore is the only long-term memory of your agents. `memcore init` builds the memory repo from scratch. Daily use needs no hand edits and no git commands. memcore measures whether memory helps, from git history and transcripts. Each sleep pass then improves memory a little.
+memcore is the only long-term memory of your agents. `memcore init` builds the memory repo from scratch. Daily use needs no hand edits and no git commands. memcore measures whether memory helps, from the use log, git history and transcripts. Each sleep pass then improves memory a little.
 
 ## The milestones
 
@@ -14,7 +14,7 @@ memcore is the only long-term memory of your agents. `memcore init` builds the m
 | --- | --- | --- |
 | M1 Write | Agents remember, revise and forget, and you review without git. | none |
 | M2 Onboard | One `memcore init` sets up the memory repo and Claude Code from scratch. | none |
-| M3 Measure | `memcore stats` shows use, misses, review precision and context cost per week. | none |
+| M3 Measure | `memcore stats` shows use, review precision, context cost and friction per week. | none |
 | M4 Sleep | A sleep pass turns your corrections into small proposals in the review queue. | headless agent |
 | M5 Evals | Past corrections become test cases, and memcore scores any commit of the memory repo. | headless agent |
 
@@ -24,7 +24,7 @@ Between M2 and M3, memcore goes live: it becomes the only memory of its maintain
 
 - Data collection comes before analysis. The use log ships in M1 and snapshots ship in M2, so later milestones have history to measure.
 - Deterministic work comes before thinking. M1 to M3 call no agent, so they stay cheap and testable.
-- M3 comes before M4. M3 is cheap, and it shows the misses and the friction before sleep spends tokens.
+- M3 comes before M4. M3 is cheap, and it shows the use and the friction before sleep spends tokens. A miss needs the text of a session, so M4 finds the misses.
 - Agents act, and you verify. No milestone lets memcore push, and every change waits in the review queue.
 - Exact data comes from the hooks of Claude Code, and conversation text comes from transcripts. Hook input is documented. The transcript format is internal to Claude Code, and it changes between versions.
 
@@ -35,7 +35,7 @@ A fresh agent reads, writes, corrects and removes any document through memcore a
 - `remember`, `revise` and `draft` take the document as memcore stores it. memcore reads it leniently, and writes the canonical form.
 - `memcore help <command>` shows the format of each input. Every input error names its cause.
 - `inbox` shows each queue commit with its reason and its files. Only you drop or push, at your terminal.
-- Every command appends one line to the use log. memcore keeps each commit in the use log reachable, so a fold loses no version that a session saw.
+- Every call of memcore appends one line to the use log, except a tool call that reads no document. memcore keeps each commit in the use log reachable, so a fold loses no version that a session saw.
 - `MEMCORE_REPO` points memcore at a scratch memory repo, for tests, dry runs and evals.
 
 See [Interface](interface.md) and [Git](git.md).
@@ -47,24 +47,24 @@ With no memory repo and an empty remote, one `memcore init <remote>` sets up the
 - `init` snapshots every transcript of Claude Code onto the transcripts branch, trimmed and redacted.
 - `init` imports the auto-memory of Claude Code, one memory per file, at the level of its project.
 - When every file is in, or you accepted the rest at your terminal, `init` turns auto-memory off.
-- `init` adds three hooks and some deny rules to the settings of Claude Code. It shows the diff and asks once.
+- `init` adds five hooks and some deny rules to the settings of Claude Code. It shows the diff and asks once.
 - `--dry-run` rehearses `init`, and `--undo` removes what `init` added to the settings.
 
 See [Install](install.md) and [Transcripts](transcripts.md).
 
 ## M3: Measure
 
-`memcore stats` answers whether memory helps, from data that memcore already has. It calls no agent. It recomputes every number from the use log, git history and the transcripts branch.
+`memcore stats` answers whether memory helps, from data that memcore already has. It calls no agent. It computes every number from the use log and git history, and reads no transcript.
 
 `stats` shows these numbers for each week:
-1. **Capture:** the memories remembered, revised and forgotten.
-2. **Review precision:** the queue commits pushed and dropped. A revision of an accepted memory within 14 days counts as an accepted mistake.
-3. **Use:** the reads per session, the most-read memories, and the memories that no session read in 30 days.
+1. **Capture:** the memories remembered, revised and forgotten, and the other documents written.
+2. **Review precision:** the queue commits created, pushed and dropped, and the accepted memories. A `revise` or a `forget` of an accepted memory within 14 days after its push counts as an accepted mistake.
+3. **Use:** the reads per session, the most-read memories, and the memories with no logged read in 30 days. The reads include the reads around memcore.
 4. **Context cost:** the words and the estimated tokens that `orient` printed per session and per level, against the budget.
 5. **Friction:** the failed calls of memcore, grouped by error.
 6. **Your marks:** the counts of `#again`, `#wrong` and `#stale`.
 
-`inbox` starts with a summary of the week in three lines.
+Two more hooks of Claude Code log the documents that an agent reads with `Bash`, `Read` or `Grep`. So the reads also count what an agent reads around `memcore show`. `inbox` starts with a summary of the week in three lines. The misses need the text of the sessions, so they wait for M4. See [Interface](interface.md).
 
 ## M4: Sleep
 
