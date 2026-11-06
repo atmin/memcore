@@ -4,6 +4,8 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -164,6 +166,148 @@ func TestOrient(t *testing.T) {
 			t.Errorf("words = %v, want the header and three levels", e.Words)
 		}
 	})
+}
+
+// shortVoice is a voice skill for tests that compare whole prints, so the print does not change with the shipped voice.
+const shortVoice = `---
+name: voice
+description: "Sets how to write."
+---
+
+# Voice
+
+## Always
+
+1. Use plain words.
+
+## Talking
+
+1. Start with the answer.
+
+## Writing
+
+1. Keep only the current truth.
+`
+
+// exactHome builds a home with three levels for tests that compare whole prints: ~, ~/dev and ~/dev/app.
+// ~/dev holds a memory in the review queue and a plan, and ~/dev/app holds a plan and two notes.
+func exactHome(t *testing.T) (home, repo, app string) {
+	t.Helper()
+	home, repo, _ = newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	app = mkdirT(t, filepath.Join(dev, "app"))
+	gitT(t, app, "init", "-q", "-b", "main")
+	writeT(t, repo, voicePath, shortVoice)
+	gitT(t, repo, "commit", "-q", "-am", "test: a short voice")
+	remember(t, dev, "small-commits", "Read before you commit: one change per commit.")
+	writeT(t, repo, "dev/plans/release.md", "---\nname: release\ndescription: \"Read when you cut a release.\"\n---\n")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: a plan at dev")
+	gitT(t, repo, "push", "-q", "origin", "main")
+	remember(t, app, "tests-before-code", "Read before you write code: the tests come first.")
+	remember(t, app, "api-versions", "Read when you call the API: it has two versions.")
+	gitT(t, repo, "push", "-q", "origin", "main")
+	remember(t, dev, "a-fact", "Read when you need a fact about the team.")
+	writeT(t, repo, "dev/app/notes/2026-11-01-slow.md", "---\nname: slow\ndescription: \"Read when search is slow.\"\n---\n")
+	writeT(t, repo, "dev/app/notes/2026-11-02-slower.md", "---\nname: slower\ndescription: \"Read when search is slower.\"\n---\n")
+	writeT(t, repo, "dev/app/plans/checkout.md", "---\nname: checkout\ndescription: \"Read when you build the checkout.\"\n---\n")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: notes and a plan at dev/app")
+	return home, repo, app
+}
+
+func TestOrientExact(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	_, repo, app := exactHome(t)
+	out, err := run(t, app, "", "orient")
+	if err != nil {
+		t.Fatalf("orient: %v\n%s", err, out)
+	}
+	want := `memcore keeps the long-term memory of your agents, in ~/memory. Touch it only through these commands:
+
+  memcore orient               Shows these commands, the voice and the indexes from the working directory up to the root.
+  memcore show <path>          Prints a document by its path in the memory repo. It prints a skill as the person accepted it.
+  memcore remember [--new] [--at <dir>] Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.
+  memcore revise <path or name> --reason <text> Replaces a document with the one on standard input, checks it, and commits it with the reason.
+  memcore forget <path or name> --reason <text> Removes a document, or the folder of a skill, and commits the removal with the reason.
+  memcore draft <kind> [<topic>] Starts a plan, a note, a script, a helper, a skill, a conventions file or a glossary from its template, and commits it.
+  memcore verify <path>        Checks a document, or every document under a path, for dead references and forbidden words.
+  memcore snapshot [--from <dir>] Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.
+  memcore inbox                Fetches, then lists the unpushed commits, which wait for the review of the person.
+  memcore stats                Measures whether memory helps, per week, from the use log and git history.
+  memcore push                 Fetches, asks the person at the terminal, then pushes the unpushed commits.
+  memcore recover              Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.
+  memcore drop <commit> [--reason <text>] Removes a commit of the review queue, with its fixups, after the person confirms.
+  memcore help [<command>]     Shows the input of a command, with an example.
+  memcore init [--dry-run] <remote> | --undo Sets up the memory repo, ~/memory or $MEMCORE_REPO, and Claude Code: its transcripts, its auto-memory, its hooks and its permissions.
+
+Only the person runs push, recover, drop and init.
+Before you first use a command, run memcore help <command>: it shows the input, with an example.
+
+Follow the voice skill in every reply and every document:
+
+## Always
+
+1. Use plain words.
+
+## Talking
+
+1. Start with the answer.
+
+Before you write a document, read the Writing part: memcore show skills/voice/SKILL.md
+
+The indexes, from the working directory to the root. Each line says when to read a document, and memcore show <path> prints it.
+
+~/dev/app
+- dev/app/memories/api-versions.md: Read when you call the API: it has two versions.
+- dev/app/memories/tests-before-code.md: Read before you write code: the tests come first.
+1 plan and 2 notes: memcore show dev/app/README.md lists them.
+
+~/dev
+- dev/memories/a-fact.md: Read when you need a fact about the team. [unreviewed]
+- dev/memories/small-commits.md: Read before you commit: one change per commit.
+1 plan: memcore show dev/README.md lists them.
+
+~
+- skills/voice/SKILL.md: Sets how to write.
+`
+	if out != want {
+		t.Errorf("output =\n%s\nwant\n%s", out, want)
+	}
+	e := last(t, repo)
+	wantWords := map[string]int{"header": 399, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
+	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
+		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)
+	}
+}
+
+func TestOrientationShortLines(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	_, repo, app := exactHome(t)
+	o, err := orientation(repo, app)
+	if err != nil {
+		t.Fatalf("orientation: %v", err)
+	}
+	var titles []string
+	for _, l := range o.levels {
+		titles = append(titles, l.title)
+	}
+	if !slices.Equal(titles, []string{"~/dev/app", "~/dev", "~"}) {
+		t.Fatalf("levels = %v, want ~/dev/app, ~/dev and ~", titles)
+	}
+	want := levelPart{
+		title: "~/dev",
+		lines: []string{
+			"- dev/memories/a-fact.md: Read when you need a fact about the team. [unreviewed]",
+			"- dev/memories/small-commits.md: Read before you commit: one change per commit.",
+		},
+		count: "1 plan: memcore show dev/README.md lists them.",
+		short: []string{"- dev/memories/a-fact.md [unreviewed]", "- dev/memories/small-commits.md"},
+	}
+	if got := o.levels[1]; !reflect.DeepEqual(got, want) {
+		t.Errorf("level = %+v, want %+v", got, want)
+	}
 }
 
 func TestShow(t *testing.T) {

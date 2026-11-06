@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/atmin/memcore/internal/store"
@@ -19,25 +20,51 @@ func runOrient(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	h, err := home()
+	o, err := orientation(repo, env.Dir)
 	if err != nil {
 		return err
 	}
+	text, words, lines := o.full()
+	env.event().Words, env.event().Lines = words, lines
+	_, err = io.WriteString(env.Out, text)
+	return err
+}
+
+// orientText is the print of orient in parts: the header, then one part for each level,
+// from the working directory to the root. A level with no line and no count line has no part.
+type orientText struct {
+	header string
+	levels []levelPart
+}
+
+// levelPart is the part of one level in the print of orient.
+type levelPart struct {
+	title string   // ~ or ~/<level>
+	lines []string // one line for each memory, skill, script, conventions file and glossary: - <path>: <text>, with any label
+	count string   // the line with the counts of plans and notes, or ""
+	short []string // the lines without the text: - <path>, with any label
+}
+
+// orientation builds the print of orient for a directory, in parts.
+func orientation(repo, dir string) (orientText, error) {
+	h, err := home()
+	if err != nil {
+		return orientText{}, err
+	}
 	levels := []string{""}
-	level, err := store.Level(env.Dir, h)
+	level, err := store.Level(dir, h)
 	switch {
 	case err == nil:
 		levels = store.Path(level)
 	case !errors.Is(err, store.ErrOutsideHome):
-		return err
+		return orientText{}, err
 	}
 	changed, all, err := unreviewed(repo)
 	if err != nil {
-		return err
+		return orientText{}, err
 	}
 
 	var w strings.Builder
-	words, counts := map[string]int{}, map[string]int{}
 	fmt.Fprintf(&w, "memcore keeps the long-term memory of your agents, in %s. Touch it only through these commands:\n", tilde(repo))
 	fmt.Fprintln(&w)
 	var yours []string
@@ -67,36 +94,56 @@ func runOrient(env Env, args []string) error {
 	}
 
 	fmt.Fprintln(&w, "\nThe indexes, from the working directory to the root. Each line says when to read a document, and memcore show <path> prints it.")
-	words["header"] = len(strings.Fields(w.String()))
+	o := orientText{header: w.String()}
 	for _, l := range levels {
 		ix, err := store.Lines(repo, l)
 		if err != nil {
-			return err
+			return orientText{}, err
 		}
-		var lines []string
+		part := levelPart{title: title(l)}
 		for _, kind := range []string{store.KindMemories, store.KindSkills, store.KindScripts, store.KindConventions, store.KindGlossary} {
 			for _, line := range ix.Of(kind) {
 				label := ""
 				if all || isChanged(changed, line) {
 					label = " [unreviewed]"
 				}
-				lines = append(lines, fmt.Sprintf("- %s: %s%s", line.Path, line.Text, label))
+				part.lines = append(part.lines, fmt.Sprintf("- %s: %s%s", line.Path, line.Text, label))
+				part.short = append(part.short, fmt.Sprintf("- %s%s", line.Path, label))
 			}
 		}
 		if counts := countLine(len(ix.Of(store.KindPlans)), len(ix.Of(store.KindNotes))); counts != "" {
-			lines = append(lines, fmt.Sprintf("%s: memcore show %s lists them.", counts, path.Join(store.Folder(l), "README.md")))
+			part.count = fmt.Sprintf("%s: memcore show %s lists them.", counts, path.Join(store.Folder(l), "README.md"))
 		}
-		if len(lines) == 0 {
+		if len(part.lines) == 0 && part.count == "" {
 			continue
 		}
-		block := fmt.Sprintf("\n%s\n%s\n", title(l), strings.Join(lines, "\n"))
-		words[title(l)] = len(strings.Fields(block))
-		counts[title(l)] = budgetLines(ix)
-		w.WriteString(block)
+		o.levels = append(o.levels, part)
 	}
-	env.event().Words, env.event().Lines = words, counts
-	_, err = io.WriteString(env.Out, w.String())
-	return err
+	return o, nil
+}
+
+// full returns the whole print of orient. It also returns the words of the header and of each level,
+// and the lines of each level that the budget counts.
+func (o orientText) full() (text string, words, lines map[string]int) {
+	var w strings.Builder
+	w.WriteString(o.header)
+	words, lines = map[string]int{"header": len(strings.Fields(o.header))}, map[string]int{}
+	for _, l := range o.levels {
+		block := l.block(l.lines)
+		w.WriteString(block)
+		words[l.title] = len(strings.Fields(block))
+		lines[l.title] = len(l.lines)
+	}
+	return w.String(), words, lines
+}
+
+// block returns the text of a level: a blank line, its title, the given lines, then its count line.
+func (l levelPart) block(lines []string) string {
+	all := slices.Clone(lines)
+	if l.count != "" {
+		all = append(all, l.count)
+	}
+	return fmt.Sprintf("\n%s\n%s\n", l.title, strings.Join(all, "\n"))
 }
 
 // unreviewed returns the paths that a commit after the accepted history changed.
