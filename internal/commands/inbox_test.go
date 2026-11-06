@@ -91,3 +91,71 @@ func TestInboxAllDropped(t *testing.T) {
 		t.Errorf("inbox says that nothing waits:\n%s", out)
 	}
 }
+
+func TestInboxIndexHeader(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	for _, c := range []struct {
+		name   string
+		hand   string // the memory that the person commits by hand and pushes with git, which leaves indexes stale
+		queue  func(t *testing.T, home string)
+		header string
+		news   []string // the entries of the index commits that push adds, newest first, right after the header
+	}{
+		{
+			name:   "one stale index and an empty queue",
+			hand:   "memories/by-hand.md",
+			header: "The review queue holds no unpushed commits. Push adds 1 index commit, newest first:\n",
+			news:   []string{"\n  new index: README.md\n    M  README.md\n"},
+		},
+		{
+			name:   "two stale indexes and an empty queue",
+			hand:   "dev/memories/by-hand.md",
+			header: "The review queue holds no unpushed commits. Push adds 2 index commits, newest first:\n",
+			news: []string{
+				"\n  new index: dev/README.md\n    A  dev/README.md\n",
+				"\n  new index: README.md\n    M  README.md\n",
+			},
+		},
+		{
+			// The fold does not run without a fixup, so the index commit stays.
+			name: "a kept commit and an index commit",
+			hand: "dev/memories/by-hand.md",
+			queue: func(t *testing.T, home string) {
+				remember(t, mkdirT(t, filepath.Join(home, "work")), "a-fact", fact)
+			},
+			header: "The review queue holds 1 unpushed commit. The fold at push leaves 1, and push adds 1 index commit, newest first:\n",
+			news:   []string{"\n  new index: dev/README.md\n    A  dev/README.md\n"},
+		},
+		{
+			// The fold drops the chain, so no kept commit takes the change of the stale index.
+			name: "a dropped chain and an index commit",
+			hand: "dev/memories/by-hand.md",
+			queue: func(t *testing.T, home string) {
+				work := mkdirT(t, filepath.Join(home, "work"))
+				remember(t, work, "a-fact", fact)
+				if out, err := run(t, work, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+					t.Fatalf("forget: %v\n%s", err, out)
+				}
+			},
+			header: "The review queue holds 2 unpushed commits. The fold at push leaves none, and push adds 1 index commit, newest first:\n",
+			news:   []string{"\n  new index: dev/README.md\n    M  README.md\n    A  dev/README.md\n"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			writeT(t, repo, c.hand, memoryText("by-hand", "Read when you edit by hand.", "A fact."))
+			gitT(t, repo, "add", "-A")
+			gitT(t, repo, "commit", "-q", "-m", "test: a memory by hand")
+			gitT(t, repo, "push", "-q", "origin", "main")
+			if c.queue != nil {
+				c.queue(t, home)
+			}
+			out := inboxT(t, home)
+			holds(t, out, "\n"+c.header+strings.Join(c.news, ""), "memcore drop <commit>")
+			if got := strings.Count(out, "\n  new "); got != len(c.news) {
+				t.Errorf("inbox lists %d new entries, want %d:\n%s", got, len(c.news), out)
+			}
+		})
+	}
+}

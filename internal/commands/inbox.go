@@ -37,8 +37,9 @@ func runInbox(env Env, args []string) error {
 }
 
 // report prints what waits on the person, without a fetch. First come a rewritten remote, the stale indexes and
-// the files that keep auto-memory on. Then comes the queue as the fold at push leaves it. When the preview of the
-// fold fails, report warns and lists each commit of the queue as it is. The caller holds the write lock.
+// the files that keep auto-memory on. Then comes the queue as the fold at push leaves it, with the index commits
+// that push adds, which the header counts apart. When the preview of the fold fails, report warns and lists each
+// commit of the queue as it is. The caller holds the write lock.
 func report(env Env, repo string) error {
 	if m, ok, err := readMarker(repo); err == nil && ok {
 		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)
@@ -72,22 +73,36 @@ func report(env Env, repo string) error {
 	}
 	held := map[string]bool{}
 	same := len(entries) == len(queue) // the fold leaves each commit as it is
+	added := 0                         // the index commits that push adds, which are no commits of the queue
 	for _, p := range entries {
 		held[p.target] = true
 		for _, f := range p.fixups {
 			held[f] = true
 		}
+		if p.target == "" {
+			added++
+		}
 		if p.target == "" || len(p.fixups) > 0 {
 			same = false
 		}
 	}
+	kept := len(entries) - added
+	left := "none"
+	if kept > 0 {
+		left = fmt.Sprint(kept)
+	}
 	switch {
 	case same:
 		return listQueue(env, repo, queue) // each commit keeps its sha, so the list is the queue as git shows it
-	case len(entries) == 0:
+	case len(queue) == 0: // every entry is an index commit
+		fmt.Fprintf(env.Out, "The review queue holds no unpushed commits. Push adds %s, newest first:\n", plural(added, "index commit"))
+	case added == 0 && kept == 0:
 		fmt.Fprintf(env.Out, "The review queue holds %s. The fold at push leaves none.\n", commits(len(queue), "unpushed"))
+	case added == 0:
+		fmt.Fprintf(env.Out, "The review queue holds %s. The fold at push leaves %d, newest first:\n", commits(len(queue), "unpushed"), kept)
 	default:
-		fmt.Fprintf(env.Out, "The review queue holds %s. The fold at push leaves %d, newest first:\n", commits(len(queue), "unpushed"), len(entries))
+		fmt.Fprintf(env.Out, "The review queue holds %s. The fold at push leaves %s, and push adds %s, newest first:\n",
+			commits(len(queue), "unpushed"), left, plural(added, "index commit"))
 	}
 	for i := len(entries) - 1; i >= 0; i-- {
 		p := entries[i]
