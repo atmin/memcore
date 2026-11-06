@@ -79,6 +79,7 @@ func orientation(repo, dir string) (orientText, error) {
 		}
 	}
 	fmt.Fprintf(&w, "\nOnly the person runs %s.\n", series(yours))
+	fmt.Fprintln(&w, "Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.")
 	fmt.Fprintln(&w, "Before you first use a command, run memcore help <command>: it shows the input, with an example.")
 	fmt.Fprintln(&w)
 

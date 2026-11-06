@@ -44,7 +44,7 @@ func Table() []Command {
 		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits as the fold at push leaves them.", Run: runInbox},
 		{Name: "stats", Does: "Measures whether memory helps, per week, from the use log and git history.", Run: runStats},
-		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},
+		{Name: "push", Does: "Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.", Run: runPush},
 		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},
 		{Name: "drop", Args: "<commit> [--reason <text>]", Does: "Removes a commit of the review queue, with its fixups, after the person confirms.", Yours: true, Run: runDrop},
 		{Name: "hook", Args: "session-start|prompt|session-end|tool", Does: "Runs a hook of Claude Code, with the hook input on standard input.", Hidden: true, Run: runHook},

@@ -237,13 +237,14 @@ func TestOrientExact(t *testing.T) {
   memcore snapshot [--from <dir>] Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.
   memcore inbox                Fetches, then lists the unpushed commits as the fold at push leaves them.
   memcore stats                Measures whether memory helps, per week, from the use log and git history.
-  memcore push                 Fetches, asks the person at the terminal, then pushes the unpushed commits.
+  memcore push                 Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.
   memcore recover              Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.
   memcore drop <commit> [--reason <text>] Removes a commit of the review queue, with its fixups, after the person confirms.
   memcore help [<command>]     Shows the input of a command, with an example.
   memcore init [--dry-run] <remote> | --undo Sets up the memory repo, ~/memory or $MEMCORE_REPO, and Claude Code: its transcripts, its auto-memory, its hooks and its permissions.
 
-Only the person runs push, recover, drop and init.
+Only the person runs recover, drop and init.
+Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.
 Before you first use a command, run memcore help <command>: it shows the input, with an example.
 
 Follow the voice skill in every reply and every document:
@@ -277,7 +278,7 @@ The indexes, from the working directory to the root. Each line says when to read
 		t.Errorf("output =\n%s\nwant\n%s", out, want)
 	}
 	e := last(t, repo)
-	wantWords := map[string]int{"header": 398, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantWords := map[string]int{"header": 432, "~/dev/app": 34, "~/dev": 30, "~": 7}
 	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
 	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
 		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)

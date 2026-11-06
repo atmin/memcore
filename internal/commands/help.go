@@ -148,8 +148,11 @@ Then it lists the memories with no logged read in 30 days.
 `,
 	"push": `memcore push
 
-Only the person runs it, at a terminal. It refuses uncommitted changes, fetches, and folds
-each fixup into the commit it corrects. Then it asks, and pushes the unpushed commits.
+The person runs it at a terminal, and confirms. An agent runs it only when the person asks.
+It refuses uncommitted changes, fetches, and folds each fixup into the commit it corrects.
+Then it pushes the unpushed commits. An agent pushes only memories, notes, plans and
+indexes. For a skill, a script, a helper, a conventions file or a glossary, it names the
+commits, and the person pushes them.
 `,
 	"recover": `memcore recover
 
