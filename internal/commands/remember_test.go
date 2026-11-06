@@ -258,6 +258,50 @@ func TestBudgetWarning(t *testing.T) {
 	}
 }
 
+func TestRememberSizeWarning(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	tests := []struct {
+		name  string
+		level string // the level of the memory, under home
+		long  int    // the memories with long descriptions at the level before remember
+		want  string // the title of the level in the warning, or "" for no warning
+	}{
+		{"a level under the limit", "shop", 0, ""},
+		{"a level over the limit", "shop", 30, "~/shop"},
+		{"the root over the limit", "", 30, "~"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			dir := mkdirT(t, filepath.Join(home, filepath.FromSlash(tt.level)))
+			if tt.long > 0 {
+				longLevel(t, repo, tt.level, tt.long)
+			}
+			out, err := run(t, dir, memoryText("branch-names", "Read before you name a branch of a repo.", "A fact."), "remember")
+			if err != nil {
+				t.Fatalf("remember: %v\n%s", err, out)
+			}
+			full, err := run(t, dir, "", "orient")
+			if err != nil {
+				t.Fatalf("orient: %v\n%s", err, full)
+			}
+			if tt.want == "" {
+				if strings.Contains(out, "warning: orient in") || len(full) > hookBytes {
+					t.Errorf("orient prints %d bytes, and remember printed\n%s\nwant no warning of the size", len(full), out)
+				}
+				return
+			}
+			want := fmt.Sprintf("warning: orient in %s prints %d bytes, over the 9500 that the SessionStart hook shows in full: a sleep pass consolidates it\n", tt.want, len(full))
+			if !strings.Contains(out, want) {
+				t.Errorf("remember printed\n%s\nwant %q", out, want)
+			}
+			if strings.Contains(out, "over the budget") {
+				t.Errorf("remember printed\n%s\nwant no warning of the budget, which counts lines", out)
+			}
+		})
+	}
+}
+
 func TestRememberConcurrent(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	home, repo, _ := newMemory(t)

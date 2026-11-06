@@ -128,6 +128,13 @@ func runRemember(env Env, args []string) error {
 	if w := budgetWarning(level, budgetLines(ix)); w != "" {
 		fmt.Fprintln(env.Out, w)
 	}
+	o, err := orientation(repo, filepath.Join(h, filepath.FromSlash(level)))
+	if err != nil {
+		return fmt.Errorf("measure the print of orient in %s: %w", title(level), err)
+	}
+	if w := sizeWarning(level, o); w != "" {
+		fmt.Fprintln(env.Out, w)
+	}
 	fmt.Fprintf(env.Out, "Remembered %s.\n", rel)
 	return nil
 }
@@ -152,6 +159,17 @@ func budgetWarning(level string, n int) string {
 		title += "/" + level
 	}
 	return fmt.Sprintf("warning: %s has %d lines in orient, over the budget of %d: a sleep pass consolidates it", title, n, budget)
+}
+
+// sizeWarning says that orient in a level prints more than the SessionStart hook shows in full, or "" when it does not.
+// The budget counts lines, so a level within the budget can still pass hookBytes.
+func sizeWarning(level string, o orientText) string {
+	text, _, _ := o.full()
+	if len(text) <= hookBytes {
+		return ""
+	}
+	return fmt.Sprintf("warning: orient in %s prints %d bytes, over the %d that the SessionStart hook shows in full: a sleep pass consolidates it",
+		title(level), len(text), hookBytes)
 }
 
 // findMemory returns the path of the memory with a name anywhere in the repo, or "".
