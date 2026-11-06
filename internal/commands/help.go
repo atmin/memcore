@@ -139,7 +139,7 @@ and calls no agent. For each week of 7 days up to now, newest first, it prints:
   review    the commits of the queue created, pushed and dropped, and the accepted memories:
             a memory revised or forgotten within 14 days after its push is a mistake
   use       the sessions, the reads per session, and the five most-read memories
-  context   the words and the estimated tokens that orient printed
+  context   the prints of orient per session, and the words and estimated tokens of one print
   friction  the failed calls of memcore, grouped by error
   marks     the count of #again, #wrong and #stale
 

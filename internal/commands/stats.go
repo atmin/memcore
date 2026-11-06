@@ -85,7 +85,9 @@ type week struct {
 	reads            int      // the reads with a session
 	around           int      // the reads with a session that hook tool logged
 	top              []ranked // the most-read memories, most first, ties by path
-	words            int      // the words that orient printed per session, rounded
+	printed          int      // the words of the prints of orient with a session
+	prints           int      // the prints of orient with a session
+	printers         int      // the sessions with a print of orient
 	costs            []cost   // the header, then each level by its title
 	failed           int
 	errors           []ranked // the largest groups of failed calls, largest first, ties by text
@@ -155,8 +157,8 @@ func summary(repo string, now time.Time) (string, error) {
 	}
 	r := w.review
 	var b strings.Builder
-	fmt.Fprintf(&b, "This week: %s, %.1f reads per session, %s around memcore, about %s of orient per session.\n",
-		plural(w.sessions, "session"), w.perSession(), plural(w.around, "read"), plural(tokens(w.words), "token"))
+	fmt.Fprintf(&b, "This week: %s, %.1f reads per session, %s around memcore, %.1f prints of orient per session, about %s each.\n",
+		plural(w.sessions, "session"), w.perSession(), plural(w.around, "read"), w.printsPerSession(), plural(tokens(w.wordsPerPrint()), "token"))
 	fmt.Fprintf(&b, "Review: %s pushed, %d dropped. %s\n", plural(r.pushed, "commit"), r.dropped, acceptedText(r, true))
 	fmt.Fprintf(&b, "Friction: %s. Marks: %d #again, %d #wrong, %d #stale. memcore stats shows more.\n",
 		plural(w.failed, "failed call"), w.marks[0], w.marks[1], w.marks[2])
@@ -343,7 +345,6 @@ func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]
 	sessions, printers := map[string]bool{}, map[string]bool{}
 	reads, groups := map[string]int{}, map[string]int{}
 	last := map[string]cost{}
-	printed := 0
 	for _, l := range lines {
 		e := l.Event
 		w.lines++
@@ -409,8 +410,9 @@ func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]
 		if len(e.Words) > 0 {
 			if e.Session != "" {
 				printers[e.Session] = true
+				w.prints++
 				for _, n := range e.Words {
-					printed += n
+					w.printed += n
 				}
 			}
 			for name, n := range e.Words {
@@ -432,9 +434,7 @@ func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]
 		}
 	}
 	w.sessions = len(sessions)
-	if len(printers) > 0 {
-		w.words = int(math.Round(float64(printed) / float64(len(printers))))
-	}
+	w.printers = len(printers)
 	w.top = largest(reads, topReads)
 	w.errors = largest(groups, topErrors)
 	w.moreErrors = len(groups) - len(w.errors)
@@ -689,7 +689,8 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "  Use: %s, %s, %.1f per session, %d of them around memcore.\n",
 		plural(w.sessions, "session"), plural(w.reads, "read"), w.perSession(), w.around)
 	writeCounts(b, w.top, 0)
-	fmt.Fprintf(b, "  Context: orient printed %s per session, about %s.\n", plural(w.words, "word"), plural(tokens(w.words), "token"))
+	fmt.Fprintf(b, "  Context: orient printed %.1f times per session, %s each, about %s.\n",
+		w.printsPerSession(), plural(w.wordsPerPrint(), "word"), plural(tokens(w.wordsPerPrint()), "token"))
 	for _, c := range w.costs {
 		fmt.Fprintf(b, "    %s: %s, about %s", c.name, plural(c.words, "word"), plural(tokens(c.words), "token"))
 		if c.lines >= 0 {
@@ -724,6 +725,22 @@ func (w week) perSession() float64 {
 		return 0
 	}
 	return math.Round(float64(w.reads)*10/float64(w.sessions)) / 10
+}
+
+// printsPerSession returns the prints of orient per session with a print, rounded to one decimal, or 0 without one.
+func (w week) printsPerSession() float64 {
+	if w.printers == 0 {
+		return 0
+	}
+	return math.Round(float64(w.prints)*10/float64(w.printers)) / 10
+}
+
+// wordsPerPrint returns the words of one print of orient with a session, rounded half away from zero, or 0 without one.
+func (w week) wordsPerPrint() int {
+	if w.prints == 0 {
+		return 0
+	}
+	return int(math.Round(float64(w.printed) / float64(w.prints)))
 }
 
 // writeCounts writes one line for each count, with the numbers aligned, then the count of the rest.

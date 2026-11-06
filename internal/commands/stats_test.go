@@ -135,7 +135,7 @@ func TestMeasure(t *testing.T) {
 			},
 			want: []week{{
 				end: statsNow, lines: 4, sessions: 2,
-				words: 674, // (652 + 695) / 2 = 673.5
+				printed: 1347, prints: 3, printers: 2, // s1 prints twice, 650 and 2 words, and s2 once, 695 words
 				costs: []cost{{"header", 580, -1}, {"~", 120, -1}, {"~/dev", 50, 3}, {"~/dev/app", 954, 48}},
 			}},
 		},
@@ -183,6 +183,28 @@ func TestMeasure(t *testing.T) {
 	}
 }
 
+func TestContextAverages(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		w                week
+		wordsPerPrint    int
+		printsPerSession float64
+	}{
+		{"no print", week{}, 0, 0},
+		{"a print of 1.5 words rounds up", week{printed: 3, prints: 2, printers: 1}, 2, 2},
+		{"a session that prints twice", week{printed: 1347, prints: 3, printers: 2}, 449, 1.5},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.w.wordsPerPrint(); got != c.wordsPerPrint {
+				t.Errorf("words per print = %d, want %d", got, c.wordsPerPrint)
+			}
+			if got := c.w.printsPerSession(); got != c.printsPerSession {
+				t.Errorf("prints per session = %.1f, want %.1f", got, c.printsPerSession)
+			}
+		})
+	}
+}
+
 func TestStats(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	home, repo, _ := newMemory(t)
@@ -222,7 +244,7 @@ The 7 days to 2026-12-10 10:00 UTC:
   Use: 2 sessions, 4 reads, 2.0 per session, 2 of them around memcore.
       3  dev/app/memories/small-commits.md
       1  dev/memories/older.md
-  Context: orient printed 1352 words per session, about 1803 tokens.
+  Context: orient printed 1.0 times per session, 1352 words each, about 1803 tokens.
     header: 575 words, about 767 tokens
     ~: 300 words, about 400 tokens, 12 lines of 40
     ~/dev/app: 954 words, about 1272 tokens, 48 lines of 40, over the budget
@@ -238,7 +260,7 @@ The 7 days to 2026-11-26 10:00 UTC:
   Review: 0 commits created, 0 of them fixups. 0 pushed, 0 dropped, 0 of them fixups.
   Accepted memories: 0.
   Use: 1 session, 0 reads, 0.0 per session, 0 of them around memcore.
-  Context: orient printed 775 words per session, about 1033 tokens.
+  Context: orient printed 1.0 times per session, 775 words each, about 1033 tokens.
     header: 575 words, about 767 tokens
     ~: 200 words, about 267 tokens, 12 lines of 40
   Friction: 0 failed calls.
@@ -683,14 +705,14 @@ func TestInboxSummary(t *testing.T) {
 				`{"time":"` + ago(20*time.Hour) + `","command":"drop","outcome":"ok","dropped":["` + dropped + `"]}`,
 				`{"time":"` + ago(19*time.Hour) + `","session":"s1","command":"revise","paths":["dev/memories/a-fact.md"],"outcome":"ok","made":["` + revised + `"]}`,
 			},
-			want: "This week: 2 sessions, 1.5 reads per session, 2 reads around memcore, about 1033 tokens of orient per session.\n" +
+			want: "This week: 2 sessions, 1.5 reads per session, 2 reads around memcore, 1.0 prints of orient per session, about 1033 tokens each.\n" +
 				"Review: 1 commit pushed, 1 dropped. Accepted memories: 1, with 1 mistake so far.\n" +
 				"Friction: 1 failed call. Marks: 0 #again, 1 #wrong, 0 #stale. memcore stats shows more.\n\n",
 		},
 		{
 			name:  "an empty log",
 			lines: nil,
-			want: "This week: 0 sessions, 0.0 reads per session, 0 reads around memcore, about 0 tokens of orient per session.\n" +
+			want: "This week: 0 sessions, 0.0 reads per session, 0 reads around memcore, 0.0 prints of orient per session, about 0 tokens each.\n" +
 				"Review: 0 commits pushed, 0 dropped. Accepted memories: 0.\n" +
 				"Friction: 0 failed calls. Marks: 0 #again, 0 #wrong, 0 #stale. memcore stats shows more.\n\n",
 		},
@@ -785,9 +807,9 @@ func TestMeasureEndToEnd(t *testing.T) {
 	if atDev < 0 || atRoot < atDev {
 		t.Fatalf("the second session start printed no ~/dev before ~:\n%s", second)
 	}
-	estimate := func(n int) int { return (n*4 + 1) / 3 }                             // words × 4 ÷ 3, rounded
-	perSession := (len(strings.Fields(first)) + len(strings.Fields(second)) + 1) / 2 // two sessions printed orient
-	context := fmt.Sprintf("  Context: orient printed %d words per session, about %d tokens.\n", perSession, estimate(perSession))
+	estimate := func(n int) int { return (n*4 + 1) / 3 }                           // words × 4 ÷ 3, rounded
+	perPrint := (len(strings.Fields(first)) + len(strings.Fields(second)) + 1) / 2 // each of two sessions printed orient once
+	context := fmt.Sprintf("  Context: orient printed 1.0 times per session, %d words each, about %d tokens.\n", perPrint, estimate(perPrint))
 	header := len(strings.Fields(second[:atDev]))
 	context += fmt.Sprintf("    header: %d words, about %d tokens\n", header, estimate(header))
 	for _, level := range []struct{ name, block string }{{"~", second[atRoot:]}, {"~/dev", second[atDev:atRoot]}} {
@@ -815,7 +837,7 @@ func TestMeasureEndToEnd(t *testing.T) {
 	}
 
 	wantSummary := "This week: 2 sessions, 1.5 reads per session, 1 read around memcore, " +
-		fmt.Sprintf("about %d tokens of orient per session.\n", estimate(perSession)) +
+		fmt.Sprintf("1.0 prints of orient per session, about %d tokens each.\n", estimate(perPrint)) +
 		"Review: 2 commits pushed, 1 dropped. Accepted memories: 2, with 1 mistake so far.\n" +
 		"Friction: 1 failed call. Marks: 0 #again, 1 #wrong, 0 #stale. memcore stats shows more.\n\n"
 	if out := as("", in(home), "", "inbox"); !strings.HasPrefix(out, wantSummary+"The review queue holds 1 unpushed commit") {
