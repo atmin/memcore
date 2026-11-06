@@ -53,6 +53,7 @@ type fileStatus struct{ status, path string }
 type review struct {
 	created, createdFixups int // the commits of remember, revise, forget and draft, with the fixups among them
 	pushed                 int
+	byAgent                int // the pushed commits of the push lines that an agent ran
 	dropped, droppedFixups int
 	accepted               int // the pairs of a push and a memory that one of its commits adds or modifies
 	mistakes               int // the accepted memories that a revise or a forget changed within 14 days
@@ -159,7 +160,7 @@ func summary(repo string, now time.Time) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "This week: %s, %.1f reads per session, %s around memcore, %.1f prints of orient per session, about %s each.\n",
 		plural(w.sessions, "session"), w.perSession(), plural(w.around, "read"), w.printsPerSession(), plural(tokens(w.wordsPerPrint()), "token"))
-	fmt.Fprintf(&b, "Review: %s pushed, %d dropped. %s\n", plural(r.pushed, "commit"), r.dropped, acceptedText(r, true))
+	fmt.Fprintf(&b, "Review: %s pushed%s, %d dropped. %s\n", plural(r.pushed, "commit"), byAgentText(r.byAgent), r.dropped, acceptedText(r, true))
 	fmt.Fprintf(&b, "Friction: %s. Marks: %d #again, %d #wrong, %d #stale. memcore stats shows more.\n",
 		plural(w.failed, "failed call"), w.marks[0], w.marks[1], w.marks[2])
 	return b.String(), nil
@@ -464,6 +465,9 @@ func (r *review) push(l logLine, lookup func(string) (fact, bool), changed map[s
 		}
 		if isQueueSubject(f.subject) {
 			r.pushed++
+			if l.By == "agent" {
+				r.byAgent++
+			}
 		}
 		for _, c := range f.changes {
 			if (c.status == "A" || c.status == "M") && store.IsMemory(c.path) {
@@ -670,8 +674,8 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "  Capture of memories: %d remembered, %d revised, %d forgotten. Other documents: %d drafted, %d revised, %d forgotten.\n",
 		m.remembered, m.revised, m.forgotten, o.drafted, o.revised, o.forgotten)
 	r := w.review
-	fmt.Fprintf(b, "  Review: %s created, %s. %d pushed, %d dropped, %s.\n",
-		plural(r.created, "commit"), ofThem(r.createdFixups), r.pushed, r.dropped, ofThem(r.droppedFixups))
+	fmt.Fprintf(b, "  Review: %s created, %s. %d pushed%s, %d dropped, %s.\n",
+		plural(r.created, "commit"), ofThem(r.createdFixups), r.pushed, byAgentText(r.byAgent), r.dropped, ofThem(r.droppedFixups))
 	// A push of weeks 0 and 1 may still gain mistakes.
 	fmt.Fprintf(b, "  %s", acceptedText(r, time.Duration(k)*weekLength < mistakeWindow))
 	if r.accepted > 0 {
@@ -763,6 +767,14 @@ func ofThem(fixups int) string {
 		return "1 of them a fixup"
 	}
 	return fmt.Sprintf("%d of them fixups", fixups)
+}
+
+// byAgentText says how many of the pushed commits before it an agent pushed, after a comma, or nothing when none.
+func byAgentText(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d of them by an agent", n)
 }
 
 // tokens estimates the tokens of English text from its words: words × 4 ÷ 3, rounded.

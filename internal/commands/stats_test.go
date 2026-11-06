@@ -431,6 +431,15 @@ func TestReview(t *testing.T) {
 			want:  []review{{pushed: 1, accepted: 1}},
 		},
 		{
+			name: "the commits of a push by an agent count apart",
+			events: []Event{
+				{Time: ago(2 * day), Command: "push", Outcome: "ok", Pushed: []string{"r1"}},
+				{Time: ago(day), Command: "push", Outcome: "ok", By: "agent", Pushed: []string{"r2"}},
+			},
+			facts: remembered,
+			want:  []review{{pushed: 2, byAgent: 1, accepted: 2}},
+		},
+		{
 			name: "a push that failed after git push still counts its pushed",
 			events: []Event{
 				{Time: ago(day), Command: "push", Outcome: "error", Error: "move the accepted history to the pushed tip", Pushed: []string{"r1"}},
@@ -520,6 +529,15 @@ func TestReview(t *testing.T) {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("week %d:\n%s\nwant it to hold %q", k, out.String(), want)
 			}
+		}
+	})
+
+	t.Run("the line of a week with pushes by an agent", func(t *testing.T) {
+		w := week{end: statsNow, lines: 1, review: review{created: 12, createdFixups: 3, pushed: 10, byAgent: 6}}
+		var out strings.Builder
+		writeWeek(&out, w, 2)
+		if want := "  Review: 12 commits created, 3 of them fixups. 10 pushed, 6 of them by an agent, 0 dropped, 0 of them fixups.\n"; !strings.Contains(out.String(), want) {
+			t.Errorf("output:\n%s\nwant it to hold %q", out.String(), want)
 		}
 	})
 
@@ -708,6 +726,16 @@ func TestInboxSummary(t *testing.T) {
 			want: "This week: 2 sessions, 1.5 reads per session, 2 reads around memcore, 1.0 prints of orient per session, about 1033 tokens each.\n" +
 				"Review: 1 commit pushed, 1 dropped. Accepted memories: 1, with 1 mistake so far.\n" +
 				"Friction: 1 failed call. Marks: 0 #again, 1 #wrong, 0 #stale. memcore stats shows more.\n\n",
+		},
+		{
+			name: "a push by an agent",
+			lines: []string{
+				`{"time":"` + ago(21*time.Hour) + `","command":"push","outcome":"ok","pushed":["` + pushed + `"],"by":"agent"}`,
+				`{"time":"` + ago(20*time.Hour) + `","command":"drop","outcome":"ok","dropped":["` + dropped + `"]}`,
+			},
+			want: "This week: 0 sessions, 0.0 reads per session, 0 reads around memcore, 0.0 prints of orient per session, about 0 tokens each.\n" +
+				"Review: 1 commit pushed, 1 of them by an agent, 1 dropped. Accepted memories: 1, with 0 mistakes so far.\n" +
+				"Friction: 0 failed calls. Marks: 0 #again, 0 #wrong, 0 #stale. memcore stats shows more.\n\n",
 		},
 		{
 			name:  "an empty log",
