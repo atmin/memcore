@@ -56,12 +56,25 @@ func TestPush(t *testing.T) {
 		}
 	})
 
-	t.Run("an agent", func(t *testing.T) {
+	t.Run("an agent pushes a memory", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		pushYes(t, home)
+		remember(t, mkdirT(t, filepath.Join(home, "dev")), "small-commits", "Read before you commit: one change per commit.")
+		t.Setenv("CLAUDECODE", "1")
+		if out, err := runWith(t, Env{Dir: home}, "push"); err != nil {
+			t.Fatalf("push by an agent: %v\n%s", err, out)
+		}
+		if got, want := gitT(t, remote, "rev-parse", "main"), gitT(t, repo, "rev-parse", "HEAD"); got != want {
+			t.Errorf("remote main = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("an agent refuses a skill", func(t *testing.T) {
 		home, _, remote := newMemory(t)
 		t.Setenv("CLAUDECODE", "1")
-		_, err := runWith(t, Env{Dir: home, Confirm: guards.Confirm}, "push")
-		if err == nil || !strings.Contains(err.Error(), "CLAUDECODE") {
-			t.Fatalf("error = %v, want a refusal that names CLAUDECODE", err)
+		_, err := runWith(t, Env{Dir: home}, "push")
+		if err == nil || !strings.HasPrefix(err.Error(), agentRefusal) || !strings.Contains(err.Error(), " init: create the memory repo: ") || !strings.Contains(err.Error(), "skills/voice/SKILL.md") {
+			t.Fatalf("error = %v, want a refusal that names the commit of the voice skill", err)
 		}
 		if _, err := store.Git(remote, "rev-parse", "--verify", "-q", "main"); err == nil {
 			t.Error("the remote has main after the refusal")
@@ -127,6 +140,9 @@ func TestInbox(t *testing.T) {
 		t.Errorf("inbox without the remote = %q, want a warning and the queue", out)
 	}
 }
+
+// agentRefusal starts the error of an agent's push that holds a commit that only the person pushes.
+const agentRefusal = "an agent pushes only memories, notes, plans and indexes, so the person pushes these commits at a terminal:\n"
 
 // pushYes runs push with a confirmer that says yes, and fails the test on an error.
 func pushYes(t *testing.T, dir string) string {
@@ -750,6 +766,179 @@ func TestPersonReason(t *testing.T) {
 			got, err := personReason(repo, sha)
 			if err != nil || got != c.want {
 				t.Errorf("personReason = %q, %v; want %q", got, err, c.want)
+			}
+		})
+	}
+}
+
+func TestAgentPush(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	note := "---\nname: trial\ndescription: \"Read when you try it.\"\n---\n\n"
+	// handBranch commits a file by hand on a branch, adds a memory on main, and merges the branch into main.
+	handBranch := func(t *testing.T, home, repo, rel, content string) {
+		gitT(t, repo, "checkout", "-q", "-b", "side")
+		writeT(t, repo, rel, content)
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", "test: "+rel+" by hand")
+		gitT(t, repo, "checkout", "-q", "main")
+		remember(t, mkdirT(t, filepath.Join(home, "dev")), "a-fact", fact)
+		gitT(t, repo, "merge", "-q", "--no-ff", "--no-edit", "side")
+	}
+	cases := []struct {
+		name string
+		// queue builds the review queue on top of a pushed init, and returns the refusal that it wants, or "".
+		queue func(t *testing.T, home, repo string) (refusal string)
+		// check checks the remote after a push, or is nil.
+		check func(t *testing.T, remote string)
+	}{
+		{
+			name: "a remember, a revise of a note and a forget",
+			queue: func(t *testing.T, home, repo string) string {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				remember(t, dev, "old-habit", "Read before you format a date by hand.")
+				writeT(t, repo, "dev/notes/trial.md", note+"A.\n")
+				gitT(t, repo, "add", "-A")
+				gitT(t, repo, "commit", "-q", "-m", "test: a note")
+				pushYes(t, home)
+				remember(t, dev, "a-fact", fact)
+				reviseT(t, dev, note+"B.\n", "dev/notes/trial.md", "A sharper note.")
+				if out, err := run(t, dev, "", "forget", "old-habit", "--reason", "Stale."); err != nil {
+					t.Fatalf("forget: %v\n%s", err, out)
+				}
+				return ""
+			},
+			check: func(t *testing.T, remote string) {
+				got := subjects(t, remote)
+				for _, s := range []string{"remember: dev/memories/a-fact.md", "revise: dev/notes/trial.md", "forget: dev/memories/old-habit.md"} {
+					if !strings.Contains(got, s) {
+						t.Errorf("remote history = %q, want %s", got, s)
+					}
+				}
+			},
+		},
+		{
+			name: "a remember with a fixup",
+			queue: func(t *testing.T, home, repo string) string {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				remember(t, dev, "a-fact", fact)
+				reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+				return ""
+			},
+			check: func(t *testing.T, remote string) {
+				if got := subjects(t, remote); got != "remember: dev/memories/a-fact.md\ninit: create the memory repo" {
+					t.Errorf("remote history = %q, want the remember folded", got)
+				}
+			},
+		},
+		{
+			name: "a stale index from a hand edit",
+			queue: func(t *testing.T, home, repo string) string {
+				writeT(t, repo, "dev/memories/by-hand.md", memoryText("by-hand", "Read when you edit by hand.", "A fact."))
+				gitT(t, repo, "add", "-A")
+				gitT(t, repo, "commit", "-q", "-m", "test: a memory by hand")
+				return ""
+			},
+			check: func(t *testing.T, remote string) {
+				if got := subjects(t, remote); !strings.Contains(got, "index: dev/README.md") || !strings.Contains(got, "test: a memory by hand") {
+					t.Errorf("remote history = %q, want the memory and its index", got)
+				}
+			},
+		},
+		{
+			name: "a remember in a repo that colors git log",
+			queue: func(t *testing.T, home, repo string) string {
+				gitT(t, repo, "config", "color.ui", "always")
+				remember(t, mkdirT(t, filepath.Join(home, "dev")), "a-fact", fact)
+				return ""
+			},
+		},
+		{
+			name: "a drafted skill after a remember",
+			queue: func(t *testing.T, home, repo string) string {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				remember(t, dev, "a-fact", fact)
+				if out, err := run(t, dev, "", "draft", "skill", "a-skill", "--description", "Use when you test."); err != nil {
+					t.Fatalf("draft: %v\n%s", err, out)
+				}
+				return agentRefusal + "  " + strings.TrimSpace(gitT(t, repo, "log", "-1", "--oneline")) + ": dev/skills/a-skill/SKILL.md"
+			},
+		},
+		{
+			name: "a drafted script",
+			queue: func(t *testing.T, home, repo string) string {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				if out, err := run(t, dev, "", "draft", "script", "a-tool", "--description", "Run when you test."); err != nil {
+					t.Fatalf("draft: %v\n%s", err, out)
+				}
+				return agentRefusal + "  " + strings.TrimSpace(gitT(t, repo, "log", "-1", "--oneline")) + ": dev/bin/a-tool"
+			},
+		},
+		{
+			name: "a merge by hand of a branch with a memory",
+			queue: func(t *testing.T, home, repo string) string {
+				handBranch(t, home, repo, "dev/memories/by-hand.md", memoryText("by-hand", "Read when you edit by hand.", "A fact."))
+				return ""
+			},
+			check: func(t *testing.T, remote string) {
+				if got := strings.TrimSpace(gitT(t, remote, "rev-list", "--merges", "main")); got != "" {
+					t.Errorf("the remote holds the merges %s, want none", got)
+				}
+				for _, p := range []string{"dev/memories/a-fact.md", "dev/memories/by-hand.md"} {
+					if _, err := store.Git(remote, "cat-file", "-e", "main:"+p); err != nil {
+						t.Errorf("the remote lacks %s: %v", p, err)
+					}
+				}
+			},
+		},
+		{
+			name: "a merge by hand of a branch with a skill",
+			queue: func(t *testing.T, home, repo string) string {
+				handBranch(t, home, repo, "dev/skills/by-hand/SKILL.md", "---\nname: by-hand\ndescription: \"Use when you test.\"\n---\n\nSteps.\n")
+				return "test: dev/skills/by-hand/SKILL.md by hand: dev/skills/by-hand/SKILL.md"
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home, repo, remote := newMemory(t)
+			pushYes(t, home)
+			refusal := c.queue(t, home, repo)
+			pushedBefore := gitT(t, remote, "rev-parse", "main")
+			headBefore := gitT(t, repo, "rev-parse", "HEAD")
+			merges := gitT(t, repo, "rev-list", "--merges", "origin/main..main")
+			noPerson := func(string) (bool, error) { return false, guards.ErrNoPerson }
+			out, err := runWith(t, Env{Dir: home, Confirm: noPerson}, "push")
+			if refusal != "" {
+				if err == nil || !strings.HasPrefix(err.Error(), agentRefusal) || !strings.Contains(err.Error(), refusal) {
+					t.Fatalf("push by an agent = %v\n%s\nwant a refusal that holds %q", err, out, refusal)
+				}
+				if got := gitT(t, remote, "rev-parse", "main"); got != pushedBefore {
+					t.Errorf("the remote moved from %s to %s", pushedBefore, got)
+				}
+				// A queue without a merge stays as it was. prepare flattens a merge before the check.
+				if got := gitT(t, repo, "rev-parse", "HEAD"); merges == "" && got != headBefore {
+					t.Errorf("the queue moved from %s to %s", headBefore, got)
+				}
+				if e := last(t, repo); e.Command != "push" || e.Outcome != "error" || e.By != "agent" || len(e.Pushed) != 0 {
+					t.Errorf("logged push = %+v, want a refusal by an agent", e)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("push by an agent: %v\n%s", err, out)
+			}
+			if got, want := gitT(t, remote, "rev-parse", "main"), gitT(t, repo, "rev-parse", "HEAD"); got != want {
+				t.Errorf("remote main = %s, want %s", got, want)
+			}
+			if got := strings.TrimSpace(gitT(t, repo, "rev-list", "--count", "origin/main..main")); got != "0" {
+				t.Errorf("queue holds %s commits after the push, want 0", got)
+			}
+			if e := last(t, repo); e.Command != "push" || e.Outcome != "ok" || e.By != "agent" || len(e.Pushed) == 0 {
+				t.Errorf("logged push = %+v, want a push by an agent", e)
+			}
+			if c.check != nil {
+				c.check(t, remote)
 			}
 		})
 	}

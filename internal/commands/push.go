@@ -12,6 +12,8 @@ import (
 )
 
 // runPush fetches, rebases the review queue, asks the person at the terminal, and pushes the queue.
+// When no person answers, an agent runs it: it pushes the whole queue without a question when every commit
+// changes only memories, notes, plans and indexes, and otherwise pushes nothing.
 // It pushes the tip that it counted, so a commit that lands while it asks waits for the next push.
 func runPush(env Env, args []string) error {
 	if len(args) != 0 {
@@ -38,7 +40,13 @@ func runPush(env Env, args []string) error {
 		fmt.Fprintf(env.Out, "  %s\n", c)
 	}
 	ok, err := confirm(fmt.Sprintf("Push %s to origin? [y/N] ", commits(len(queue))))
-	if err != nil {
+	if errors.Is(err, guards.ErrNoPerson) {
+		env.event().By = "agent"
+		if err := agentQueue(repo, tip); err != nil {
+			return err
+		}
+		ok = true
+	} else if err != nil {
 		return err
 	}
 	if !ok {
@@ -75,6 +83,38 @@ func runPush(env Env, args []string) error {
 		return err
 	}
 	fmt.Fprintf(env.Out, "Pushed %s.\n", commits(len(queue)))
+	return nil
+}
+
+// agentQueue refuses the push of an agent when a commit of the queue up to tip needs the person, and names each
+// such commit with its reason, newest first. The queue is one line of history, so an agent pushes all of it or nothing.
+func agentQueue(repo, tip string) error {
+	rng := tip
+	if hasAccepted(repo) {
+		rng = acceptedRef + ".." + tip
+	}
+	// A format of its own keeps the colors and decorations of the git configuration out of the commit IDs.
+	out, err := store.Git(repo, "log", "--format=%H%x00%h %s", rng)
+	if err != nil {
+		return fmt.Errorf("list the review queue: %w", err)
+	}
+	var refused []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		sha, entry, ok := strings.Cut(line, "\x00")
+		if !ok {
+			continue
+		}
+		reason, err := personReason(repo, sha)
+		if err != nil {
+			return err
+		}
+		if reason != "" {
+			refused = append(refused, entry+": "+reason)
+		}
+	}
+	if len(refused) > 0 {
+		return errors.New("an agent pushes only memories, notes, plans and indexes, so the person pushes these commits at a terminal:\n  " + strings.Join(refused, "\n  "))
+	}
 	return nil
 }
 

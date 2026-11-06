@@ -36,6 +36,7 @@ type Event struct {
 	Reason   string         `json:"reason,omitempty"`
 	Folded   []string       `json:"folded,omitempty"`
 	Pushed   []string       `json:"pushed,omitempty"`
+	By       string         `json:"by,omitempty"`     // who ran a push without the person: agent
 	Words    map[string]int `json:"words,omitempty"`  // the words that orient printed: the header, then each level
 	Lines    map[string]int `json:"lines,omitempty"`  // the lines of each level that the budget counts, in the full orient even when the hook shortens it
 	Short    []string       `json:"short,omitempty"`  // the levels that the SessionStart hook shortened to fit the output limit of Claude Code

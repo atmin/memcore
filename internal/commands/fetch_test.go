@@ -120,6 +120,36 @@ func TestFetch(t *testing.T) {
 	})
 }
 
+func TestRecoverRefusesAnAgent(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	first := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	remember(t, dev, "pushed-then-lost", "Read when the remote loses a commit.")
+	pushYes(t, home)
+	remember(t, dev, "still-unpushed", "Read when a commit waits in the queue.")
+	gitT(t, remote, "update-ref", "refs/heads/main", first)
+	if err := Fetch(repo); err == nil || !strings.Contains(err.Error(), "memcore recover") {
+		t.Fatalf("Fetch: error = %v, want one that names memcore recover", err)
+	}
+	refs := gitT(t, repo, "for-each-ref")
+	queue := gitT(t, repo, "log", "--format=%H", "origin/main..main")
+
+	t.Setenv("CLAUDECODE", "1")
+	if _, err := run(t, home, "", "recover"); err == nil || !strings.Contains(err.Error(), "CLAUDECODE") {
+		t.Errorf("recover by an agent: error = %v, want a refusal that names CLAUDECODE", err)
+	}
+	if got := gitT(t, repo, "for-each-ref"); got != refs {
+		t.Errorf("refs after the refusal =\n%s\nwant\n%s", got, refs)
+	}
+	if got := gitT(t, repo, "log", "--format=%H", "origin/main..main"); got != queue {
+		t.Errorf("queue after the refusal = %q, want %q", got, queue)
+	}
+	if _, ok, err := readMarker(repo); !ok || err != nil {
+		t.Errorf("the marker of the rewritten remote = %v, %v after the refusal, want it kept", ok, err)
+	}
+}
+
 func TestRewrittenRemote(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	home, repo, remote := newMemory(t)
