@@ -235,7 +235,7 @@ func TestOrientExact(t *testing.T) {
   memcore draft <kind> [<topic>] Starts a plan, a note, a script, a helper, a skill, a conventions file or a glossary from its template, and commits it.
   memcore verify <path>        Checks a document, or every document under a path, for dead references and forbidden words.
   memcore snapshot [--from <dir>] Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.
-  memcore inbox                Fetches, then lists the unpushed commits, which wait for the review of the person.
+  memcore inbox                Fetches, then lists the unpushed commits as the fold at push leaves them.
   memcore stats                Measures whether memory helps, per week, from the use log and git history.
   memcore push                 Fetches, asks the person at the terminal, then pushes the unpushed commits.
   memcore recover              Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.
@@ -277,7 +277,7 @@ The indexes, from the working directory to the root. Each line says when to read
 		t.Errorf("output =\n%s\nwant\n%s", out, want)
 	}
 	e := last(t, repo)
-	wantWords := map[string]int{"header": 399, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantWords := map[string]int{"header": 398, "~/dev/app": 34, "~/dev": 30, "~": 7}
 	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
 	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
 		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)

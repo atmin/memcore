@@ -42,7 +42,7 @@ func Table() []Command {
 		{Name: "draft", Args: "<kind> [<topic>]", Does: "Starts a plan, a note, a script, a helper, a skill, a conventions file or a glossary from its template, and commits it.", Run: runDraft},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
-		{Name: "inbox", Does: "Fetches, then lists the unpushed commits, which wait for the review of the person.", Run: runInbox},
+		{Name: "inbox", Does: "Fetches, then lists the unpushed commits as the fold at push leaves them.", Run: runInbox},
 		{Name: "stats", Does: "Measures whether memory helps, per week, from the use log and git history.", Run: runStats},
 		{Name: "push", Does: "Fetches, asks the person at the terminal, then pushes the unpushed commits.", Yours: true, Run: runPush},
 		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},

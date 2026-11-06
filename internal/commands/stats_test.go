@@ -723,7 +723,7 @@ func TestInboxSummary(t *testing.T) {
 			if err != nil {
 				t.Fatalf("inbox: %v\n%s", err, out)
 			}
-			if !strings.HasPrefix(out, c.want+"The review queue holds 4 unpushed commits") {
+			if !strings.HasPrefix(out, c.want+"The review queue holds 4 unpushed commits. The fold at push leaves 3, newest first:\n") {
 				t.Errorf("output:\n%s\nwant it to start with:\n%s", out, c.want)
 			}
 		})
@@ -840,7 +840,7 @@ func TestMeasureEndToEnd(t *testing.T) {
 		fmt.Sprintf("1.0 prints of orient per session, about %d tokens each.\n", estimate(perPrint)) +
 		"Review: 2 commits pushed, 1 dropped. Accepted memories: 2, with 1 mistake so far.\n" +
 		"Friction: 1 failed call. Marks: 0 #again, 1 #wrong, 0 #stale. memcore stats shows more.\n\n"
-	if out := as("", in(home), "", "inbox"); !strings.HasPrefix(out, wantSummary+"The review queue holds 1 unpushed commit") {
+	if out := as("", in(home), "", "inbox"); !strings.HasPrefix(out, wantSummary+"The review queue holds 1 unpushed commit, newest first:\n") {
 		t.Errorf("inbox:\n%s\nwant it to start with:\n%s", out, wantSummary)
 	}
 }

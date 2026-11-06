@@ -196,7 +196,7 @@ func TestDrop(t *testing.T) {
 
 func TestInboxDetails(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	home, _, _ := newMemory(t)
+	home, repo, _ := newMemory(t)
 	dev := mkdirT(t, filepath.Join(home, "dev"))
 	remember(t, dev, "a-fact", "Read when you test a fact.")
 	if out, err := run(t, dev, memoryText("a-fact", "Read when you test a fact.", "Sharper."), "revise", "a-fact", "--reason", "The fact grew sharper."); err != nil {
@@ -206,9 +206,18 @@ func TestInboxDetails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inbox: %v\n%s", err, out)
 	}
-	for _, want := range []string{"fixup! remember: dev/memories/a-fact.md", "The fact grew sharper.", "A  dev/memories/a-fact.md", "M  dev/memories/a-fact.md", "memcore drop"} {
+	// The remember and its revise list as one entry, with the files of the folded commit.
+	entry := "\n  " + short(sha(t, repo, "remember: dev/memories/a-fact.md")) + " remember: dev/memories/a-fact.md\n" +
+		"    1 fixup folds in.\n    M  README.md\n    A  dev/README.md\n    A  dev/memories/a-fact.md\n"
+	for _, want := range []string{"The review queue holds 3 unpushed commits. The fold at push leaves 2, newest first:\n", entry, "memcore drop"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inbox does not hold %q:\n%s", want, out)
+		}
+	}
+	// The fold keeps the message of the target only.
+	for _, gone := range []string{"fixup!", "The fact grew sharper."} {
+		if strings.Contains(out, gone) {
+			t.Errorf("inbox holds %q:\n%s", gone, out)
 		}
 	}
 }

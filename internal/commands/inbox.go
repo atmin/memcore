@@ -9,7 +9,8 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// runInbox fetches, rebases the review queue, prints the summary of the week, and lists the unpushed commits.
+// runInbox fetches, rebases the review queue, prints the summary of the week, and lists the unpushed commits
+// as the fold at push leaves them.
 // A fetch or a summary that fails only warns, so the person sees the queue offline too.
 func runInbox(env Env, args []string) error {
 	if len(args) != 0 {
@@ -35,8 +36,9 @@ func runInbox(env Env, args []string) error {
 	return report(env, repo)
 }
 
-// report prints what waits on the person, without a fetch: a rewritten remote, stale indexes, the files that keep
-// auto-memory on, and the queue. The caller holds the write lock.
+// report prints what waits on the person, without a fetch. First come a rewritten remote, the stale indexes and
+// the files that keep auto-memory on. Then comes the queue as the fold at push leaves it. When the preview of the
+// fold fails, report warns and lists each commit of the queue as it is. The caller holds the write lock.
 func report(env Env, repo string) error {
 	if m, ok, err := readMarker(repo); err == nil && ok {
 		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)
@@ -54,6 +56,83 @@ func report(env Env, repo string) error {
 	if err != nil {
 		return err
 	}
+	// regenerate can add an index commit to an empty queue, so every queue gets a preview.
+	entries, err := preview(repo)
+	if err != nil {
+		fmt.Fprintf(env.Err, "warning: %v\nThe queue below lists each commit as it is, without the fold.\n", err)
+		return listQueue(env, repo, queue)
+	}
+	if len(queue) == 0 && len(entries) == 0 {
+		fmt.Fprintln(env.Out, "Nothing waits for review.")
+		return nil
+	}
+	shas, err := revList(repo, "refs/heads/main")
+	if err != nil {
+		return err
+	}
+	held := map[string]bool{}
+	same := len(entries) == len(queue) // the fold leaves each commit as it is
+	for _, p := range entries {
+		held[p.target] = true
+		for _, f := range p.fixups {
+			held[f] = true
+		}
+		if p.target == "" || len(p.fixups) > 0 {
+			same = false
+		}
+	}
+	switch {
+	case same:
+		return listQueue(env, repo, queue) // each commit keeps its sha, so the list is the queue as git shows it
+	case len(entries) == 0:
+		fmt.Fprintf(env.Out, "The review queue holds %s. The fold at push leaves none.\n", commits(len(queue), "unpushed"))
+	default:
+		fmt.Fprintf(env.Out, "The review queue holds %s. The fold at push leaves %d, newest first:\n", commits(len(queue), "unpushed"), len(entries))
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		p := entries[i]
+		name := "new" // an index that push commits
+		if p.target != "" {
+			name = abbrev(repo, p.target)
+		}
+		fmt.Fprintf(env.Out, "\n  %s %s\n", name, p.subject)
+		writeBody(env, p.body)
+		switch len(p.fixups) {
+		case 0:
+		case 1:
+			fmt.Fprintln(env.Out, "    1 fixup folds in.")
+		default:
+			fmt.Fprintf(env.Out, "    %d fixups fold in.\n", len(p.fixups))
+		}
+		writeFiles(env, p.files)
+	}
+	dropped := 0
+	for _, sha := range shas {
+		if !held[sha] {
+			dropped++
+		}
+	}
+	switch dropped {
+	case 0:
+	case 1:
+		fmt.Fprintln(env.Out, "\nThe fold drops 1 commit that leaves every document as it was.")
+	default:
+		fmt.Fprintf(env.Out, "\nThe fold drops %d commits that leave every document as it was.\n", dropped)
+	}
+	writeClosing(env, repo)
+	return nil
+}
+
+// abbrev returns the short name of a commit that git log --oneline prints, or its first seven characters.
+func abbrev(repo, sha string) string {
+	if out, err := store.Git(repo, "rev-parse", "--short", sha); err == nil {
+		return strings.TrimSpace(out)
+	}
+	return short(sha)
+}
+
+// listQueue lists each commit of the queue as it is, newest first, with its body and its files.
+func listQueue(env Env, repo string, queue []string) error {
 	if len(queue) == 0 {
 		fmt.Fprintln(env.Out, "Nothing waits for review.")
 		return nil
@@ -65,25 +144,38 @@ func report(env Env, repo string) error {
 		if err != nil {
 			return fmt.Errorf("read the commit %s: %w", sha, err)
 		}
-		files, err := store.Git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", sha)
+		files, err := filesOf(repo, sha)
 		if err != nil {
-			return fmt.Errorf("list the files of %s: %w", sha, err)
+			return err
 		}
 		fmt.Fprintf(env.Out, "\n  %s\n", c)
-		for _, line := range strings.Split(strings.TrimSpace(detail), "\n") {
-			if line != "" {
-				fmt.Fprintf(env.Out, "    %s\n", line)
-			}
-		}
-		for _, line := range strings.Split(strings.TrimSpace(files), "\n") {
-			if status, p, ok := strings.Cut(line, "\t"); ok {
-				fmt.Fprintf(env.Out, "    %s  %s\n", status, p)
-			}
+		writeBody(env, detail)
+		writeFiles(env, files)
+	}
+	writeClosing(env, repo)
+	return nil
+}
+
+// writeBody writes the lines of a commit body that are not blank, indented under the subject.
+func writeBody(env Env, body string) {
+	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		if line != "" {
+			fmt.Fprintf(env.Out, "    %s\n", line)
 		}
 	}
+}
+
+// writeFiles writes the files of a commit, each with its status letter, indented under the subject.
+func writeFiles(env Env, files []fileStatus) {
+	for _, f := range files {
+		fmt.Fprintf(env.Out, "    %s  %s\n", f.status, f.path)
+	}
+}
+
+// writeClosing writes how the person drops, reviews and accepts the queue.
+func writeClosing(env Env, repo string) {
 	fmt.Fprintln(env.Out, "\nmemcore drop <commit> removes a commit and its fixups. memcore push folds each fixup into its commit.")
 	fmt.Fprintf(env.Out, "Review them with git in %s, then accept them with memcore push.\n", tilde(repo))
-	return nil
 }
 
 // indent puts two spaces in front of each line of git output.

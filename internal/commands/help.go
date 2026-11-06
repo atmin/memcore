@@ -127,8 +127,9 @@ the memory repo, trimmed to the conversation and redacted. memcore never pushes 
 	"inbox": `memcore inbox
 
 Takes no input. It fetches, then prints a summary of the newest week in three lines, as
-memcore stats measures it. Then it lists the unpushed commits, which wait for the review
-of the person.
+memcore stats measures it. Then it lists the unpushed commits as the fold at push leaves
+them, for the review of the person. Each entry counts the fixups that fold into it. When the
+fold drops commits, the list ends with their count.
 `,
 	"stats": `memcore stats
 

@@ -80,13 +80,14 @@ func TestPush(t *testing.T) {
 
 func TestInbox(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	home, _, remote := newMemory(t)
+	home, repo, remote := newMemory(t)
+	gitT(t, repo, "config", "core.abbrev", "12")
 
 	out, err := run(t, home, "", "inbox")
 	if err != nil {
 		t.Fatalf("inbox: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "1 unpushed commit") || !strings.Contains(out, "init: create the memory repo") {
+	if !strings.Contains(out, "The review queue holds 1 unpushed commit, newest first:\n") || !strings.Contains(out, "init: create the memory repo") {
 		t.Errorf("inbox before the push = %q", out)
 	}
 
@@ -107,8 +108,11 @@ func TestInbox(t *testing.T) {
 
 	remember(t, mkdirT(t, filepath.Join(home, "dev")), "small-commits", "Read before you commit: one change per commit.")
 	out, _ = run(t, home, "", "inbox")
-	if !strings.Contains(out, "remember: dev/memories/small-commits.md") || strings.Contains(out, "init: create") {
-		t.Errorf("inbox after a new memory = %q", out)
+	// A queue that the fold leaves as it is lists as git log prints it.
+	entry := "The review queue holds 1 unpushed commit, newest first:\n\n  " + strings.TrimSpace(gitT(t, repo, "log", "--oneline", "-1")) + "\n" +
+		"    M  README.md\n    A  dev/README.md\n    A  dev/memories/small-commits.md\n\nmemcore drop <commit>"
+	if !strings.Contains(out, entry) || strings.Contains(out, "init: create") {
+		t.Errorf("inbox after a new memory = %q, want %q", out, entry)
 	}
 
 	if err := os.RemoveAll(remote); err != nil {
