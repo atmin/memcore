@@ -90,6 +90,8 @@ An index starts with a title: `# ~` for the root, and `# ~/<level>` for any othe
 
 A level has a budget of 40 lines. The budget counts what `orient` prints for the level: its memories, skills, scripts, conventions and glossary. `orient` prints no child level, because an agent never loads a sibling. It prints plans and notes as one line with their counts. So the budget limits what an agent sees, not what a level stores. `remember` warns past the budget and does not block, because only a sleep pass can fix an overflow (see [Sleep](sleep.md)).
 
+The budget counts lines, and the `SessionStart` hook adds a limit in bytes for the whole path. The hook shows `orient` in full only up to 9,500 bytes. That limit covers the header and every level up to the root (see [Interface](interface.md)). Long descriptions can pass that limit within the budget. So `remember` also warns when the `orient` of its level passes 9,500 bytes.
+
 **Placement.** Where a document goes follows from where the agent works:
 - The working directory maps to the toplevel of the git repo that holds it, as a path relative to home. A worktree maps to its main checkout, through the common git directory.
 - A directory in no repo maps to itself. Home maps to the root.
