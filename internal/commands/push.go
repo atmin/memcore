@@ -3,6 +3,8 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"path"
+	"slices"
 	"strings"
 
 	"github.com/atmin/memcore/internal/guards"
@@ -131,4 +133,57 @@ func cleanTree(repo, consequence string) error {
 		return fmt.Errorf("the working tree of the memory repo has changes that are not committed, so %s: the person commits or discards them:\n%s", consequence, strings.TrimRight(out, "\n"))
 	}
 	return nil
+}
+
+// personReason returns "" when an agent may push a commit, and otherwise the reason that only the person may:
+// "a merge commit", or the paths that the commit changes and that are not memories, notes, plans or indexes, sorted.
+// Only the person accepts skills and scripts, because they run from the accepted history.
+func personReason(repo, sha string) (string, error) {
+	// rev-list prints the commit, then its parents, and no setting of git log adds a line to it.
+	out, err := store.Git(repo, "rev-list", "--parents", "-n", "1", sha)
+	if err != nil {
+		return "", fmt.Errorf("read the parents of %s: %w", short(sha), err)
+	}
+	if len(strings.Fields(out)) > 2 {
+		return "a merge commit", nil
+	}
+	// -z keeps each path exact, and --ignore-submodules=none lets no setting of a submodule hide its change.
+	out, err = store.Git(repo, "diff-tree", "-r", "-z", "--root", "--no-commit-id", "--raw", "--no-renames", "--ignore-submodules=none", sha)
+	if err != nil {
+		return "", fmt.Errorf("list the files of %s: %w", short(sha), err)
+	}
+	fields := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
+	var paths []string
+	for i := 0; i+1 < len(fields); i += 2 {
+		// A record is ":<old mode> <new mode> <old blob> <new blob> <status>", then the path.
+		meta := strings.Fields(fields[i])
+		if len(meta) != 5 {
+			return "", fmt.Errorf("read the files of %s: git printed %q", short(sha), fields[i])
+		}
+		if !agentFile(fields[i+1], meta[1]) {
+			paths = append(paths, fields[i+1])
+		}
+	}
+	slices.Sort(paths)
+	return strings.Join(paths, ", "), nil
+}
+
+// agentFile reports whether an agent may push a change that leaves a path with mode, 000000 for a deleted path.
+// It may push a memory, a note, a plan or an index outside skills and bin, when the change deletes it or leaves
+// it a regular file.
+func agentFile(p, mode string) bool {
+	if mode != "000000" && mode != "100644" {
+		return false
+	}
+	parts := strings.Split(p, "/")
+	for _, part := range parts[:len(parts)-1] {
+		if strings.EqualFold(part, "skills") || strings.EqualFold(part, "bin") {
+			return false
+		}
+	}
+	switch docKind(p) {
+	case "memories", "notes", "plans":
+		return true
+	}
+	return path.Base(p) == "README.md"
 }

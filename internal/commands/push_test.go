@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -632,4 +633,124 @@ func TestStaleIndexEdges(t *testing.T) {
 		os.Remove(hook)
 		pushYes(t, home)
 	})
+}
+
+// treeFile is a path of a commit, with its mode and its content. A file with no mode is deleted.
+type treeFile struct{ path, mode, content string }
+
+// commitOn commits files onto parent through a scratch index, so each path keeps its exact case and its mode on any
+// file system. The content of a gitlink, mode 160000, names its commit. commitOn moves no branch, and returns the commit.
+func commitOn(t *testing.T, repo, parent, message string, files []treeFile) string {
+	t.Helper()
+	index := filepath.Join(t.TempDir(), "index")
+	git := func(stdin string, args ...string) string {
+		t.Helper()
+		out, err := store.GitIndex(repo, index, stdin, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(out)
+	}
+	git("", "read-tree", parent)
+	for _, f := range files {
+		if f.mode == "" {
+			git("", "update-index", "--force-remove", f.path)
+			continue
+		}
+		var obj string
+		if f.mode == "160000" {
+			obj = git("", "rev-parse", "--verify", f.content)
+		} else {
+			obj = git(f.content, "hash-object", "-w", "--stdin")
+		}
+		git("", "update-index", "--add", "--cacheinfo", f.mode+","+obj+","+f.path)
+	}
+	return git("", "commit-tree", git("", "write-tree"), "-p", parent, "-m", message)
+}
+
+func TestPersonReasonOfSignedCommit(t *testing.T) {
+	keygen, err := exec.LookPath("ssh-keygen")
+	if err != nil {
+		t.Skip("no ssh-keygen to sign a commit")
+	}
+	_, repo, _ := newMemory(t)
+	key := filepath.Join(t.TempDir(), "key")
+	if out, err := exec.Command(keygen, "-q", "-t", "ed25519", "-N", "", "-f", key).CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v\n%s", err, out)
+	}
+	gitT(t, repo, "config", "gpg.format", "ssh")
+	gitT(t, repo, "config", "user.signingkey", key)
+	gitT(t, repo, "config", "log.showSignature", "true")
+	writeT(t, repo, "dev/memories/a-fact.md", memoryText("a-fact", "Read when you test a fact.", "A fact."))
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-S", "-m", "test: a signed memory")
+	sha := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	if got, err := personReason(repo, sha); err != nil || got != "" {
+		t.Errorf("personReason of a signed memory = %q, %v; want \"\"", got, err)
+	}
+}
+
+func TestPersonReason(t *testing.T) {
+	const regular = "100644"
+	cases := []struct {
+		name   string
+		before []treeFile // the commit before the case
+		change []treeFile // the commit of the case
+		side   []treeFile // a commit beside the change, which a merge joins with it
+		want   string
+	}{
+		{name: "a new memory", change: []treeFile{{"dev/memories/a-fact.md", regular, "A fact.\n"}}},
+		{name: "a revised note",
+			before: []treeFile{{"dev/notes/a-note.md", regular, "A note.\n"}},
+			change: []treeFile{{"dev/notes/a-note.md", regular, "A sharper note.\n"}}},
+		{name: "a deleted plan",
+			before: []treeFile{{"dev/plans/a-plan.md", regular, "A plan.\n"}},
+			change: []treeFile{{"dev/plans/a-plan.md", "", ""}}},
+		{name: "the index of a level", change: []treeFile{{"dev/README.md", regular, "# dev\n"}}},
+		{name: "a memory with a space and a letter outside ASCII", change: []treeFile{{"dev/memories/café notes.md", regular, "A fact.\n"}}},
+		{name: "a skill", change: []treeFile{{"skills/a-skill/SKILL.md", regular, "A skill.\n"}}, want: "skills/a-skill/SKILL.md"},
+		{name: "a skill in Skills", change: []treeFile{{"Skills/a-skill/SKILL.md", regular, "A skill.\n"}}, want: "Skills/a-skill/SKILL.md"},
+		{name: "a skill of a level with a space", change: []treeFile{{"dev/skills/my skill/SKILL.md", regular, "A skill.\n"}}, want: "dev/skills/my skill/SKILL.md"},
+		{name: "a script and a helper",
+			change: []treeFile{{"dev/bin/start-stack", "100755", "#!/bin/sh\n"}, {"dev/bin/lib.sh", regular, "x=1\n"}},
+			want:   "dev/bin/lib.sh, dev/bin/start-stack"},
+		{name: "a conventions file and a glossary",
+			change: []treeFile{{"glossary.md", regular, "Terms.\n"}, {"conventions.md", regular, "Rules.\n"}},
+			want:   "conventions.md, glossary.md"},
+		{name: "an executable memory", change: []treeFile{{"dev/memories/a-fact.md", "100755", "A fact.\n"}}, want: "dev/memories/a-fact.md"},
+		{name: "a symlink in memories", change: []treeFile{{"dev/memories/a-link.md", "120000", "../../README.md"}}, want: "dev/memories/a-link.md"},
+		{name: "a skill moved into memories",
+			before: []treeFile{{"skills/a-skill/SKILL.md", regular, "A skill.\n"}},
+			change: []treeFile{{"skills/a-skill/SKILL.md", "", ""}, {"dev/memories/a-skill.md", regular, "A skill.\n"}},
+			want:   "skills/a-skill/SKILL.md"},
+		{name: "a submodule that .gitmodules ignores",
+			change: []treeFile{
+				{".gitmodules", regular, "[submodule \"sub\"]\n\tpath = dev/memories/sub\n\turl = ./sub\n\tignore = all\n"},
+				{"dev/memories/sub", "160000", "HEAD"},
+			},
+			want: ".gitmodules, dev/memories/sub"},
+		{name: "a merge of two memories",
+			change: []treeFile{{"dev/memories/a-fact.md", regular, "A fact.\n"}},
+			side:   []treeFile{{"dev/memories/b-fact.md", regular, "B fact.\n"}},
+			want:   "a merge commit"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, repo, _ := newMemory(t)
+			base := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+			if c.before != nil {
+				base = commitOn(t, repo, base, "before", c.before)
+			}
+			sha := commitOn(t, repo, base, "change", c.change)
+			if c.side != nil {
+				side := commitOn(t, repo, base, "side", c.side)
+				tree, _, _ := strings.Cut(gitT(t, repo, "merge-tree", "--write-tree", sha, side), "\n")
+				sha = strings.TrimSpace(gitT(t, repo, "commit-tree", tree, "-p", sha, "-p", side, "-m", "merge"))
+			}
+			got, err := personReason(repo, sha)
+			if err != nil || got != c.want {
+				t.Errorf("personReason = %q, %v; want %q", got, err, c.want)
+			}
+		})
+	}
 }
