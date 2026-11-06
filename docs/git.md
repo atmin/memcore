@@ -9,7 +9,7 @@ The intended remote is a future gitmote. It is serverless, lives in object stora
 - A correction of an unpushed change becomes a fixup commit. `push` folds each fixup into the commit it corrects.
 - Until you push, memcore can rewrite history for clarity: it can reorder, merge, reword or drop commits.
 - Nobody rewrites pushed history, and nobody pushes with `--force`, except you, in a purge.
-- Only you push, and only you purge.
+- An agent pushes memories, notes and plans when you ask. Only you push the other documents, and only you purge.
 - You drop a commit of the queue with `memcore drop`, at your terminal, and the drop keeps your reason.
 
 Each commit of memcore names its command and its path, as `remember: dev/memories/tests-before-code.md`. The commands that commit are `remember`, `revise`, `forget` and `draft`. `push` adds `index: <path>` for an index that a hand edit left stale. The body of a `revise` or a `forget` holds its reason. A fixup is `fixup! <subject of its target>`, with its command, its path and its reason in the body. The first commit of a new memory repo is `init: create the memory repo`. `init` commits each import of auto-memory as `init: import the auto-memory of <dir>`. A snapshot commits to the transcripts branch as `snapshot: <n> transcripts`, never to `main`.
@@ -24,14 +24,18 @@ Hostile text, such as a web page, an issue or an email, can make an agent plant 
 
 ## Only you
 
-An agent runs as you, so nothing on your machine can stop it from calling `push` or `purge`. It can fake a terminal and answer a prompt. So the guard is something the agent does not have: the credential that the remote needs for a write. `init` binds that credential to your presence, or to a passphrase that only you know, with the strongest guard available:
+An agent runs as you, so nothing on your machine can stop it from calling `push` or `purge`. It can fake a terminal and answer a prompt. So the planned guard is something the agent does not have: the credential that the remote needs for a write. Later work: `init` binds that credential to your presence, or to a passphrase that only you know, with the strongest guard available:
 1. The strongest is a security key, such as a YubiKey. OpenSSH keeps the key on it, and every signature needs a touch, with a PIN if you choose. The OpenSSH that macOS ships lacks this support, and the one from Homebrew has it.
 2. The next is Touch ID, through an SSH agent that keeps the key in the Secure Enclave, such as Secretive<sup>[1](#sources)</sup>. The agent asks for your touch at every signature, and the system dialog falls back to your login password when Touch ID is unavailable.
 3. The floor is a passphrase key. memcore runs ssh with that key alone, without an agent or a cache, so you type the passphrase at every push.
 
-`push` and `purge` sign with that key, so they need you at the keyboard, whoever starts them. You push in bulk at review time, so you type or touch once per review. A background fetch cannot wait for you, so the memory repo also has a read-only credential, which memcore may cache. `inbox` shows which guard protects the remote.
+With that key, `push` and `purge` would need you at the keyboard, whoever starts them. You would push in bulk at review time, so you type or touch once per review. A background fetch cannot wait for you, so the memory repo would also have a read-only credential, which memcore may cache. `inbox` would show which guard protects the remote.
 
-Two more guards stop an agent's mistakes earlier, and you do not rely on them. memcore refuses `push` and `purge` when it finds no controlling terminal or sees the variables that agents set. `init` denies `push` in the permissions of Claude Code, with `drop` and `recover`. Where the host can forbid force pushes, keep that protection on. Lift it for a purge in the host's own interface.
+Two more guards stop an agent's mistakes earlier, and you do not rely on them. memcore refuses `purge`, `drop` and `recover` when it finds no controlling terminal or sees the variables that agents set. `init` denies `drop` and `recover` in the permissions of Claude Code, but not `push`. Where the host can forbid force pushes, keep that protection on. Lift it for a purge in the host's own interface.
+
+An agent pushes when you ask it to. memcore cannot see the chat, so `orient` tells an agent to push only then. Skills and scripts run from the accepted history, so their push stays yours. Today `push` uses the credential that git already has, for you and for an agent alike. A key bound to your presence would stop an agent's push too, so its design is open: see [Open questions](open-questions.md).
+
+Without a terminal, or with the variables that agents set, `push` asks nothing. It checks the queue that the fold leaves. It pushes the whole queue only when every commit changes only memories, notes, plans and indexes. Otherwise it pushes nothing. It names each commit that you push at your terminal: a merge, or a commit with any other file.
 
 ## Purge
 

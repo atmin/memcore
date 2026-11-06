@@ -8,7 +8,7 @@ memcore is one Go executable. It runs the installed git and the agent that you a
 2. **Store.** The memory repo, its indexes and the transcripts branch. memcore changes the store only through the installed git.
 3. **Readers.** One adapter for each agent's transcript format, such as the JSONL files of Claude Code. Each adapter converts its format into one trimmed conversation format. The readers also read the auto-memory of Claude Code, and find the directory behind each of its project folders.
 4. **Thinking.** Extraction, merges, promotions and contradiction checks. memcore runs your agent headless for this work, for example with `claude -p` or `codex exec`.
-5. **Guards.** Redaction, `verify`, the write lock, and the confirmation and the key behind `push` and `purge`.
+5. **Guards.** Redaction, `verify`, the write lock, the confirmation and the key behind `push` and `purge`, and the check of the files that an agent pushes.
 
 ## Git
 

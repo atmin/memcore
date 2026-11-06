@@ -25,7 +25,7 @@ Between M2 and M3, memcore goes live: it becomes the only memory of its maintain
 - Data collection comes before analysis. The use log ships in M1 and snapshots ship in M2, so later milestones have history to measure.
 - Deterministic work comes before thinking. M1 to M3 call no agent, so they stay cheap and testable.
 - M3 comes before M4. M3 is cheap, and it shows the use and the friction before sleep spends tokens. A miss needs the text of a session, so M4 finds the misses.
-- Agents act, and you verify. No milestone lets memcore push, and every change waits in the review queue.
+- Agents act, and you verify. Every change waits in the review queue. An agent pushes memories, notes and plans when you ask, and only you push skills and scripts.
 - Exact data comes from the hooks of Claude Code, and conversation text comes from transcripts. Hook input is documented. The transcript format is internal to Claude Code, and it changes between versions.
 
 ## M1: Write
@@ -34,7 +34,7 @@ A fresh agent reads, writes, corrects and removes any document through memcore a
 
 - `remember`, `revise` and `draft` take the document as memcore stores it. memcore reads it leniently, and writes the canonical form.
 - `memcore help <command>` shows the format of each input. Every input error names its cause.
-- `inbox` lists the queue as the fold leaves it, each commit with its message and its files. Only you drop or push, at your terminal.
+- `inbox` lists the queue as the fold leaves it, each commit with its message and its files. Only you drop, at your terminal. An agent pushes memories, notes and plans when you ask, and only you push the other documents.
 - Every call of memcore appends one line to the use log, except a tool call that reads no document. memcore keeps each commit in the use log reachable, so a fold loses no version that a session saw.
 - `MEMCORE_REPO` points memcore at a scratch memory repo, for tests, dry runs and evals.
 

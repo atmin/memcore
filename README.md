@@ -6,11 +6,11 @@ memcore is long-term memory for the agents you work with, kept as plain markdown
 
 Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.
 
-**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `push`, `drop` and `recover` work on it. `push` asks at your terminal, but the key bound to your presence is still design. The rest of these docs is design. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
+**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `push`, `drop` and `recover` work on it. `push` asks at your terminal, and an agent's push sends memories, notes and plans without a question. The key bound to your presence is still design. The rest of these docs is design. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
 
 ## Principles
 
-- **Agents act, and you verify.** An agent writes a memory, and memcore commits it to the memory repo without asking you. You review the commits in bulk, and only you push.
+- **Agents act, and you verify.** An agent writes a memory, and memcore commits it to the memory repo without asking you. You review the commits in bulk. An agent pushes memories, notes and plans when you ask, and only you push skills and scripts.
 - **Lean context, progressive disclosure.** An agent sees the least it needs. It reaches anything else in a few small hops, the way an index keeps a large table one small read away.
 - **Plain files, plain git.** memcore uses no database and no vector store. You can read and edit everything by hand.
 - **Local first.** Memory lives in a git repo on your machine, and it works without the remote. Local redaction runs before anything leaves. Memories go to your remote for storage. Text goes to the agent that you already use for thinking, and nowhere else.

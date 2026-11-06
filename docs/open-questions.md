@@ -11,5 +11,6 @@
 - **Local thinking.** A later option runs the thinking on a local model instead of a hosted agent. What form should it take?
 - **Sharing.** Can an organisation's subtree become a team's shared memory, and what does review look like then?
 - **Transcripts off the machine.** Once the remote is end-to-end encrypted, should the transcripts branch be pushed too, as a backup and to reach other machines? A purge would then rewrite it on the remote too.
+- **Agent push.** An agent pushes memories, notes and plans with the write credential. So a key bound to your presence can no longer guard skills and scripts. Should the accepted checkout move only to skills and scripts that you sign, or should the remote take two credentials?
 - **The guard on gitmote.** gitmote speaks smart HTTP with tokens, and a serverless remote has no server to check a touch, because the bucket credential is the write access. The write credential would have to be sealed to a presence-bound key and unsealed per push. How?
 - **Chat apps.** Chat apps have no shell; they reach outside tools only through MCP connectors. Should memcore reach them too?
