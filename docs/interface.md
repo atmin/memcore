@@ -20,7 +20,7 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | upkeep | `snapshot` | Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted. `--from <dir>` reads an old copy of the projects folder. A call of memcore starts a snapshot in the background when six hours have passed since the last one. |
 | | `sleep` | Runs a sleep pass, with one commit per change. The pass runs `verify` on every document. |
 | | `verify <path>` | Checks the documents at a path, or any markdown, against the references they name, the glossaries on their path and the voice skill. |
-| | `inbox` | Lists what waits on you: the unpushed commits with their reasons and files, and the stale indexes. It also warns of a remote that lost accepted commits. It fetches first, then prints a summary of the newest week of `stats` in three lines. The open contradictions and the guard of the remote wait for later work. |
+| | `inbox` | Lists what waits on you: the unpushed commits as the fold at push leaves them, and the stale indexes. An entry shows the message and the files of its commit after the fold, and counts the fixups that fold in. When the fold drops commits, the list ends with their count. It also warns of a remote that lost accepted commits. It fetches first, then prints a summary of the newest week of `stats` in three lines. The open contradictions and the guard of the remote wait for later work. |
 | yours | `push` | Refuses uncommitted changes, fetches, writes each stale index again, and folds in the fixups. Then it asks for confirmation at your terminal and pushes. The key that only you can use waits for later work (see [Git](git.md)). After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. |
 | | `purge <path>`, `purge --text` | Removes a document or a passage from every commit, then force pushes once, with the same confirmation and key as `push`. See [Git](git.md). |
 | | `drop <commit>` | Removes a commit of the review queue, with its fixups, after it asks at your terminal. It records your reason, so sleep learns from it. |
@@ -41,7 +41,7 @@ Agents seldom call `verify` themselves, because the write commands and every sle
 - **Capture:** the committed lines of `remember`, `revise`, `forget` and `draft`, for memories and for other documents. A fold changes no count.
 - **Review:** the queue commits created, pushed and dropped, with the fixups among them. An accepted memory is a memory that a pushed commit adds or modifies, imports included. Each push counts it once, in the week of the push. The precision is the share of accepted memories that are no accepted mistake. The two newest weeks say "so far", because their mistakes can still grow.
 - **Use:** the sessions, the reads per session, the reads around memcore, and the five most-read memories. Only reads with a session count here.
-- **Context cost:** the words and the estimated tokens that `orient` printed, per session with a print. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
+- **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. A subagent can inherit the session id of its agent, so one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
 - **Friction:** the failed calls of memcore, grouped by command and error. Errors that differ only in a path, a commit or a number fall in one group. The five largest groups show, then the count of the rest.
 - **Marks:** the counts of `#again`, `#wrong` and `#stale`.
 
@@ -50,7 +50,7 @@ More rules of `stats`:
 - `stats` reads the subject and the changed paths of each logged commit from git. A commit that changes nothing keeps its subject. `stats` names the count of logged commits that git lacks.
 - Lines within one second keep the order of the log. So a `revise` in the second of its push, after the push in the log, is an accepted mistake.
 - The estimated tokens are the words × 4 ÷ 3. `orient` prints many paths, so the true count is likely higher. The estimate serves to compare weeks and levels.
-- Averages round half away from zero. The reads per session keep one decimal, and the words per session keep none.
+- Averages round half away from zero. The reads and the prints per session keep one decimal, and the words per print keep none.
 
 Then `stats` lists the memories with no logged read in 30 days, 20 at most:
 - A memory counts when it is at `HEAD` and older than 30 days.

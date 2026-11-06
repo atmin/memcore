@@ -34,7 +34,7 @@ A fresh agent reads, writes, corrects and removes any document through memcore a
 
 - `remember`, `revise` and `draft` take the document as memcore stores it. memcore reads it leniently, and writes the canonical form.
 - `memcore help <command>` shows the format of each input. Every input error names its cause.
-- `inbox` shows each queue commit with its reason and its files. Only you drop or push, at your terminal.
+- `inbox` lists the queue as the fold leaves it, each commit with its message and its files. Only you drop or push, at your terminal.
 - Every call of memcore appends one line to the use log, except a tool call that reads no document. memcore keeps each commit in the use log reachable, so a fold loses no version that a session saw.
 - `MEMCORE_REPO` points memcore at a scratch memory repo, for tests, dry runs and evals.
 
@@ -60,7 +60,7 @@ See [Install](install.md) and [Transcripts](transcripts.md).
 1. **Capture:** the memories remembered, revised and forgotten, and the other documents written.
 2. **Review precision:** the queue commits created, pushed and dropped, and the accepted memories. A `revise` or a `forget` of an accepted memory within 14 days after its push counts as an accepted mistake.
 3. **Use:** the reads per session, the most-read memories, and the memories with no logged read in 30 days. The reads include the reads around memcore.
-4. **Context cost:** the words and the estimated tokens that `orient` printed per session and per level, against the budget.
+4. **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. Each level shows its words, and its lines against the budget.
 5. **Friction:** the failed calls of memcore, grouped by error.
 6. **Your marks:** the counts of `#again`, `#wrong` and `#stale`.
 
