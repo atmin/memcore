@@ -95,6 +95,14 @@ func TestInboxAllDropped(t *testing.T) {
 func TestInboxIndexHeader(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	const fact = "Read when you test a fact."
+	// dropped remembers a fact at ~/work and forgets it, a chain that the fold drops.
+	dropped := func(t *testing.T, home string) {
+		work := mkdirT(t, filepath.Join(home, "work"))
+		remember(t, work, "a-fact", fact)
+		if out, err := run(t, work, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+			t.Fatalf("forget: %v\n%s", err, out)
+		}
+	}
 	for _, c := range []struct {
 		name   string
 		hand   string // the memory that the person commits by hand and pushes with git, which leaves indexes stale
@@ -129,17 +137,19 @@ func TestInboxIndexHeader(t *testing.T) {
 		},
 		{
 			// The fold drops the chain, so no kept commit takes the change of the stale index.
-			name: "a dropped chain and an index commit",
-			hand: "dev/memories/by-hand.md",
-			queue: func(t *testing.T, home string) {
-				work := mkdirT(t, filepath.Join(home, "work"))
-				remember(t, work, "a-fact", fact)
-				if out, err := run(t, work, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
-					t.Fatalf("forget: %v\n%s", err, out)
-				}
-			},
+			name:   "a dropped chain and an index commit",
+			hand:   "dev/memories/by-hand.md",
+			queue:  dropped,
 			header: "The review queue holds 2 unpushed commits. The fold at push leaves none, and push adds 1 index commit, newest first:\n",
 			news:   []string{"\n  new index: dev/README.md\n    M  README.md\n    A  dev/README.md\n"},
+		},
+		{
+			// The chain writes the stale root index, and push writes it again after the fold drops the chain.
+			name:   "a dropped chain that held a stale index",
+			hand:   "memories/by-hand.md",
+			queue:  dropped,
+			header: "The review queue holds 2 unpushed commits. The fold at push leaves none, and push adds 1 index commit, newest first:\n",
+			news:   []string{"\n  new index: README.md\n    M  README.md\n"},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

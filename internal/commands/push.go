@@ -132,7 +132,8 @@ func revList(repo, tip string) ([]string, error) {
 }
 
 // prepare readies the queue for a push under the write lock. It refuses a working tree with
-// uncommitted changes, fetches, regenerates the stale indexes, and folds the fixups. It returns the tip,
+// uncommitted changes, fetches, regenerates the stale indexes, folds the fixups, and regenerates again,
+// since a chain that the fold drops may have held the change of a stale index. It returns the tip,
 // the accepted commit, the queue, newest first, the commits of the indexes and the commits that the fold removed.
 func prepare(repo string) (tip, base string, queue, made, folded []string, err error) {
 	unlock, err := store.Lock(repo)
@@ -151,6 +152,11 @@ func prepare(repo string) (tip, base string, queue, made, folded []string, err e
 	}
 	if folded, err = fold(repo); err != nil {
 		return "", "", nil, made, nil, err
+	}
+	again, err := regenerate(repo)
+	made = append(made, again...)
+	if err != nil {
+		return "", "", nil, made, folded, err
 	}
 	if err := foreignNames(repo); err != nil {
 		return "", "", nil, made, folded, err

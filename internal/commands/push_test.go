@@ -514,6 +514,29 @@ func foldCases() []foldCase {
 				}
 			},
 		},
+		{
+			// The remember and its forget write the stale root index, and the fold drops them, so the index is stale again.
+			name: "a dropped chain that held a stale index",
+			queue: func(t *testing.T, home, repo, remote string) func(*testing.T, string) {
+				writeT(t, repo, "memories/by-hand.md", memoryText("by-hand", "Read when you edit by hand.", "A fact."))
+				gitT(t, repo, "add", "-A")
+				gitT(t, repo, "commit", "-q", "-m", "test: a memory by hand")
+				gitT(t, repo, "push", "-q", "origin", "main")
+				work := mkdirT(t, filepath.Join(home, "work"))
+				remember(t, work, "a-fact", fact)
+				if out, err := run(t, work, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+					t.Fatalf("forget: %v\n%s", err, out)
+				}
+				return func(t *testing.T, out string) {
+					if got := gitT(t, remote, "show", "main:README.md"); !strings.Contains(got, "by-hand") {
+						t.Errorf("remote root index =\n%s\nwant the memory by hand\n%s", got, out)
+					}
+					if stale, err := staleIndexes(repo); err != nil || len(stale) > 0 {
+						t.Errorf("stale indexes after the push = %q, %v, want none", stale, err)
+					}
+				}
+			},
+		},
 	}
 }
 

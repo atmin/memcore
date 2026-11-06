@@ -25,9 +25,9 @@ type pick struct {
 	fixups []string
 }
 
-// preview returns the review queue as push would leave it, oldest first. It runs regenerate and fold, as prepare
-// does, in a scratch clone of main, and removes the clone before it returns. So it changes nothing in the memory
-// repo, and runs no git hook and no file system monitor. The caller holds the write lock.
+// preview returns the review queue as push would leave it, oldest first. It runs regenerate, fold and regenerate
+// again, as prepare does, in a scratch clone of main, and removes the clone before it returns. So it changes nothing
+// in the memory repo, and runs no git hook and no file system monitor. The caller holds the write lock.
 func preview(repo string) ([]previewed, error) {
 	// The clone lacks the ignored files, and an index of push might list them.
 	out, err := store.Git(repo, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain", "--ignored", "--untracked-files=all")
@@ -58,17 +58,24 @@ func preview(repo string) ([]previewed, error) {
 	if _, err := fold(clone); err != nil {
 		return nil, fmt.Errorf("the fold at push would stop: %w", err)
 	}
-	shas, err := revList(clone, "refs/heads/main")
+	// A chain that the fold drops may have held the change of a stale index, so push regenerates again.
+	again, err := regenerate(clone)
+	if err != nil {
+		return nil, fmt.Errorf("push would stop: %w", err)
+	}
+	all, err := revList(clone, "refs/heads/main")
 	if err != nil {
 		return nil, err
 	}
-	commits := make([]previewed, len(shas))
-	keys := make([]string, len(shas))
-	for i, sha := range shas {
+	commits := make([]previewed, len(all))
+	keys := make([]string, len(all))
+	for i, sha := range all {
 		if commits[i], keys[i], err = describe(clone, sha); err != nil {
 			return nil, err
 		}
 	}
+	// The index commits after the fold come last and are no picks of the todo, so they keep no target and no fixups.
+	shas := all[:len(all)-len(again)]
 	matched, err := readTodo(clone)
 	if err != nil {
 		return nil, err
@@ -79,7 +86,7 @@ func preview(repo string) ([]previewed, error) {
 		for i, sha := range shas {
 			matched[i] = pick{sha: sha}
 		}
-	} else if matched, err = match(clone, keys, matched); err != nil {
+	} else if matched, err = match(clone, keys[:len(shas)], matched); err != nil {
 		return nil, err
 	}
 	inQueue := map[string]bool{}
