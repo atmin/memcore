@@ -16,7 +16,7 @@ Each commit of memcore names its command and its path, as `remember: dev/memorie
 
 **Fold.** `push` folds the queue with one interactive rebase, and never rewrites the accepted history. A fixup folds into the nearest earlier commit with its subject. A chain that leaves every document as it found it, such as a remember and its forget, goes whole. Indexes are generated, so the fold writes each index again after each commit. A conflict in any other document stops the fold and leaves the queue as it was.
 
-`inbox` runs the same fold on a scratch clone of `main`, to show what `push` would leave. It shows an index that `push` would commit as `new`. Only `push` folds the memory repo. The clone runs no hook, file system monitor or signing helper. When the fold in the clone stops, `inbox` warns and lists each commit of the queue as it is.
+`inbox` runs the same fold on a scratch clone of `main`, to show what `push` would leave. It shows an index that `push` would commit as `new`. The header of `inbox` counts the index commits that `push` adds apart from the commits that the fold leaves. Only `push` folds the memory repo. The clone runs no hook, file system monitor or signing helper. When the fold in the clone stops, `inbox` warns and lists each commit of the queue as it is.
 
 Agents load unreviewed memories at once, and `orient` labels them as unreviewed. A bad memory lasts until your next review, and the review leaves a clean history.
 
