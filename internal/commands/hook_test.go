@@ -2,7 +2,9 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -206,6 +208,87 @@ func TestHook(t *testing.T) {
 		out, _ = run(t, dev, "", "help")
 		if strings.Contains(out, "memcore hook") {
 			t.Errorf("help lists hook:\n%s", out)
+		}
+	})
+}
+
+// longLevel commits n memories with long descriptions at a level, so its print of orient passes hookBytes
+// when n is 30. It returns the paths of the memories.
+func longLevel(t *testing.T, repo, level string, n int) []string {
+	t.Helper()
+	var paths []string
+	for i := range n {
+		name := fmt.Sprintf("part-%02d", i)
+		p := path.Join(store.Folder(level), "memories", name+".md")
+		paths = append(paths, p)
+		writeT(t, repo, p, memoryText(name, fmt.Sprintf("Read when you change part %d of the shop: the checkout, the cart, the stock, the prices, the taxes, the shipping, the returns, the coupons, the reviews and the photos of each product, in each country where the shop sells.", i), "A fact."))
+	}
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: a level with long descriptions")
+	return paths
+}
+
+func TestSessionStartFits(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	shop := mkdirT(t, filepath.Join(home, "shop"))
+	paths := longLevel(t, repo, "shop", 30)
+
+	in := hookJSON(map[string]string{"session_id": "s9", "cwd": shop, "hook_event_name": "SessionStart", "source": "startup"})
+	out, err := run(t, home, in, "hook", "session-start")
+	if err != nil {
+		t.Fatalf("hook: %v\n%s", err, out)
+	}
+	if len(out) > hookBytes {
+		t.Errorf("the hook printed %d bytes, over %d", len(out), hookBytes)
+	}
+	notice := "Run memcore orient before you act. This print leaves out the descriptions of ~/shop, to fit the output limit of Claude Code hooks.\n"
+	if !strings.HasPrefix(out, notice) {
+		t.Errorf("output starts %q, want the notice %q", out[:min(len(out), 200)], notice)
+	}
+	for _, p := range paths {
+		if !strings.Contains(out, "\n- "+p+" [unreviewed]\n") {
+			t.Errorf("output has no line for %s:\n%s", p, out)
+		}
+	}
+	e := last(t, repo)
+	if !slices.Equal(e.Short, []string{"~/shop"}) {
+		t.Errorf("short = %v, want ~/shop", e.Short)
+	}
+	sum := 0
+	for _, n := range e.Words {
+		sum += n
+	}
+	if sum != len(strings.Fields(out)) {
+		t.Errorf("words = %v, %d in all, want the %d words of the print", e.Words, sum, len(strings.Fields(out)))
+	}
+	if e.Lines["~/shop"] != len(paths) {
+		t.Errorf("lines = %v, want %d for ~/shop", e.Lines, len(paths))
+	}
+
+	full, err := run(t, shop, "", "orient")
+	if err != nil {
+		t.Fatalf("orient: %v\n%s", err, full)
+	}
+	if len(full) <= hookBytes {
+		t.Errorf("orient printed %d bytes, want more than %d", len(full), hookBytes)
+	}
+	if e := last(t, repo); len(e.Short) != 0 {
+		t.Errorf("orient logged the short levels %v, want none", e.Short)
+	}
+
+	t.Run("a print that fits", func(t *testing.T) {
+		in := hookJSON(map[string]string{"session_id": "s9", "cwd": home, "hook_event_name": "SessionStart", "source": "startup"})
+		out, err := run(t, home, in, "hook", "session-start")
+		if err != nil {
+			t.Fatalf("hook: %v\n%s", err, out)
+		}
+		want, err := run(t, home, "", "orient")
+		if err != nil {
+			t.Fatalf("orient: %v\n%s", err, want)
+		}
+		if out != want {
+			t.Errorf("hook =\n%s\nwant the print of orient\n%s", out, want)
 		}
 	})
 }

@@ -89,7 +89,21 @@ func runHook(env Env, args []string) error {
 				return err
 			}
 		}
-		return runOrient(env, nil)
+		// Claude Code passes a longer output of a hook only as a file and a preview.
+		// So the hook prints orient in a form that fits hookBytes.
+		repo, err := openRepo()
+		if err != nil {
+			return err
+		}
+		o, err := orientation(repo, env.Dir)
+		if err != nil {
+			return err
+		}
+		text, words, short := o.fit(hookBytes)
+		_, _, lines := o.full()
+		e.Words, e.Lines, e.Short = words, lines, short
+		_, err = io.WriteString(env.Out, text)
+		return err
 	case "prompt":
 		found := findMarks(in.Prompt)
 		for _, m := range marks {

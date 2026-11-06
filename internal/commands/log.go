@@ -37,7 +37,8 @@ type Event struct {
 	Folded   []string       `json:"folded,omitempty"`
 	Pushed   []string       `json:"pushed,omitempty"`
 	Words    map[string]int `json:"words,omitempty"`  // the words that orient printed: the header, then each level
-	Lines    map[string]int `json:"lines,omitempty"`  // the lines that orient printed for each level and that the budget counts
+	Lines    map[string]int `json:"lines,omitempty"`  // the lines of each level that the budget counts, in the full orient even when the hook shortens it
+	Short    []string       `json:"short,omitempty"`  // the levels that the SessionStart hook shortened to fit the output limit of Claude Code
 	Dir      string         `json:"dir,omitempty"`    // the directory of a hook, as ~/<path>
 	Source   string         `json:"source,omitempty"` // the source of a session start: startup, resume, clear, compact or fork
 	Marks    []string       `json:"marks,omitempty"`  // the marks of a prompt; no field holds the prompt

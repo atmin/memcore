@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"fmt"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -302,11 +304,94 @@ func TestOrientationShortLines(t *testing.T) {
 			"- dev/memories/a-fact.md: Read when you need a fact about the team. [unreviewed]",
 			"- dev/memories/small-commits.md: Read before you commit: one change per commit.",
 		},
-		count: "1 plan: memcore show dev/README.md lists them.",
-		short: []string{"- dev/memories/a-fact.md [unreviewed]", "- dev/memories/small-commits.md"},
+		count:     "1 plan: memcore show dev/README.md lists them.",
+		short:     []string{"- dev/memories/a-fact.md [unreviewed]", "- dev/memories/small-commits.md"},
+		documents: 3,
 	}
 	if got := o.levels[1]; !reflect.DeepEqual(got, want) {
 		t.Errorf("level = %+v, want %+v", got, want)
+	}
+}
+
+// fitLevel returns a level for TestFit with n memories, each with a description of about 70 bytes, and some notes.
+func fitLevel(level string, n, notes int) levelPart {
+	l := levelPart{title: title(level), documents: n + notes}
+	for i := range n {
+		p := path.Join(level, "memories", fmt.Sprintf("m%02d.md", i))
+		l.lines = append(l.lines, fmt.Sprintf("- %s: Read when you work on part %d of %s, which takes a long description.", p, i, title(level)))
+		l.short = append(l.short, "- "+p)
+	}
+	if notes > 0 {
+		l.count = fmt.Sprintf("%d notes: memcore show %s lists them.", notes, path.Join(level, "README.md"))
+	}
+	return l
+}
+
+func TestFit(t *testing.T) {
+	o := orientText{
+		header: strings.Repeat("The header of orient. ", 24) + "\n",
+		levels: []levelPart{fitLevel("b", 10, 0), fitLevel("a", 20, 2), fitLevel("", 4, 3)},
+	}
+	notice := func(left string) string {
+		return "Run memcore orient before you act. This print leaves out " + left + ", to fit the output limit of Claude Code hooks.\n\n"
+	}
+	full, _, _ := o.full()
+	tests := []struct {
+		name     string
+		limit    int
+		short    []string // the titles of the shortened levels
+		start    string   // the start of the print
+		replaced []string // the lines of the replaced levels
+	}{
+		{"a print that fits", len(full), nil, full, nil},
+		{"the largest level goes short first", len(full) - 1, []string{"~/a"}, notice("the descriptions of ~/a"), nil},
+		{"two levels go short", 2000, []string{"~/b", "~/a"}, notice("the descriptions of ~/b and ~/a"), nil},
+		{"a level is replaced", 1200, []string{"~/b", "~/a", "~"}, notice("the descriptions of ~/b and ~, and the lines of ~/a"), []string{"~/a: 22 documents, which memcore orient lists."}},
+		{"a header longer than the limit", 400, []string{"~/b", "~/a", "~"}, hookFallback, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, words, short := o.fit(tt.limit)
+			if len(text) > tt.limit {
+				t.Errorf("print of %d bytes, over the limit of %d", len(text), tt.limit)
+			}
+			if !slices.Equal(short, tt.short) {
+				t.Errorf("short = %v, want %v", short, tt.short)
+			}
+			if !strings.HasPrefix(text, tt.start) {
+				t.Errorf("print =\n%s\nwant a start of\n%s", text, tt.start)
+			}
+			sum := 0
+			for _, n := range words {
+				sum += n
+			}
+			if sum != len(strings.Fields(text)) {
+				t.Errorf("words = %v, %d in all, want the %d words of the print", words, sum, len(strings.Fields(text)))
+			}
+			if tt.start == hookFallback {
+				if text != hookFallback {
+					t.Errorf("print = %q, want only the fixed text", text)
+				}
+				return
+			}
+			for _, l := range o.levels {
+				i := slices.IndexFunc(tt.replaced, func(r string) bool { return strings.HasPrefix(r, l.title+": ") })
+				switch {
+				case i >= 0:
+					if !strings.Contains(text, "\n"+tt.replaced[i]+"\n") || strings.Contains(text, l.short[0]) {
+						t.Errorf("print =\n%s\nwant only the line %q for %s", text, tt.replaced[i], l.title)
+					}
+				case slices.Contains(tt.short, l.title):
+					if !strings.Contains(text, l.block(l.short)) {
+						t.Errorf("print =\n%s\nwant each path of %s without its text", text, l.title)
+					}
+				default:
+					if !strings.Contains(text, l.block(l.lines)) {
+						t.Errorf("print =\n%s\nwant the whole of %s", text, l.title)
+					}
+				}
+			}
+		})
 	}
 }
 

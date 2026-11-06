@@ -39,10 +39,11 @@ type orientText struct {
 
 // levelPart is the part of one level in the print of orient.
 type levelPart struct {
-	title string   // ~ or ~/<level>
-	lines []string // one line for each memory, skill, script, conventions file and glossary: - <path>: <text>, with any label
-	count string   // the line with the counts of plans and notes, or ""
-	short []string // the lines without the text: - <path>, with any label
+	title     string   // ~ or ~/<level>
+	lines     []string // one line for each memory, skill, script, conventions file and glossary: - <path>: <text>, with any label
+	count     string   // the line with the counts of plans and notes, or ""
+	short     []string // the lines without the text: - <path>, with any label
+	documents int      // one for each line, plan and note
 }
 
 // orientation builds the print of orient for a directory, in parts.
@@ -111,9 +112,11 @@ func orientation(repo, dir string) (orientText, error) {
 				part.short = append(part.short, fmt.Sprintf("- %s%s", line.Path, label))
 			}
 		}
-		if counts := countLine(len(ix.Of(store.KindPlans)), len(ix.Of(store.KindNotes))); counts != "" {
+		plans, notes := len(ix.Of(store.KindPlans)), len(ix.Of(store.KindNotes))
+		if counts := countLine(plans, notes); counts != "" {
 			part.count = fmt.Sprintf("%s: memcore show %s lists them.", counts, path.Join(store.Folder(l), "README.md"))
 		}
+		part.documents = len(part.lines) + plans + notes
 		if len(part.lines) == 0 && part.count == "" {
 			continue
 		}
@@ -144,6 +147,109 @@ func (l levelPart) block(lines []string) string {
 		all = append(all, l.count)
 	}
 	return fmt.Sprintf("\n%s\n%s\n", l.title, strings.Join(all, "\n"))
+}
+
+// hookBytes is the most that the SessionStart hook prints. Claude Code caps the output of a hook at 10,000 characters.
+// A UTF-8 byte count never undercounts the characters, and the margin of 500 covers any framing.
+const hookBytes = 9500
+
+// hookFallback is the print of the SessionStart hook when even the notice and the header pass the limit.
+// It is under 1,000 bytes, so it always fits.
+const hookFallback = "Run memcore orient before you act. Its print passes the output limit of Claude Code hooks.\n"
+
+// The forms of a level in a short print.
+const (
+	formFull     = iota // the title, the lines and the count line
+	formShort           // the title, the lines without the text, and the count line
+	formReplaced        // one line with the count of the documents
+)
+
+// fit returns the print of orient in at most limit bytes. It also returns the words of the header and of each level,
+// and the titles of the shortened levels. The print is the first of these forms that fits:
+//  1. the full print;
+//  2. the notice, the header and the levels, with levels made short one at a time, the largest full block first;
+//  3. the same, with short levels replaced one at a time, the largest short block first;
+//  4. the fixed text hookFallback.
+func (o orientText) fit(limit int) (text string, words map[string]int, short []string) {
+	text, words, _ = o.full()
+	if len(text) <= limit {
+		return text, words, nil
+	}
+	forms := make([]int, len(o.levels))
+	for _, i := range o.bySize(func(l levelPart) string { return l.block(l.lines) }) {
+		l := o.levels[i]
+		if l.block(l.short) == l.block(l.lines) {
+			continue // a level with only a count line has no description to leave out
+		}
+		forms[i] = formShort
+		if text, words, short = o.shortened(forms); len(text) <= limit {
+			return text, words, short
+		}
+	}
+	for _, i := range o.bySize(func(l levelPart) string { return l.block(l.short) }) {
+		forms[i] = formReplaced
+		if text, words, short = o.shortened(forms); len(text) <= limit {
+			return text, words, short
+		}
+	}
+	short = nil
+	for _, l := range o.levels {
+		short = append(short, l.title)
+	}
+	return hookFallback, map[string]int{"header": len(strings.Fields(hookFallback))}, short
+}
+
+// bySize returns the indexes of the levels, the largest block first. Levels with blocks of one size keep their order.
+func (o orientText) bySize(block func(levelPart) string) []int {
+	order := make([]int, len(o.levels))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return len(block(o.levels[b])) - len(block(o.levels[a]))
+	})
+	return order
+}
+
+// shortened returns a short print, with each level in its form. The first line is the notice,
+// which names the shortened levels and tells the agent to run orient. The notice counts as words of the header.
+func (o orientText) shortened(forms []int) (text string, words map[string]int, short []string) {
+	var blocks strings.Builder
+	var described, replaced []string
+	words = map[string]int{}
+	for i, l := range o.levels {
+		var block string
+		switch forms[i] {
+		case formFull:
+			block = l.block(l.lines)
+		case formShort:
+			block = l.block(l.short)
+			described = append(described, l.title)
+		default:
+			noun := "documents"
+			if l.documents == 1 {
+				noun = "document"
+			}
+			block = fmt.Sprintf("\n%s: %d %s, which memcore orient lists.\n", l.title, l.documents, noun)
+			replaced = append(replaced, l.title)
+		}
+		if forms[i] != formFull {
+			short = append(short, l.title)
+		}
+		words[l.title] = len(strings.Fields(block))
+		blocks.WriteString(block)
+	}
+	var left []string
+	if len(described) > 0 {
+		left = append(left, "the descriptions of "+series(described))
+	}
+	if len(replaced) > 0 {
+		left = append(left, "the lines of "+series(replaced))
+	}
+	head := fmt.Sprintf("Run memcore orient before you act. This print leaves out %s, to fit the output limit of Claude Code hooks.\n\n%s",
+		strings.Join(left, ", and "), o.header)
+	words["header"] = len(strings.Fields(head))
+	return head + blocks.String(), words, short
 }
 
 // unreviewed returns the paths that a commit after the accepted history changed.
