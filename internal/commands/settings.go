@@ -322,12 +322,13 @@ func sameMatcher(m *jsonNode, matcher string) bool {
 
 // denyRules are the permissions that keep an agent away from the memory repo and from the commands of the person.
 // init gets no rule, because a rule cannot tell --dry-run apart, and memcore refuses an agent for the rest of init.
+// push gets no rule, because an agent pushes memories, notes and plans when the person asks.
 func denyRules(repo, home string) []string {
 	edit := "Edit(/" + filepath.ToSlash(repo) + "/**)"
 	if rel, err := filepath.Rel(home, repo); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 		edit = "Edit(~/" + filepath.ToSlash(rel) + "/**)"
 	}
-	return []string{edit, "Bash(memcore push *)", "Bash(memcore drop *)", "Bash(memcore recover *)"}
+	return []string{edit, "Bash(memcore drop *)", "Bash(memcore recover *)"}
 }
 
 // applySettings shows the diff of the settings, asks once, then records the additions, keeps the original,
@@ -661,7 +662,7 @@ func runsHook(g *jsonNode, arg string) bool {
 	return false
 }
 
-// ruleKey is a rule without its pattern at the end: the tool and the command, as Bash(memcore push.
+// ruleKey is a rule without its pattern at the end: the tool and the command, as Bash(memcore drop.
 func ruleKey(rule string) string {
 	key := strings.TrimSuffix(rule, ")")
 	for _, tail := range []string{" *", ":*", "/**"} {

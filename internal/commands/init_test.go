@@ -307,6 +307,23 @@ func TestInitClaude(t *testing.T) {
 		}
 	})
 
+	t.Run("a fresh init denies drop and recover, and not push", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		fakeMemcore(t)
+		if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t)); err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		got := readT(t, settings)
+		for _, want := range []string{"Bash(memcore drop *)", "Bash(memcore recover *)"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("settings =\n%s\nwant %q", got, want)
+			}
+		}
+		if strings.Contains(got, "memcore push") {
+			t.Errorf("settings =\n%s\nwant no rule for push", got)
+		}
+	})
+
 	t.Run("init ends with the report of inbox", func(t *testing.T) {
 		home, settings := claudeHome(t)
 		fakeMemcore(t)
@@ -408,7 +425,7 @@ func TestOnboard(t *testing.T) {
 			t.Errorf("asked %q, want the exclusions, then the settings", asked)
 		}
 		got := readT(t, settings)
-		for _, want := range []string{"echo hello", "'" + exe + "' hook session-start", "'" + exe + "' hook prompt", "'" + exe + "' hook session-end", "'" + exe + "' hook tool", "Edit(~/memory/**)", "Bash(memcore push *)"} {
+		for _, want := range []string{"echo hello", "'" + exe + "' hook session-start", "'" + exe + "' hook prompt", "'" + exe + "' hook session-end", "'" + exe + "' hook tool", "Edit(~/memory/**)", "Bash(memcore drop *)"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("settings =\n%s\nwant %q", got, want)
 			}
@@ -419,7 +436,7 @@ func TestOnboard(t *testing.T) {
 		if _, ok := settingsOf(t)["autoMemoryEnabled"]; ok {
 			t.Error("autoMemoryEnabled is set while files stay out")
 		}
-		for _, want := range []string{"+++ ~/.claude/settings.json, after the change", `+            "command": "'` + exe + `' hook session-start"`, `+      "Bash(memcore push *)"`, `+      "Edit(~/memory/**)"`} {
+		for _, want := range []string{"+++ ~/.claude/settings.json, after the change", `+            "command": "'` + exe + `' hook session-start"`, `+      "Bash(memcore drop *)"`, `+      "Edit(~/memory/**)"`} {
 			if !strings.Contains(out, want) {
 				t.Errorf("output =\n%s\nwant the diff line %q", out, want)
 			}

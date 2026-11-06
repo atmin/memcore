@@ -63,12 +63,12 @@ func TestClaudeChanges(t *testing.T) {
 		autoOff   bool
 		additions int // hooks, rules and the setting
 	}{
-		{"no file", "", false, 5 + 4},
-		{"an empty file", "{}", true, 5 + 4 + 1},
-		{"a hook and a rule of yours", yours, false, 5 + 4},
-		{"a rule already there", `{"permissions":{"deny":["Bash(memcore push *)"]}}`, false, 5 + 3},
-		{"auto-memory already off", `{"autoMemoryEnabled":false}`, true, 5 + 4},
-		{"a tool hook of yours with another matcher", `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"'` + exe + `' hook tool"}]}]}}`, false, 5 + 4},
+		{"no file", "", false, 5 + 3},
+		{"an empty file", "{}", true, 5 + 3 + 1},
+		{"a hook and a rule of yours", yours, false, 5 + 3},
+		{"a rule already there", `{"permissions":{"deny":["Bash(memcore drop *)"]}}`, false, 5 + 2},
+		{"auto-memory already off", `{"autoMemoryEnabled":false}`, true, 5 + 3},
+		{"a tool hook of yours with another matcher", `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"'` + exe + `' hook tool"}]}]}}`, false, 5 + 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -112,13 +112,15 @@ func TestClaudeChanges(t *testing.T) {
 				}
 				return s
 			}(), "\n")
-			for _, want := range []string{"Edit(~/memory/**)", "Bash(memcore push *)", "Bash(memcore drop *)", "Bash(memcore recover *)"} {
+			for _, want := range []string{"Edit(~/memory/**)", "Bash(memcore drop *)", "Bash(memcore recover *)"} {
 				if strings.Count(deny, want) != 1 {
 					t.Errorf("deny =\n%s\nwant %s once", deny, want)
 				}
 			}
-			if strings.Contains(deny, "init") {
-				t.Errorf("deny =\n%s\nwant no rule for init", deny)
+			for _, cmd := range []string{"init", "push"} {
+				if strings.Contains(deny, cmd) {
+					t.Errorf("deny =\n%s\nwant no rule for %s", deny, cmd)
+				}
 			}
 			if tt.in == yours && !strings.Contains(string(tree.encode()), `"echo hi"`) {
 				t.Error("your hook is gone")
@@ -197,7 +199,7 @@ func TestApplySettings(t *testing.T) {
 			t.Errorf("kept = %v, want one copy of the original", kept)
 		}
 		rec := readInitRecordT(t, repo)
-		if len(rec.Hooks) != 5 || len(rec.Deny) != 4 || rec.AutoMemory == nil || !rec.AutoMemory.Absent {
+		if len(rec.Hooks) != 5 || len(rec.Deny) != 3 || rec.AutoMemory == nil || !rec.AutoMemory.Absent {
 			t.Errorf("record = %+v", rec)
 		}
 		for _, ev := range []string{"PostToolUse", "PostToolUseFailure"} {
@@ -223,7 +225,7 @@ func TestApplySettings(t *testing.T) {
 		if got := readT(t, settings); !strings.Contains(got, "hook session-end") {
 			t.Errorf("settings =\n%s\nwant the hooks back", got)
 		}
-		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 5 || len(rec.Deny) != 4 {
+		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 5 || len(rec.Deny) != 3 {
 			t.Errorf("record = %+v, want each addition once", rec)
 		}
 	})
@@ -330,7 +332,7 @@ func TestUndoSettings(t *testing.T) {
 		{"a plain undo restores the original", nil, nil, []string{"hook", "memcore", "autoMemoryEnabled"}, nil},
 		{"a setting added after init stays", func(t *testing.T, s string) {
 			replaceT(t, s, `"theme": "dark",`, `"theme": "dark",`+"\n  \"model\": \"opus\",")
-		}, []string{`"model": "opus"`}, []string{"hook session-start", "Bash(memcore push *)"}, nil},
+		}, []string{`"model": "opus"`}, []string{"hook session-start", "Bash(memcore drop *)"}, nil},
 		{"a changed hook and auto-memory turned back on stay", func(t *testing.T, s string) {
 			replaceT(t, s, "hook session-start\"", "hook session-start --quiet\"")
 			replaceT(t, s, `"autoMemoryEnabled": false`, `"autoMemoryEnabled": true`)
@@ -343,8 +345,8 @@ func TestUndoSettings(t *testing.T) {
 			replaceT(t, s, "'"+exe+"' hook session-start", "/usr/local/bin/memcore hook session-start")
 		}, []string{"/usr/local/bin/memcore hook session-start"}, []string{"hook prompt"}, []string{"SessionStart"}},
 		{"an edited rule is a conflict", func(t *testing.T, s string) {
-			replaceT(t, s, `"Bash(memcore push *)"`, `"Bash(memcore push:*)"`)
-		}, []string{"Bash(memcore push:*)"}, []string{"Bash(memcore drop *)"}, []string{"Bash(memcore push *)"}},
+			replaceT(t, s, `"Bash(memcore drop *)"`, `"Bash(memcore drop:*)"`)
+		}, []string{"Bash(memcore drop:*)"}, []string{"Bash(memcore recover *)"}, []string{"Bash(memcore drop *)"}},
 		{"a changed matcher is a conflict", func(t *testing.T, s string) {
 			replaceT(t, s, `"matcher": "Bash|Read|Grep"`, `"matcher": "Bash"`)
 		}, []string{`"matcher": "Bash"`, "hook tool"}, []string{"hook prompt", "PostToolUseFailure", "Bash|Read|Grep"}, []string{"the PostToolUse hook"}},
@@ -403,6 +405,34 @@ func TestUndoSettings(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("--undo removes the old rule of push with the other rules", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		settings := filepath.Join(home, ".claude", "settings.json")
+		original := "{\n  \"theme\": \"dark\"\n}\n"
+		writeT(t, filepath.Dir(settings), "settings.json", original)
+		tree, err := readSettings(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := applySettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, new(string))}, repo, settings, tree, claudeChanges(tree, repo, home, exe, true)); err != nil {
+			t.Fatal(err)
+		}
+		// Before this rule list, init denied push too, and recorded the rule.
+		const old = "Bash(memcore push *)"
+		replaceT(t, settings, `"Bash(memcore drop *)",`, `"Bash(memcore drop *)",`+"\n      \""+old+"\",")
+		rec := readInitRecordT(t, repo)
+		rec.Deny = append(rec.Deny, old)
+		if err := writeInitRecord(repo, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := undoSettings(Env{Dir: home, Out: &strings.Builder{}, Confirm: answer(true, new(string))}, repo, settings); err != nil {
+			t.Fatal(err)
+		}
+		if got := readT(t, settings); got != original {
+			t.Errorf("settings =\n%s\nwant the original", got)
+		}
+	})
 
 	t.Run("a record from before M3 gains the tool hooks, and --undo removes all five", func(t *testing.T) {
 		home, repo, _ := newMemory(t)
