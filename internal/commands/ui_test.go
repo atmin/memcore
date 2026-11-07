@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/atmin/memcore/internal/store"
 	"github.com/atmin/memcore/internal/ui"
 )
 
@@ -276,5 +277,99 @@ func TestUINoHelpers(t *testing.T) {
 	gitT(t, repo, "diff", "HEAD~1", "HEAD")
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("git diff did not run the helper, so the test proves nothing: %v", err)
+	}
+}
+
+func TestUIPush(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	ctx := context.Background()
+
+	t.Run("the head pushes, and a queue with a skill pushes", func(t *testing.T) {
+		home, repo, remote := newMemory(t) // the first commit holds the voice skill
+		b := uiBackend{repo: repo, dir: home}
+		r, err := b.Push(ctx, headCommit(repo))
+		if err != nil || r.Error != "" || !strings.Contains(r.Output, "Pushed") {
+			t.Fatalf("push = %+v, %v", r, err)
+		}
+		if got := gitT(t, remote, "rev-parse", "main"); got != gitT(t, repo, "rev-parse", "HEAD") {
+			t.Errorf("remote main = %s, want the tip of the queue", got)
+		}
+		e := last(t, repo)
+		if e.Command != "push" || e.By == "agent" || len(e.Pushed) == 0 {
+			t.Errorf("event = %+v, want a push of the person", e)
+		}
+	})
+
+	t.Run("a stale head pushes nothing", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		seen := headCommit(repo)
+		remember(t, mkdirT(t, filepath.Join(home, "dev")), "deploy-fact", "Read when you deploy the shop.")
+		r, err := uiBackend{repo: repo, dir: home}.Push(ctx, seen)
+		if err != nil || !strings.Contains(r.Error, "the queue changed since the review") {
+			t.Fatalf("push = %+v, %v, want the refusal in the result", r, err)
+		}
+		if _, err := store.Git(remote, "rev-parse", "--verify", "-q", "main"); err == nil {
+			t.Error("the remote has main after the refusal")
+		}
+	})
+
+	t.Run("no head", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		for _, head := range []string{"", "--help", "main"} {
+			if _, err := (uiBackend{repo: repo, dir: home}).Push(ctx, head); !errors.Is(err, ui.ErrBadInput) {
+				t.Errorf("push with the head %q: %v, want ErrBadInput", head, err)
+			}
+		}
+	})
+}
+
+func TestUIDrop(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	ctx := context.Background()
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	remember(t, dev, "unwanted", "Read when you test an unwanted fact.")
+	reviseT(t, dev, memoryText("unwanted", "Read when you test an unwanted fact.", "Still unwanted."), "unwanted", "A test.")
+	remember(t, dev, "wanted", "Read before you deploy on Fridays.")
+	b := uiBackend{repo: repo, dir: home}
+	r, err := b.Drop(ctx, sha(t, repo, "remember: dev/memories/unwanted.md"), "Not a fact.")
+	if err != nil || r.Error != "" {
+		t.Fatalf("drop = %+v, %v", r, err)
+	}
+	if got := strings.TrimSpace(gitT(t, repo, "log", "--format=%s")); got != "remember: dev/memories/wanted.md\ninit: create the memory repo" {
+		t.Errorf("history = %q", got)
+	}
+	e := last(t, repo)
+	if e.Command != "drop" || len(e.Dropped) != 2 || e.Reason != "Not a fact." {
+		t.Errorf("event = %+v, want the drop of two commits with the reason", e)
+	}
+	if r, err := b.Drop(ctx, strings.Repeat("0", 40), ""); err != nil || r.Error == "" {
+		t.Errorf("a drop of no commit = %+v, %v, want the refusal in the result", r, err)
+	}
+	for _, commit := range []string{"", "--help", "-h", "HEAD"} {
+		if _, err := b.Drop(ctx, commit, "A reason."); !errors.Is(err, ui.ErrBadInput) {
+			t.Errorf("a drop of %q: %v, want ErrBadInput", commit, err)
+		}
+	}
+}
+
+func TestUIDropReasonLikeAFlag(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	for _, reason := range []string{"--help", "-h"} {
+		t.Run(reason, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			dev := mkdirT(t, filepath.Join(home, "dev"))
+			remember(t, dev, "unwanted", "Read when you test an unwanted fact.")
+			r, err := uiBackend{repo: repo, dir: home}.Drop(context.Background(), sha(t, repo, "remember: dev/memories/unwanted.md"), reason)
+			if err != nil || r.Error != "" {
+				t.Fatalf("drop = %+v, %v", r, err)
+			}
+			if got := strings.TrimSpace(gitT(t, repo, "log", "--format=%s")); got != "init: create the memory repo" {
+				t.Errorf("history = %q, want the memory dropped", got)
+			}
+			if e := last(t, repo); e.Command != "drop" || e.Reason != reason {
+				t.Errorf("event = %+v, want the drop with the reason %q", e, reason)
+			}
+		})
 	}
 }

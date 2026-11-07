@@ -1,17 +1,22 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/atmin/memcore/internal/store"
 	"github.com/atmin/memcore/internal/ui"
 )
+
+// commitName matches the name of a commit that the window sends: hex digits, so no name reads as a flag.
+var commitName = regexp.MustCompile(`^[0-9a-f]{4,64}$`)
 
 // searchLimit is the most hits that a search of the window returns.
 const searchLimit = 200
@@ -221,14 +226,39 @@ func (b uiBackend) Search(_ context.Context, query string) (ui.Hits, error) {
 	return h, nil
 }
 
-// Push is a stub until the actions of the window exist.
-func (b uiBackend) Push(context.Context, string) (ui.Result, error) {
-	return ui.Result{}, fmt.Errorf("the window cannot push yet")
+// Push runs push --expect head, so it pushes only the queue that the person saw. The person confirmed in the
+// window, so the push takes the path of the person.
+func (b uiBackend) Push(_ context.Context, head string) (ui.Result, error) {
+	if !commitName.MatchString(head) {
+		return ui.Result{}, fmt.Errorf("the push names no commit as the tip of main, but %q: %w", head, ui.ErrBadInput)
+	}
+	return b.action("push", "--expect="+head)
 }
 
-// Drop is a stub until the actions of the window exist.
-func (b uiBackend) Drop(context.Context, string, string) (ui.Result, error) {
-	return ui.Result{}, fmt.Errorf("the window cannot drop yet")
+// Drop runs drop on a commit of the queue, with the reason of the person, who confirmed in the window.
+func (b uiBackend) Drop(_ context.Context, commit, reason string) (ui.Result, error) {
+	if !commitName.MatchString(commit) {
+		return ui.Result{}, fmt.Errorf("the drop names no commit, but %q: %w", commit, ui.ErrBadInput)
+	}
+	// A reason such as --help stays one argument, so Run never reads it as a flag.
+	args := []string{"drop", commit}
+	if reason != "" {
+		args = append(args, "--reason="+reason)
+	}
+	return b.action(args...)
+}
+
+// action runs a command through Run, so the use log records it, with a confirmation that says yes. It returns
+// the output of the command, and its error in the Result.
+func (b uiBackend) action(args ...string) (ui.Result, error) {
+	var out bytes.Buffer
+	yes := func(string) (bool, error) { return true, nil }
+	err := Run(Env{Dir: b.dir, In: strings.NewReader(""), Out: &out, Err: &out, Confirm: yes}, args[0], args[1:])
+	r := ui.Result{Output: strings.TrimSpace(out.String())}
+	if err != nil {
+		r.Error = err.Error()
+	}
+	return r, nil
 }
 
 var _ ui.Backend = uiBackend{}
