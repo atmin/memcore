@@ -2,7 +2,9 @@ package commands
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"path"
 	"slices"
 	"strings"
@@ -15,15 +17,26 @@ import (
 // When no person answers, an agent runs it. Then it pushes the whole queue without a question when every
 // commit changes only memories, notes, plans and indexes. Otherwise it pushes nothing.
 // It pushes the tip that it counted, so a commit that lands while it asks waits for the next push.
+// With --expect, it pushes nothing unless main is at that commit before the fetch, so it pushes only a queue
+// that the person reviewed.
 func runPush(env Env, args []string) error {
-	if len(args) != 0 {
-		return usageErr("usage: memcore push")
+	flags := flag.NewFlagSet("push", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	expect := flags.String("expect", "", "the tip of main that the person reviewed")
+	pos, err := parseInterleaved(flags, args)
+	if err != nil || len(pos) != 0 {
+		return usageErr("usage: memcore push [--expect <commit>]")
+	}
+	given := false
+	flags.Visit(func(f *flag.Flag) { given = given || f.Name == "expect" })
+	if given && *expect == "" {
+		return usageErr("--expect needs the commit that the person reviewed")
 	}
 	repo, err := openRepo()
 	if err != nil {
 		return err
 	}
-	tip, base, queue, made, folded, err := prepare(repo)
+	tip, base, queue, made, folded, err := prepare(repo, *expect)
 	env.event().Made, env.event().Folded = made, folded
 	if err != nil {
 		return err
@@ -133,7 +146,7 @@ func revList(repo, tip string) ([]string, error) {
 }
 
 // prepare readies the queue for a push under the write lock. It refuses a working tree with uncommitted
-// changes. Then it does these steps:
+// changes, and a main that is not at expect, when expect is set. Then it does these steps:
 //   - It fetches.
 //   - It regenerates the stale indexes.
 //   - It folds the fixups.
@@ -145,7 +158,7 @@ func revList(repo, tip string) ([]string, error) {
 //   - the queue, newest first
 //   - the commits of the indexes
 //   - the commits that the fold removed
-func prepare(repo string) (tip, base string, queue, made, folded []string, err error) {
+func prepare(repo, expect string) (tip, base string, queue, made, folded []string, err error) {
 	unlock, err := store.Lock(repo)
 	if err != nil {
 		return "", "", nil, nil, nil, err
@@ -153,6 +166,9 @@ func prepare(repo string) (tip, base string, queue, made, folded []string, err e
 	defer unlock()
 	if err := cleanTree(repo, "push pushed nothing"); err != nil {
 		return "", "", nil, nil, nil, err
+	}
+	if expect != "" && headCommit(repo) != expect {
+		return "", "", nil, nil, nil, errors.New("the queue changed since the review, so push pushed nothing: review it again")
 	}
 	if err := Fetch(repo); err != nil {
 		return "", "", nil, nil, nil, err

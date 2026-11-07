@@ -78,13 +78,14 @@ func TestHelp(t *testing.T) {
 		if out, err := run(t, home, "", "help"); err != nil || !strings.Contains(out, row) {
 			t.Errorf("help: %v, output %q, want the row %q", err, out, row)
 		}
-		want := `memcore push
+		want := `memcore push [--expect <commit>]
 
 The person runs it at a terminal, and confirms. An agent runs it only when the person asks.
 It refuses uncommitted changes, fetches, and folds each fixup into the commit it corrects.
 Then it pushes the unpushed commits. An agent pushes only memories, notes, plans and
 indexes. For a skill, a script, a helper, a conventions file or a glossary, it names the
-commits, and the person pushes them.
+commits, and the person pushes them. With --expect <commit>, it pushes nothing unless main
+is at that commit, so it pushes only the queue that the person reviewed.
 `
 		if out, err := run(t, home, "", "help", "push"); err != nil || out != want {
 			t.Errorf("help push: %v, output\n%s\nwant\n%s", err, out, want)

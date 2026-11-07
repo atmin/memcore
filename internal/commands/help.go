@@ -146,13 +146,14 @@ and calls no agent. For each week of 7 days up to now, newest first, it prints:
 
 Then it lists the memories with no logged read in 30 days.
 `,
-	"push": `memcore push
+	"push": `memcore push [--expect <commit>]
 
 The person runs it at a terminal, and confirms. An agent runs it only when the person asks.
 It refuses uncommitted changes, fetches, and folds each fixup into the commit it corrects.
 Then it pushes the unpushed commits. An agent pushes only memories, notes, plans and
 indexes. For a skill, a script, a helper, a conventions file or a glossary, it names the
-commits, and the person pushes them.
+commits, and the person pushes them. With --expect <commit>, it pushes nothing unless main
+is at that commit, so it pushes only the queue that the person reviewed.
 `,
 	"recover": `memcore recover
 

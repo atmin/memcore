@@ -968,3 +968,48 @@ func TestAgentPush(t *testing.T) {
 		})
 	}
 }
+
+func TestPushExpect(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	tests := []struct {
+		name   string
+		expect func(repo string) string
+		pushes bool
+	}{
+		{"the tip of main pushes", func(repo string) string { return headCommit(repo) }, true},
+		{"an older commit pushes nothing", func(repo string) string { return strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")) }, false},
+		{"no such commit pushes nothing", func(string) string { return strings.Repeat("0", 40) }, false},
+		{"an empty commit pushes nothing", func(string) string { return "" }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, repo, remote := newMemory(t)
+			remember(t, mkdirT(t, filepath.Join(home, "dev")), "small-commits", "Read before you commit: one change per commit.")
+			before := headCommit(repo)
+			var asked string
+			out, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push", "--expect", tt.expect(repo))
+			_, remoteErr := store.Git(remote, "rev-parse", "--verify", "-q", "main")
+			if tt.pushes {
+				if err != nil {
+					t.Fatalf("push --expect: %v\n%s", err, out)
+				}
+				if got := gitT(t, remote, "rev-parse", "main"); got != gitT(t, repo, "rev-parse", "HEAD") {
+					t.Errorf("remote main = %s, want the tip of the queue", got)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "the queue changed since the review, so push pushed nothing") && !strings.Contains(err.Error(), "--expect needs the commit") {
+				t.Fatalf("push --expect: %v, want the refusal\n%s", err, out)
+			}
+			if remoteErr == nil {
+				t.Error("the remote has main after the refusal")
+			}
+			if headCommit(repo) != before {
+				t.Error("the refusal changed the queue")
+			}
+			if asked != "" {
+				t.Errorf("push asked %q before it refused", asked)
+			}
+		})
+	}
+}
