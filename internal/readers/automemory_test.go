@@ -52,8 +52,9 @@ func TestAutoMemory(t *testing.T) {
 	}
 }
 
-// encode names a directory the way Claude Code names its project folder: one hyphen for each
-// character that is not a letter or a digit of ASCII, as the paths of this test hold no character beyond U+FFFF.
+// encode names a directory the way Claude Code names its project folder.
+// It writes one hyphen for each character that is not an ASCII letter or digit.
+// One hyphen is enough, as the paths of this test hold no character beyond U+FFFF.
 func encode(dir string) string {
 	var b strings.Builder
 	for _, r := range dir {

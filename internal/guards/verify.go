@@ -80,9 +80,10 @@ func newVerifier(repo string) (*verifier, error) {
 	return v, nil
 }
 
-// Faults returns the faults of every markdown document in the repo except the indexes, as if the
-// removed paths were gone: a file, or a folder with everything in it. A command compares the faults
-// with and without a removal, so only the faults that the removal adds stop it.
+// Faults returns the faults of every markdown document in the repo except the indexes.
+// It checks the repo as if the removed paths were gone. A removed path is a file, or a folder
+// with everything in it. Only a removed memory file takes its name out of the [[name]] targets.
+// A command compares the faults with and without a removal, so only the faults that the removal adds stop it.
 func Faults(repo string, removed []string) ([]Finding, error) {
 	v, err := newVerifier(repo)
 	if err != nil {
@@ -153,7 +154,8 @@ func VerifyContent(repo, p string, content []byte) (Report, error) {
 }
 
 // VerifySet checks documents that are not on disk yet as one set, by their paths relative to repo.
-// Each document sees the repo and the others, so a link or a [[name]] to another document of the set holds.
+// Each document sees the repo and the other documents of the set.
+// A link or a [[name]] to another document of the set holds.
 func VerifySet(repo string, files map[string][]byte) (map[string]Report, error) {
 	v, err := newVerifier(repo)
 	if err != nil {

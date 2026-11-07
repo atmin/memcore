@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// ErrNoPerson is the refusal of a command of the person when no person answers: an agent runs it,
-// or no terminal opens. A command that an agent may run in part checks for it with errors.Is.
+// ErrNoPerson is the refusal of a command of the person when no person answers.
+// No person answers when an agent runs the command, or when no terminal opens.
+// A command that an agent may run in part checks for it with errors.Is.
 var ErrNoPerson = errors.New("only the person runs it, at a terminal")
 
 // ttyPath is the controlling terminal, where Confirm asks. A test points it at a missing file.

@@ -107,7 +107,8 @@ func Redact(text string) string {
 	return b.String()
 }
 
-// keyBlock returns the end of a private key block: the end of its END line, or the end of the text without one.
+// keyBlock returns the end of a private key block, which is the end of its END line.
+// Without an END line, the block ends at the end of the text.
 func keyBlock(text string, end int) int {
 	if m := keyEndRE.FindStringIndex(text[end:]); m != nil {
 		return end + m[1]
@@ -115,8 +116,8 @@ func keyBlock(text string, end int) int {
 	return len(text)
 }
 
-// credential reports whether the last word of a match holds a digit or a symbol, as a credential does
-// and a word of prose does not. A period at the end belongs to the sentence.
+// credential reports whether the last word of a match holds a digit or a symbol.
+// A credential holds one, and a word of prose does not. A period at the end belongs to the sentence.
 func credential(match string) bool {
 	f := strings.Fields(match)
 	return strings.ContainsAny(strings.TrimRight(f[len(f)-1], "."), "0123456789._~+/-")

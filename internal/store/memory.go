@@ -83,8 +83,8 @@ type Frontmatter struct {
 	Lists  map[string][]string
 }
 
-// HasFrontmatter reports whether a text starts with a frontmatter, by the rule of ParseFrontmatter:
-// a first line of --- with any trailing spaces or carriage return.
+// HasFrontmatter reports whether a text starts with a frontmatter, by the rule of ParseFrontmatter.
+// The rule is a first line of --- with any trailing spaces or carriage return.
 func HasFrontmatter(text string) bool {
 	first, _, _ := strings.Cut(text, "\n")
 	return strings.TrimRight(first, " \r") == "---"
@@ -209,8 +209,8 @@ func indicator(v string) bool {
 		strings.HasPrefix(v, "- ") || strings.HasPrefix(v, "? ") || strings.HasPrefix(v, ": ")
 }
 
-// plain reports whether a value reads back the same as a plain value under the strict rules of YAML,
-// which memcore writes by. The lenient parser never decides this.
+// plain reports whether a value reads back the same as a plain value under the strict rules of YAML.
+// memcore writes by these strict rules. The lenient parser never decides this.
 func plain(v string) bool {
 	if v == "" || v != strings.TrimSpace(v) || strings.ContainsFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return false

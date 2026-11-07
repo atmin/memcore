@@ -19,7 +19,7 @@ import (
 
 // TrimOptions sets how Trim treats a transcript.
 type TrimOptions struct {
-	Redact   func(string) string // applied to each text before Trim encodes it; nil keeps the text
+	Redact   func(string) string // applied to each text before Trim encodes it. A nil Redact keeps the text.
 	Subagent bool                // the transcript is the file of a subagent
 }
 
@@ -82,8 +82,12 @@ const rejection = "The user doesn't want to proceed with this tool use"
 
 var reminderRE = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
 
-// Trim reads a Claude Code transcript and writes the conversation in the trimmed format of docs/transcripts.md:
-// a header line, then one line for each text of the person and the agent, each call, and each rejected call.
+// Trim reads a Claude Code transcript and writes the conversation in the trimmed format of docs/transcripts.md.
+// It writes a header line, then one line for each of these:
+//   - a text of the person or the agent
+//   - a call
+//   - a rejected call
+//
 // It writes nothing when no line of the conversation survives. The same input always gives the same output.
 func Trim(r io.Reader, w io.Writer, opts TrimOptions) (TrimStats, error) {
 	var stats TrimStats
@@ -234,7 +238,8 @@ func call(b block) string {
 	return text
 }
 
-// resultText returns the text of the content of a tool result, which is a string or a list of text blocks.
+// resultText returns the text of the content of a tool result.
+// The content is a string or a list of text blocks.
 func resultText(content json.RawMessage) string {
 	var s string
 	if json.Unmarshal(content, &s) == nil {
@@ -249,8 +254,10 @@ func resultText(content json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
-// ProjectDirs returns every directory under root that Claude Code names folder: its path with each character
-// that is not a letter or a digit as -. A folder that Claude Code named after a long path, with a hash, matches none.
+// ProjectDirs returns every directory under root that Claude Code names folder. Claude Code names a folder
+// after the path of a directory. A - replaces each character of the path that is not a letter or a digit.
+// A character beyond U+FFFF gets two hyphens, as projectName says.
+// A folder that Claude Code named after a long path, with a hash, matches none.
 func ProjectDirs(folder, root string) ([]string, error) {
 	var found []string
 	var walk func(dir string) error

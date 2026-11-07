@@ -34,8 +34,8 @@ func main() {
 	}
 }
 
-// workingDir returns the working directory of a command. hook tool takes its folder from its input
-// and never fails, so it runs with an empty folder when getwd fails.
+// workingDir returns the working directory of a command. hook tool takes its folder from its input,
+// and it never fails. So hook tool runs with an empty folder when getwd fails.
 func workingDir(name string, args []string, getwd func() (string, error)) (string, error) {
 	dir, err := getwd()
 	if err != nil {

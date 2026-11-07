@@ -3,7 +3,7 @@ package store
 import "fmt"
 
 // Commit stages the paths, relative to repo, and commits them alone with the message.
-// A path that no longer exists commits as a removal. Git reads each path literally, never as a pattern.
+// A path that does not exist commits as a removal. Git reads each path literally, never as a pattern.
 func Commit(repo string, paths []string, message string) error {
 	if _, err := Git(repo, append([]string{"--literal-pathspecs", "add", "-A", "--"}, paths...)...); err != nil {
 		return fmt.Errorf("stage the change: %w", err)
