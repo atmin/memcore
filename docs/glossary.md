@@ -8,7 +8,7 @@ The docs use each term below with one meaning only.
 - **memory repo**: the git repo that memcore manages, in `~/memory` by default.
 - **level**: a folder in the memory repo that mirrors a directory, such as the root, `work/` or `work/shop/`. A folder whose name would collide with a kind gets a `+` in front, as `+bin/` for `~/bin`.
 - **path**: the chain of levels from one level up to the root. An agent loads its path.
-- **document**: any file that memcore stores at a level: a memory, a plan, a note, a skill, a script, a conventions file or a glossary.
+- **document**: any file that memcore stores at a level. It is a memory, a plan, a note, a skill, a script, a conventions file or a glossary.
 - **kind**: the type of a document. The name of its folder or file gives the kind.
 - **memory**: a document that holds one current fact.
 - **script**: an executable file in a `bin/` folder. `push` links it onto your `PATH`.
@@ -18,7 +18,6 @@ The docs use each term below with one meaning only.
 - **snapshot**: a commit of new transcripts to the transcripts branch.
 - **hook**: a command that an agent runs at a point of a session, such as its start. `init` adds the hooks of memcore to Claude Code.
 - **mark**: a word that you add to a prompt, `#again`, `#wrong` or `#stale`, to say that memory failed you.
-- **sleep pass**: one run of sleep, the consolidation that keeps memory lean.
 - **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch.
 - **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
 - **accepted mistake**: a memory that a `revise` or a `forget` changed within 14 days after a push accepted it.
@@ -26,6 +25,3 @@ The docs use each term below with one meaning only.
 - **fold**: the step of `push` that folds each fixup into the commit it corrects.
 - **use log**: the local record of the calls of memcore, under `.git/memcore/`, which memcore never commits.
 - **read**: a document that a session reads, through a successful `show` or a tool call that a hook logs.
-- **purge**: the removal of content from every commit of the memory repo, which only you run.
-- **promotion**: the move of a document up one level.
-- **milestone**: a stage of the [roadmap](roadmap.md), from M1 to M5, that ends in a state you can use.

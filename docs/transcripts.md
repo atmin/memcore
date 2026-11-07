@@ -15,7 +15,7 @@ Before memcore commits a snapshot, it redacts each text locally, before it encod
 - a pattern-and-entropy scanner for keys, tokens, private keys and connection strings;
 - typed placeholders such as `[secret:api-key]`, so the conversation still reads correctly.
 
-A small local model for personal and production data, in any language and script, waits for later work. Its placeholders will read as `[phone]`. The same scanner checks every memory that an agent writes.
+The same scanner checks every memory that an agent writes.
 
 ## The format
 

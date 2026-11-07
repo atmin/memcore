@@ -2,38 +2,36 @@
 
 *A palimpsest for agents.*
 
-memcore is long-term memory for the agents you work with, kept as plain markdown in git. The working tree holds what is true now, and history holds earlier beliefs. The `memcore` command does the git work for the agents. It runs the installed git and the agent that you already use, so you install nothing else.
+memcore is long-term memory for the agents you work with, kept as plain markdown in git. The working tree holds what is true now, and history holds earlier beliefs. The `memcore` command does the git work for the agents. It runs the installed git, so you install nothing else.
 
 Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.
 
-**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `push`, `drop` and `recover` work on it. `push` asks at your terminal, and an agent's push sends memories, notes and plans without a question. The key bound to your presence is still design. The rest of these docs is design. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
+**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `push`, `drop` and `recover` work on it. `push` asks at your terminal, and an agent's push sends memories, notes and plans without a question.
+
+These docs describe what memcore does today. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
 
 ## Principles
 
-- **Agents act, and you verify.** An agent writes a memory, and memcore commits it to the memory repo without asking you. You review the commits in bulk. An agent pushes memories, notes and plans when you ask, and only you push skills and scripts.
-- **Lean context, progressive disclosure.** An agent sees the least it needs. It reaches anything else in a few small hops, the way an index keeps a large table one small read away.
+- **Agents act, and you verify.** An agent writes a memory. memcore commits it to the memory repo without asking you. You review the commits in bulk. An agent pushes memories, notes and plans when you ask, and only you push skills and scripts.
+- **Lean context, progressive disclosure.** An agent sees the least it needs. It reaches anything else in a few small hops, as an index keeps a large table one small read away.
 - **Plain files, plain git.** memcore uses no database and no vector store. You can read and edit everything by hand.
-- **Local first.** Memory lives in a git repo on your machine, and it works without the remote. Local redaction runs before anything leaves. Memories go to your remote for storage. Text goes to the agent that you already use for thinking, and nowhere else.
+- **Local first.** Memory lives in a git repo on your machine, and it works without the remote. Local redaction runs before anything leaves. Memories go to your remote for storage.
 - **Any agent.** A stock agent learns memcore from one instruction. The formats are open standards, so nothing ties memcore to one agent.
 
 ## Docs
 
-These docs are the design of memcore. An agent that uses memcore loads none of them: it runs `memcore orient` and follows it. Each line below says when to read a doc, for you and for an agent that changes this repo.
+These docs describe memcore. An agent that uses memcore loads none of them: it runs `memcore orient` and follows it. Each line below says when to read a doc, for you and for an agent that changes this repo.
 
 - [Conventions](AGENTS.md): read before you change code or docs in this repo. It covers the work, the code, the tests, the verification and the commits.
-- [Install](docs/install.md): read when you set up memcore on a machine. It covers the install script, `memcore init` and what runs on its own.
+- [Install](docs/install.md): read when you set up memcore on a machine. It covers how to build memcore, `memcore init` and what runs on its own.
 - [Glossary](docs/glossary.md): read before you name anything. It gives each term in the docs one meaning.
 - [Layout](docs/layout.md): read when you place or find a document. It covers levels, kinds, the index, placement and lookup.
 - [A memory](docs/memory.md): read before you write a memory. It covers the frontmatter and the body.
 - [Git](docs/git.md): read before you commit, review or push. It covers the review queue, fixups and the remote.
 - [Interface](docs/interface.md): read when you use or build `memcore`. It covers the commands and how a stock agent learns them.
-- [Architecture](docs/architecture.md): read when you build or change `memcore`. It covers its parts, git, the thinking, concurrency and local state.
-- [Sleep](docs/sleep.md): read when you consolidate memory. It covers a sleep pass, promotion, staleness and budgets.
+- [Architecture](docs/architecture.md): read when you build or change `memcore`. It covers its parts, git, concurrency and local state.
 - [Transcripts](docs/transcripts.md): read when you work with transcripts. It covers what a snapshot keeps and how memcore redacts it.
-- [Onboarding](docs/onboarding.md): read when you start from an empty memory repo. It covers the sources and how the structure emerges.
 - [Prior art](docs/prior-art.md): read when you compare memcore with other tools. It covers what exists and what memcore adds.
-- [Roadmap](docs/roadmap.md): read when you plan the next change to memcore. It covers the milestones and their order.
-- [Open questions](docs/open-questions.md): read when you make a decision. It lists what is still open.
 
 ## Skills
 

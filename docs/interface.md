@@ -8,9 +8,6 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | --- | --- | --- |
 | read | `orient` | Shows the indexes from the working directory up to the root. At each level it prints the memories, skills, scripts, conventions and glossary, and the plans and notes as counts. It prints no sibling level. |
 | | `show <path>` | Prints a document by its path. It prints a skill as you accepted it, and refuses a path through a symlink. |
-| | `search <query>` | Searches memories, plans, notes and skills, from this level up by default. |
-| | `recall <query>` | Finds passages in past transcripts on the transcripts branch. |
-| | `history <path>` | Shows earlier versions of a document. |
 | | `help [<command>]` | Shows the input of a command, with one valid example. `memcore <command> --help` does the same. |
 | | `stats` | Measures whether memory helps, per week, from the use log and git history. It calls no agent, and writes nothing beyond what every call of memcore writes. So an agent may run it too. See **Stats** below. |
 | write | `remember` | Places, checks, indexes and commits a memory, which it reads from standard input with its frontmatter (see [A memory](memory.md)). `--at <dir>` places it at the level of a directory on the path up to home. `--at ~` places a fact about you at the root. When a memory on the path shares most words of the new description, it lists the matches and writes nothing. "Read", "when", "before" and "you" do not count, because most descriptions start with them. So the agent can revise one instead of adding another. `remember --new` writes anyway. It runs `verify` on the new memory before it commits. It also warns when the `orient` of its level passes the 9,500 bytes that the `SessionStart` hook shows in full. |
@@ -18,30 +15,25 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | | `forget <path or name> --reason <text>` | Removes a document, or the folder of a skill, and records the reason. It refuses while another document links to it. A level left with no document goes too. When the queue created the document, the removal is a fixup, and the fold leaves no commit of either. |
 | | `draft <kind> [<topic>]` | Starts any kind of document from its template, as `memcore help draft` lists them. It writes at the level of the working directory, or of `--at`. `revise` then fills it. |
 | upkeep | `snapshot` | Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted. `--from <dir>` reads an old copy of the projects folder. A call of memcore starts a snapshot in the background when six hours have passed since the last one. |
-| | `sleep` | Runs a sleep pass, with one commit per change. The pass runs `verify` on every document. |
-| | `verify <path>` | Checks the documents at a path, or any markdown, against the references they name, the glossaries on their path and the voice skill. |
-| | `inbox` | Lists what waits on you: the unpushed commits as the fold at push leaves them, and the stale indexes. The header counts the index commits that `push` adds apart from the commits that the fold leaves. An entry shows the message and the files of its commit after the fold, and counts the fixups that fold in. When the fold drops commits, the list ends with their count. It also warns of a remote that lost accepted commits. It fetches first, then prints a summary of the newest week of `stats` in three lines. The open contradictions and the guard of the remote wait for later work. |
-| | `push` | Refuses uncommitted changes, fetches, and folds in the fixups. It writes each stale index again before and after the fold. Then it asks for confirmation at your terminal and pushes. An agent runs it only when you ask. Without a terminal, it asks nothing and pushes a queue that holds only memories, notes, plans and indexes. For any other file, or a merge, it pushes nothing, and names the commits that you push at your terminal. The key that only you can use waits for later work (see [Git](git.md)). After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. |
-| yours | `purge <path>`, `purge --text` | Removes a document or a passage from every commit, then force pushes once, with the same confirmation and key as `push`. See [Git](git.md). |
-| | `drop <commit>` | Removes a commit of the review queue, with its fixups, after it asks at your terminal. It records your reason, so sleep learns from it. |
+| | `verify <path>` | Checks the documents at a path, or any markdown, against the references they name and the glossaries on their path. |
+| | `inbox` | Lists what waits on you: the unpushed commits as the fold at push leaves them, and the stale indexes. The header counts the index commits that `push` adds apart from the commits that the fold leaves. An entry shows the message and the files of its commit after the fold. It counts the fixups that fold in. When the fold drops commits, the list ends with their count. It also warns of a remote that lost accepted commits. It fetches first, then prints a summary of the newest week of `stats` in three lines. |
+| | `push` | Refuses uncommitted changes, fetches, and folds in the fixups. It writes each stale index again before and after the fold. Then it asks for confirmation at your terminal and pushes. An agent runs it only when you ask. Without a terminal, it asks nothing and pushes a queue that holds only memories, notes, plans and indexes. For any other file, or a merge, it pushes nothing, and names the commits that you push at your terminal. After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. |
+| yours | `drop <commit>` | Removes a commit of the review queue, with its fixups, after it asks at your terminal. It records your reason. |
 | | `recover` | Runs after a fetch finds that the remote lost accepted commits. It asks at your terminal, drops them here, and moves the queue onto the remote (see [Git](git.md)). |
-| setup | `init <remote>` | Sets memcore up on a machine: the memory repo and its credentials, its scripts, every installed agent, and onboarding. Today it sets up the memory repo and Claude Code: the snapshot, the import, the hooks and the permissions. It creates the repo when the remote is empty, and clones the remote otherwise. `--dry-run` rehearses it, and `--undo` removes its changes to the settings. The rest waits for later work. See [Install](install.md). |
+| setup | `init <remote>` | Sets up the memory repo and Claude Code: the snapshot, the import, the hooks and the permissions. It creates the repo when the remote is empty, and clones the remote otherwise. `--dry-run` rehearses it, and `--undo` removes its changes to the settings. See [Install](install.md). |
 | | `hook <event>` | Runs a hook of Claude Code, with the hook input on standard input: `session-start`, `prompt`, `session-end` or `tool`. Only Claude Code runs it, so `orient` and `help` leave it out. |
 
-**Verify.** `verify` blocks a write only on exact faults: a dead reference, or a word that a glossary on the path forbids. A forbidden word counts as a whole word or phrase, outside code and links. `verify` only warns on heuristic faults:
-- a long sentence or a long paragraph;
-- an arrow or a filler word;
-- a description that names no moment to read, which the check reads as a missing "when" or "before".
+**Verify.** `verify` blocks a write only on exact faults. These are a dead reference, or a word that a glossary on the path forbids. A forbidden word counts as a whole word or phrase, outside code and links. `verify` only warns on heuristic faults in a description. Such a description names no moment to read, or has over 25 words. A description without "when" or "before" names no moment.
 
 `verify` also warns on a memory, a plan, a note or a skill without a description. Its index line then says so, and no read fails on it.
 
-Agents seldom call `verify` themselves, because the write commands and every sleep pass run it.
+Agents seldom call `verify` themselves, because the write commands run it.
 
 **Stats.** `stats` measures whether memory helps, from the use log and git history alone. It reads no transcript, calls no agent and takes no argument. A week is 7 days that end at the time of the call, in UTC. `stats` prints the four newest weeks, newest first. It leaves out a week that ends before the log starts. For each week, it shows:
 - **Capture:** the committed lines of `remember`, `revise`, `forget` and `draft`, for memories and for other documents. A fold changes no count.
 - **Review:** the queue commits created, pushed and dropped. The fixups count among the created and the dropped. The commits of an agent's push count among the pushed. An accepted memory is a memory that a pushed commit adds or modifies, imports included. Each push counts it once, in the week of the push. The precision is the share of accepted memories that are no accepted mistake. The two newest weeks say "so far", because their mistakes can still grow.
 - **Use:** the sessions, the reads per session, the reads around memcore, and the five most-read memories. Only reads with a session count here.
-- **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. A subagent can inherit the session id of its agent, so one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
+- **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. A subagent can inherit the session id of its agent. So one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
 - **Friction:** the failed calls of memcore, grouped by command and error. Errors that differ only in a path, a commit or a number fall in one group. The five largest groups show, then the count of the rest.
 - **Marks:** the counts of `#again`, `#wrong` and `#stale`.
 
@@ -72,7 +64,7 @@ The hooks read only this simple form, so `stats` calls these reads "around memco
 - `~user`, `cd -` and a `cd` of several words resolve to nothing, as does a later relative path;
 - the hooks cannot tell which side of `&&` or `||` ran, so they count both.
 
-**Any agent.** The whole integration is one instruction in `AGENTS.md`<sup>[1](#sources)</sup>: run `memcore orient` at the start of every session and follow it. The output of `orient` teaches the rest: the commands, the rules, the indexes and the skill descriptions.
+**Any agent.** The whole integration is one instruction in `AGENTS.md`<sup>[1](#sources)</sup>. It says: run `memcore orient` at the start of every session and follow it. The output of `orient` teaches the rest: the commands, the rules, the indexes and the skill descriptions.
 
 **Claude Code.** Claude Code needs no instruction, because `init` adds five hooks to its settings:
 - The `SessionStart` hook runs `orient` for the directory of the session, at every start, resume, clear, compaction and fork. Claude Code adds the output to the context, so a session sees `orient` without an instruction. The hook also logs the start of the session. The line in the use log holds the words that the hook printed, and the levels that it shortened. Claude Code passes a hook output over 10,000 characters only as a file and a preview. So the hook prints at most 9,500 bytes:
@@ -87,13 +79,13 @@ The hooks read only this simple form, so `stats` calls these reads "around memco
 
 Each hook runs memcore by its full path, so it does not depend on the `PATH` of Claude Code. When the memory repo is not `~/memory`, each hook also sets `MEMCORE_REPO`. The `SessionStart` hook passes it on to the commands of the agent, through the environment file of the session.
 
-**Voice.** memcore ships the [voice](../skills/voice/SKILL.md) skill, which sets how agents talk to you and write. An agent never thinks to look up how to write, because it writes all the time. So `orient` pins the skill's "Always" and "Talking" parts, and the "Writing" part loads when an agent writes a document. The root copy is yours: sleep adapts it from your corrections about writing.
+**Voice.** memcore ships the [voice](../skills/voice/SKILL.md) skill, which sets how agents talk to you and write. An agent never thinks to look up how to write, because it writes all the time. So `orient` pins the skill's "Always" and "Talking" parts, and the "Writing" part loads when an agent writes a document.
 
-**Building.** memcore also ships three skills for changes to code: [plan](../skills/plan/SKILL.md), [build](../skills/build/SKILL.md) and [review](../skills/review/SKILL.md). The plan skill turns a task into small steps that an agent with no context can build. After you approve the plan, the build skill builds every step in a worktree, with one commit and one review per step. The review skill prefers an agent from another provider as the reviewer.
+**Building.** memcore also ships three skills for changes to code: [plan](../skills/plan/SKILL.md), [build](../skills/build/SKILL.md) and [review](../skills/review/SKILL.md). The plan skill turns a task into small steps that an agent with no context can build. After you approve the plan, the build skill builds every step in a worktree. Each step gets one commit and one review. The review skill prefers an agent from another provider as the reviewer.
 
 Where the agent's permissions allow it, `init` also denies the agent direct edits under the memory repo. So `memcore` stays the only way in. It denies `drop` and `recover` there too, the commands that only you run. It leaves `push` allowed, because an agent pushes memories, notes and plans when you ask. `init` gets no rule, because a rule cannot tell `--dry-run` apart. memcore refuses an agent for the rest of `init`. Skill formats are standard, but the place where each agent looks for skills is not. memcore serves skills itself, from the checkout of the accepted history, so that location never matters.
 
-memcore ships as a single executable. It runs the installed git and the agent that you already use, so you install nothing else. See [Architecture](architecture.md).
+memcore ships as a single executable. It runs the installed git, so you install nothing else. See [Architecture](architecture.md).
 
 ## Sources
 

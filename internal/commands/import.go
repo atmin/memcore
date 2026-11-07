@@ -55,7 +55,7 @@ type candidate struct {
 var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\n]+)\]\]`)
 
 // importAutoMemory imports the auto-memory of Claude Code into the memory repo, one commit per project, by the
-// rules of docs/onboarding.md. It returns whether the import is complete: every source file is imported as it is
+// rules of docs/install.md. It returns whether the import is complete: every source file is imported as it is
 // now, or the person accepted it.
 func importAutoMemory(env Env, repo, claude string) (bool, error) {
 	h, err := home()
