@@ -26,8 +26,8 @@ type pick struct {
 }
 
 // preview returns the review queue as push would leave it, oldest first. It runs regenerate, fold and regenerate
-// again, as prepare does, in a scratch clone of main, and removes the clone before it returns. So it changes nothing
-// in the memory repo, and runs no git hook and no file system monitor. The caller holds the write lock.
+// again, as prepare does, in a scratch clone of main. It removes the clone before it returns. So it changes
+// nothing in the memory repo, and runs no git hook and no file system monitor. The caller holds the write lock.
 func preview(repo string) ([]previewed, error) {
 	// The clone lacks the ignored files, and an index of push might list them.
 	out, err := store.Git(repo, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain", "--ignored", "--untracked-files=all")
@@ -74,7 +74,8 @@ func preview(repo string) ([]previewed, error) {
 			return nil, err
 		}
 	}
-	// The index commits after the fold come last and are no picks of the todo, so they keep no target and no fixups.
+	// The index commits after the fold come last, and they are no picks of the todo. So they keep no target and
+	// no fixups.
 	shas := all[:len(all)-len(again)]
 	matched, err := readTodo(clone)
 	if err != nil {
@@ -102,7 +103,8 @@ func preview(repo string) ([]previewed, error) {
 	return commits, nil
 }
 
-// scratchClone clones the branch main of the repo into tmp for regenerate and fold, and returns the path of the clone.
+// scratchClone clones the branch main of the repo into tmp for regenerate and fold. It returns the path of the
+// clone.
 // No hook, file system monitor or signing helper runs in the clone. Its accepted commit is the one of the repo.
 // It takes the settings of the repo that shape a commit message, so its messages match those of push.
 // It holds every folder of the working tree, since an index lists the empty folders of its level.

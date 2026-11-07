@@ -23,9 +23,15 @@ const voicePath = "skills/voice/SKILL.md"
 // initMessage is the message of the first commit of every memory repo, which init makes.
 const initMessage = "init: create the memory repo"
 
-// runInit sets up the memory repo and Claude Code: the repo, the snapshot of the transcripts, the import of
-// auto-memory, the settings, then the report of inbox. --dry-run builds the repo at MEMCORE_REPO and only
-// prints the change of the settings. --undo removes what init added to the settings.
+// runInit sets up the memory repo and Claude Code, in this order:
+//   - the repo
+//   - the snapshot of the transcripts
+//   - the import of auto-memory
+//   - the settings
+//   - the report of inbox
+//
+// --dry-run builds the repo at MEMCORE_REPO and only prints the change of the settings. --undo removes what
+// init added to the settings.
 func runInit(env Env, args []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -121,8 +127,8 @@ func setupRepo(env Env, remote string) (string, error) {
 		return "", fmt.Errorf("%s exists and is not a memory repo of memcore: move it away, then run init again", repo)
 	}
 
-	// init builds the repo beside its final path and renames it into place, so a failure leaves
-	// that path as it was, and the rename refuses a directory that something filled meanwhile.
+	// init builds the repo beside its final path and renames it into place. So a failure leaves that path
+	// as it was. The rename refuses a directory that something filled meanwhile.
 	tmp, err := os.MkdirTemp(filepath.Dir(repo), ".memory-init-")
 	if err != nil {
 		return "", fmt.Errorf("create a temporary directory: %w", err)

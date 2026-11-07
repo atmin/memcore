@@ -61,7 +61,8 @@ func TestPreviewMatchesPush(t *testing.T) {
 	}
 }
 
-// stateOf returns what a preview must leave as it was in a repo: its refs, HEAD, its working tree and .git/memcore/.
+// stateOf returns the state of a repo that a preview must leave as it was. That is its refs, HEAD, its
+// working tree and .git/memcore/.
 func stateOf(t *testing.T, repo string) string {
 	t.Helper()
 	state := gitT(t, repo, "for-each-ref") + gitT(t, repo, "symbolic-ref", "HEAD") + gitT(t, repo, "rev-parse", "HEAD") +

@@ -27,7 +27,7 @@ type Command struct {
 	Does   string
 	Yours  bool   // only the person runs it
 	Hidden bool   // only a hook of an agent runs it, so orient, help and the usage leave it out
-	Help   string // the input and the format, with one minimal valid input; see help.go
+	Help   string // unused: helps, in help.go, holds the help of each command
 	Run    func(env Env, args []string) error
 }
 

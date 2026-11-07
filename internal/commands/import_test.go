@@ -83,7 +83,7 @@ func TestImport(t *testing.T) {
 	autoMemory(t, claude, shop, "spec_link.md", flat("spec-link", "Read when you read the spec.", "reference", "See [the spec](../notes/spec.md)."))
 	autoMemory(t, claude, shop, "memo.md", flat("memo-word", "Read when you write.", "feedback", "Write a memo."))
 	autoMemory(t, claude, shop, "MEMORY.md", "- [Deploy](deploy_day.md)\n")
-	// The app holds the name of a memory of the shop, and ~/--- the name of a memory in the repo.
+	// The app holds the name of a memory of the shop. ~/--- holds the name of a memory in the repo.
 	autoMemory(t, claude, app, "deploy.md", flat("deploy-day", "Read before you deploy the app.", "project", "Deploy the app on Mondays. See [[deploy-day]]."))
 	autoMemory(t, claude, dashes, "care.md", flat("care_rule", "Read when you take care.", "project", "Take care."))
 	// These folders resolve to no directory, to two, or to one outside home.

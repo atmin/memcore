@@ -37,7 +37,7 @@ type options struct {
 	flags   string // the letters that take no argument
 	args    string // the letters that take an argument
 	digits  bool   // a dash with digits, as -20, is an option
-	pattern bool   // without -e or -f, the first operand is the pattern or the script, and -f names a file that it reads
+	pattern bool   // without -e or -f, the first operand is the pattern or the script. -f names a file that the command reads
 }
 
 // readingCommands are the commands whose operands name the files that they read. Any other command reads nothing.
@@ -52,10 +52,10 @@ var readingCommands = map[string]options{
 	"rg":   {flags: "nivwxcloHsqF", args: "efABCm", pattern: true},
 }
 
-// char is one character of a shell word. plain is true when no quote or backslash protects it,
-// so it keeps its meaning to the shell, as * and ~ do. A $ in double quotes stays plain.
-// quote numbers the quotes or the backslash that protect the character, and is 0 outside them,
-// so the name of a variable ends where its quotes end.
+// char is one character of a shell word. plain is true when no quote or backslash protects the character.
+// Then it keeps its meaning to the shell, as * and ~ do. A $ in double quotes stays plain.
+// quote numbers the quotes or the backslash that protect the character, and is 0 outside them.
+// So the name of a variable ends where its quotes end.
 type char struct {
 	r     rune
 	plain bool
@@ -311,7 +311,7 @@ func (r *reader) bash(command, cwd string) {
 	end("")
 }
 
-// run applies one segment: a cd changes the folder, unless it runs next to a |, and a reader reads its files.
+// run applies one segment. A cd changes the folder, unless it runs next to a |. A reader reads its files.
 func (r *reader) run(seg segment, dir *string, piped bool) {
 	words := seg.words
 	for len(words) > 0 && (assignment(words[0]) || keyword(words[0])) {
@@ -513,15 +513,17 @@ func (r *reader) file(p, cwd string) {
 	r.add(p)
 }
 
-// physical cleans an absolute path as the system resolves it. It returns false when a .. leaves a symlink,
-// since the parent of the target of the symlink is not the folder that the path names. It also returns false
-// when a /, a . or a .. follows a part that is no folder, as in x.md/, since the system then opens nothing.
+// physical cleans an absolute path as the system resolves it. It returns false when a .. leaves a symlink.
+// The reason is that the parent of the target of the symlink is not the folder that the path names.
+// It also returns false when a /, a . or a .. follows a part that is no folder. An example is x.md/.
+// The system then opens nothing.
 func physical(p string) (string, bool) {
 	return resolveDots(p, os.Lstat) // a symlink is no folder to Lstat
 }
 
-// logical cleans an absolute path as cd -L does, so a .. leaves a symlink to a folder for the folder that holds it.
-// It returns false when a /, a . or a .. follows a part that is no folder, as in x.md/.., since cd then fails.
+// logical cleans an absolute path as cd -L does. So a .. leaves a symlink to a folder for the folder that holds
+// the symlink. It returns false when a /, a . or a .. follows a part that is no folder.
+// An example is x.md/.., where cd fails.
 func logical(p string) (string, bool) {
 	return resolveDots(p, os.Stat)
 }
@@ -551,7 +553,8 @@ func resolveDots(p string, parent func(string) (os.FileInfo, error)) (string, bo
 	return cur, true
 }
 
-// add records an absolute path when it is a document of the memory repo, by its path as the repo spells it.
+// add records an absolute path when it is a document of the memory repo. It records the path as the repo
+// spells it.
 func (r *reader) add(p string) {
 	p, ok := physical(p)
 	if !ok {
@@ -583,7 +586,8 @@ func (r *reader) add(p string) {
 	r.found[rel] = true
 }
 
-// below returns the parts of a clean absolute path below the memory repo, or false when the path lies outside it.
+// below returns the parts of a clean absolute path below the memory repo. It returns false when the path lies
+// outside the repo.
 // A file system that ignores case also opens the repo by another casing of its path.
 func (r *reader) below(p string) ([]string, bool) {
 	sep := string(filepath.Separator)
@@ -602,7 +606,7 @@ func (r *reader) below(p string) ([]string, bool) {
 }
 
 // spelling returns the name by which a folder holds part. A file system that ignores case opens a file by any
-// casing of its name, so the log takes the name of the entry, and names each document one way.
+// casing of its name. So the log takes the name of the entry, and names each document one way.
 // It returns false when no entry of the folder is part in another casing.
 func spelling(dir, part string) (string, bool) {
 	entries, err := os.ReadDir(dir)

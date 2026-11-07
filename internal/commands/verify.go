@@ -60,7 +60,8 @@ func runVerify(env Env, args []string) error {
 	return nil
 }
 
-// toplevel returns the root of the git repo that holds a path, or the folder of the path in no repo.
+// toplevel returns the root of the git repo that holds a path. For a path in no repo, it returns the folder
+// of the path.
 func toplevel(target string) (string, error) {
 	dir := target
 	if info, err := os.Stat(target); err == nil && !info.IsDir() {

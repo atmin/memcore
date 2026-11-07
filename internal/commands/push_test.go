@@ -161,9 +161,9 @@ func subjects(t *testing.T, remote string) string {
 	return strings.TrimSpace(gitT(t, remote, "log", "--format=%s", "main"))
 }
 
-// foldCase is a review queue that push folds. queue builds it in a new memory repo, with any push before it, and
-// returns the check of what the next push leaves. preview checks the preview of the queue beyond its equality with
-// the push, or is nil.
+// foldCase is a review queue that push folds. queue builds it in a new memory repo, with any push before it.
+// queue returns the check of what the next push leaves. preview checks the preview of the queue beyond its
+// equality with the push, or is nil.
 type foldCase struct {
 	name    string
 	queue   func(t *testing.T, home, repo, remote string) (pushed func(t *testing.T, out string))
@@ -515,7 +515,8 @@ func foldCases() []foldCase {
 			},
 		},
 		{
-			// The remember and its forget write the stale root index, and the fold drops them, so the index is stale again.
+			// The remember and its forget write the stale root index. The fold drops them, so the index is stale
+			// again.
 			name: "a dropped chain that held a stale index",
 			queue: func(t *testing.T, home, repo, remote string) func(*testing.T, string) {
 				writeT(t, repo, "memories/by-hand.md", memoryText("by-hand", "Read when you edit by hand.", "A fact."))
@@ -677,8 +678,9 @@ func TestStaleIndexEdges(t *testing.T) {
 // treeFile is a path of a commit, with its mode and its content. A file with no mode is deleted.
 type treeFile struct{ path, mode, content string }
 
-// commitOn commits files onto parent through a scratch index, so each path keeps its exact case and its mode on any
-// file system. The content of a gitlink, mode 160000, names its commit. commitOn moves no branch, and returns the commit.
+// commitOn commits files onto parent through a scratch index. So each path keeps its exact case and its mode on
+// any file system. The content of a gitlink, mode 160000, names its commit. commitOn moves no branch, and returns
+// the commit.
 func commitOn(t *testing.T, repo, parent, message string, files []treeFile) string {
 	t.Helper()
 	index := filepath.Join(t.TempDir(), "index")

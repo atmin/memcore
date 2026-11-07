@@ -21,8 +21,9 @@ type chain struct {
 
 // fold folds the fixups of the review queue into their targets, with one interactive rebase whose todo
 // memcore writes itself. A fixup folds into the nearest earlier commit with its subject, as autosquash does.
-// A chain that leaves every document as it found it, such as a remember and its forget, is dropped whole,
-// since git stops on a fixup that empties its target. It returns the commits that the fold removed.
+// A chain may leave every document as it found it, such as a remember and its forget. The fold drops such a
+// chain whole, because git stops on a fixup that empties its target. It returns the commits that the fold
+// removed.
 // The caller holds the write lock, and the working tree is clean.
 func fold(repo string) ([]string, error) {
 	chains, base, err := chainsOf(repo)
@@ -153,8 +154,8 @@ func cancels(repo string, ch *chain) (bool, error) {
 	return true, nil
 }
 
-// objectAt returns the tree entry of a path at a commit, its mode and its object, or "" when the commit
-// has no such path. A change of mode alone counts as a change.
+// objectAt returns the tree entry of a path at a commit, with its mode and its object. It returns "" when
+// the commit has no such path. A change of mode alone counts as a change.
 func objectAt(repo, rev, p string) string {
 	out, err := store.Git(repo, "--literal-pathspecs", "ls-tree", "--full-tree", rev, "--", p)
 	if err != nil {

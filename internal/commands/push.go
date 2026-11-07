@@ -12,8 +12,8 @@ import (
 )
 
 // runPush fetches, rebases the review queue, asks the person at the terminal, and pushes the queue.
-// When no person answers, an agent runs it: it pushes the whole queue without a question when every commit
-// changes only memories, notes, plans and indexes, and otherwise pushes nothing.
+// When no person answers, an agent runs it. Then it pushes the whole queue without a question when every
+// commit changes only memories, notes, plans and indexes. Otherwise it pushes nothing.
 // It pushes the tip that it counted, so a commit that lands while it asks waits for the next push.
 func runPush(env Env, args []string) error {
 	if len(args) != 0 {
@@ -86,8 +86,9 @@ func runPush(env Env, args []string) error {
 	return nil
 }
 
-// agentQueue refuses the push of an agent when a commit of the queue up to tip needs the person, and names each
-// such commit with its reason, newest first. The queue is one line of history, so an agent pushes all of it or nothing.
+// agentQueue refuses the push of an agent when a commit of the queue up to tip needs the person. It names each
+// such commit with its reason, newest first. The queue is one line of history, so an agent pushes all of it or
+// nothing.
 func agentQueue(repo, tip string) error {
 	rng := tip
 	if hasAccepted(repo) {
@@ -131,10 +132,19 @@ func revList(repo, tip string) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
-// prepare readies the queue for a push under the write lock. It refuses a working tree with
-// uncommitted changes, fetches, regenerates the stale indexes, folds the fixups, and regenerates again,
-// since a chain that the fold drops may have held the change of a stale index. It returns the tip,
-// the accepted commit, the queue, newest first, the commits of the indexes and the commits that the fold removed.
+// prepare readies the queue for a push under the write lock. It refuses a working tree with uncommitted
+// changes. Then it does these steps:
+//   - It fetches.
+//   - It regenerates the stale indexes.
+//   - It folds the fixups.
+//   - It regenerates again, since a chain that the fold drops may have held the change of a stale index.
+//
+// It returns these values:
+//   - the tip
+//   - the accepted commit
+//   - the queue, newest first
+//   - the commits of the indexes
+//   - the commits that the fold removed
 func prepare(repo string) (tip, base string, queue, made, folded []string, err error) {
 	unlock, err := store.Lock(repo)
 	if err != nil {
@@ -181,9 +191,10 @@ func cleanTree(repo, consequence string) error {
 	return nil
 }
 
-// personReason returns "" when an agent may push a commit, and otherwise the reason that only the person may:
-// "a merge commit", or the paths that the commit changes and that are not memories, notes, plans or indexes, sorted.
-// Only the person accepts skills and scripts, because they run from the accepted history.
+// personReason returns "" when an agent may push a commit. Otherwise it returns the reason that only the
+// person may. The reason is "a merge commit". Or it is the sorted paths of the commit that are not memories,
+// notes, plans or indexes. Only the person accepts skills and scripts, because they run from the accepted
+// history.
 func personReason(repo, sha string) (string, error) {
 	// rev-list prints the commit, then its parents, and no setting of git log adds a line to it.
 	out, err := store.Git(repo, "rev-list", "--parents", "-n", "1", sha)
@@ -215,8 +226,8 @@ func personReason(repo, sha string) (string, error) {
 }
 
 // agentFile reports whether an agent may push a change that leaves a path with mode, 000000 for a deleted path.
-// It may push a memory, a note, a plan or an index outside skills and bin, when the change deletes it or leaves
-// it a regular file.
+// An agent may push a memory, a note, a plan or an index outside skills and bin. The change must delete the
+// file or leave it a regular file.
 func agentFile(p, mode string) bool {
 	if mode != "000000" && mode != "100644" {
 		return false

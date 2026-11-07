@@ -14,15 +14,15 @@ import (
 )
 
 // conflictError is a rebase that stopped on a conflict in a document, and that memcore aborted.
-// abort returns it only when the abort succeeded, so a caller may say that the queue is as it was.
+// abort returns it only when the abort succeeded. So a caller may say that the queue is as it was.
 type conflictError struct{ paths []string }
 
 func (e *conflictError) Error() string {
 	return "a rebase stopped on a conflict in " + strings.Join(e.paths, ", ") + ", so memcore aborted it"
 }
 
-// rebase runs git rebase with args. At each stop on a conflict that only indexes hold,
-// it writes those indexes again from the documents and continues, since indexes are generated.
+// rebase runs git rebase with args. Indexes are generated. So at each stop on a conflict that only indexes
+// hold, it writes those indexes again from the documents. Then it continues.
 // A conflict in any other document aborts the rebase and returns a conflictError.
 // The caller holds the write lock.
 func rebase(repo string, args ...string) error {
@@ -104,8 +104,8 @@ func indexLevel(p string) (string, bool) {
 	return store.LevelOf(folder)
 }
 
-// abort aborts the rebase in progress and returns err. When the abort fails, it returns that failure,
-// with the message of err but not err itself, so no caller reports the queue as it was.
+// abort aborts the rebase in progress and returns err. When the abort fails, it returns that failure, with the
+// message of err but not err itself. So no caller reports the queue as it was.
 func abort(repo string, err error) error {
 	if _, aerr := store.Git(repo, "rebase", "--abort"); aerr != nil {
 		return fmt.Errorf("%v; abort the rebase: %w: the person finishes or aborts the rebase", err, aerr)
@@ -113,11 +113,12 @@ func abort(repo string, err error) error {
 	return err
 }
 
-// settle handles a stop of a rebase that holds no conflict. After an "exec false" line, which the fold puts
-// after each commit, it regenerates the indexes that the commit left stale and amends the commit, since an
-// earlier commit that the fold dropped may have written them. After a fixup that empties its target for now,
-// as a revision back to the text before it, it keeps the empty commit, so the next fixup applies.
-// Any other stop is an error.
+// settle handles a stop of a rebase that holds no conflict. The fold puts an "exec false" line after each
+// commit that it keeps. After that line, settle regenerates the indexes that the commit left stale, and amends
+// the commit. An earlier commit that the fold dropped may have written those indexes.
+//
+// A fixup may empty its target until the next fixup, such as a revision back to the text before it. After such a fixup, settle keeps
+// the empty commit, so the next fixup applies. Any other stop is an error.
 func settle(repo string) error {
 	done, err := os.ReadFile(filepath.Join(gitPath(repo, "rebase-merge"), "done"))
 	if err != nil {

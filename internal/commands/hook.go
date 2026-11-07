@@ -26,7 +26,7 @@ type hookInput struct {
 	Error     string    `json:"error"` // the error of a failed tool call, of which only the start counts
 }
 
-// toolInput holds the fields of a tool call that name what the call reads: the command of Bash,
+// toolInput holds the fields of a tool call that name what the call reads. These are the command of Bash,
 // the file of Read and the path of Grep.
 type toolInput struct {
 	Command  string `json:"command"`
@@ -82,7 +82,7 @@ func runHook(env Env, args []string) error {
 	switch args[0] {
 	case "session-start":
 		e.Source = in.Source
-		// The commands of the agent run without the environment of the hook, so a memory repo other than
+		// The commands of the agent run without the environment of the hook. So a memory repo other than
 		// ~/memory reaches them through the environment file of the session.
 		if repo, f := os.Getenv("MEMCORE_REPO"), os.Getenv("CLAUDE_ENV_FILE"); repo != "" && f != "" {
 			if err := appendLine(f, "export MEMCORE_REPO="+shellQuote(repo)); err != nil {
@@ -124,7 +124,8 @@ func runHook(env Env, args []string) error {
 }
 
 // hookTool logs the documents that a tool call read. A call that read none is quiet, so Run logs nothing
-// and starts no process for it. The level of cwd costs a git process, so only a call that read a document looks it up.
+// and starts no process for it. The level of cwd costs a git process. So only a call that read a document
+// looks it up.
 func hookTool(e *Event, in hookInput) error {
 	repo, err := memoryRepo()
 	if err != nil {
@@ -149,7 +150,7 @@ func hookTool(e *Event, in hookInput) error {
 	return nil
 }
 
-// ran reports whether a tool call ran, so that it read what it names: any call after PostToolUse,
+// ran reports whether a tool call ran, so that it read what it names. That is any call after PostToolUse,
 // and a Bash call after PostToolUseFailure whose command ran and exited.
 func ran(in hookInput) bool {
 	switch in.Event {
@@ -161,8 +162,8 @@ func ran(in hookInput) bool {
 	return false
 }
 
-// findMarks returns the marks in a prompt. A mark stands as a whole word: no letter, digit or underscore
-// touches it, in any script, and no # comes before it.
+// findMarks returns the marks in a prompt. A mark stands as a whole word. No letter, digit or underscore of
+// any script touches it, and no # comes before it.
 func findMarks(prompt string) map[string]bool {
 	found := map[string]bool{}
 	for _, m := range markRE.FindAllStringSubmatchIndex(prompt, -1) {

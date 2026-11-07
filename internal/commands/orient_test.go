@@ -170,7 +170,8 @@ func TestOrient(t *testing.T) {
 	})
 }
 
-// shortVoice is a voice skill for tests that compare whole prints, so the print does not change with the shipped voice.
+// shortVoice is a voice skill for tests that compare whole prints. With it, the print does not change with the
+// shipped voice.
 const shortVoice = `---
 name: voice
 description: "Sets how to write."
@@ -192,7 +193,7 @@ description: "Sets how to write."
 `
 
 // exactHome builds a home with three levels for tests that compare whole prints: ~, ~/dev and ~/dev/app.
-// ~/dev holds a memory in the review queue and a plan, and ~/dev/app holds a plan and two notes.
+// ~/dev holds a memory in the review queue and a plan. ~/dev/app holds a plan and two notes.
 func exactHome(t *testing.T) (home, repo, app string) {
 	t.Helper()
 	home, repo, _ = newMemory(t)

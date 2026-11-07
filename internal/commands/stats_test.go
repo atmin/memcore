@@ -781,7 +781,8 @@ func TestMeasureEndToEnd(t *testing.T) {
 	memory := "dev/memories/a-fact.md"
 	var asked string
 	yes := Env{Dir: home, Confirm: answer(true, &asked)}
-	// as runs one command in a session, or as the person when the session is empty, and fails the test on an error.
+	// as runs one command in a session, or as the person when the session is empty. It fails the test on an
+	// error.
 	as := func(session string, env Env, stdin string, args ...string) string {
 		t.Helper()
 		t.Setenv("CLAUDE_CODE_SESSION_ID", session)

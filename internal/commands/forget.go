@@ -89,8 +89,9 @@ func runForget(env Env, args []string) error {
 	return nil
 }
 
-// forgetTarget returns what forget removes: a document, named by its path or, for a memory, by its name,
-// or the folder of a skill, named by the folder or its SKILL.md. It returns the files of the target too.
+// forgetTarget returns what forget removes, and the files of the target. The target is one of these:
+//   - a document, named by its path or, for a memory, by its name
+//   - the folder of a skill, named by the folder or its SKILL.md
 func forgetTarget(repo, arg string) (string, []string, error) {
 	if !strings.Contains(arg, "/") {
 		found, err := findMemory(repo, arg)
@@ -153,9 +154,9 @@ func forgetTarget(repo, arg string) (string, []string, error) {
 }
 
 // forgetMessage returns the commit message of a removal. When the queue created the target, the removal is
-// a fixup of its last change, so the fold leaves no commit of the pair. Otherwise it is "forget: <path>".
-// A skill counts as created by the commit that created its SKILL.md, and its removal is a fixup only when
-// every queued change of the skill folds into that commit.
+// a fixup of its last change. So the fold leaves no commit of the pair. Otherwise the message is
+// "forget: <path>". A skill counts as created by the commit that created its SKILL.md. The removal of a
+// skill is a fixup only when every queued change of the skill folds into that commit.
 func forgetMessage(repo, target string, skill bool, reason string) (string, error) {
 	plain := "forget: " + target + "\n\n" + reason
 	creation := target
@@ -208,10 +209,11 @@ func forgetMessage(repo, target string, skill bool, reason string) (string, erro
 	return plain, nil
 }
 
-// wouldPrune returns the folders that a removal of files leaves empty, deepest first, as apply removes them:
-// a folder that holds only removed files and emptied folders, and a level that keeps only its index.
-// An empty folder inside counts as gone only where apply removes it too: inside a level that empties,
-// or inside a pruned folder, such as the folder of a skill. A link into such a folder breaks too.
+// wouldPrune returns the folders that a removal of files leaves empty, deepest first, as apply removes them.
+// These are the folders that hold only removed files and emptied folders, and the levels that keep only
+// their index. An empty folder inside counts as gone only where apply removes it too. That is inside a
+// level that empties, or inside a pruned folder, such as the folder of a skill. A link into such a folder
+// breaks too.
 func wouldPrune(repo string, files, prune []string) ([]string, error) {
 	var dirs []string
 	for _, f := range files {

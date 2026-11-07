@@ -46,7 +46,7 @@ type source struct {
 }
 
 // branchPath is the path of a transcript on the branch. The project folder becomes its digest. Claude Code
-// writes each character of a directory that is not a letter or a digit as -, so no check of the name can
+// writes each character of a directory that is not a letter or a digit as -. So no check of the name can
 // find every secret in it. The header of the transcript keeps the directory, redacted.
 func (s source) branchPath() string {
 	parts := []string{"claude", digest(s.folder)}
@@ -107,7 +107,7 @@ func runSnapshot(env Env, args []string) error {
 }
 
 // snapshot commits the changed transcripts under src to the transcripts branch, and returns how many it committed.
-// It holds its own lock, so it never blocks a write, and it never touches main, HEAD or the index of the repo.
+// It holds its own lock, so it never blocks a write. It never touches main, HEAD or the index of the repo.
 func snapshot(out io.Writer, repo, src string) (int, error) {
 	unlock, err := store.LockFile(repo, "snapshot.lock")
 	if err != nil {
@@ -302,7 +302,7 @@ func transcriptFiles(src string) ([]source, error) {
 }
 
 // safeName returns the name of a file for the transcripts branch. A name that may hold a secret becomes
-// redacted- and its digest, so it shows nothing of the secret, and two names stay apart.
+// redacted- and its digest. So it shows nothing of the secret, and two names stay apart.
 func safeName(name string) string {
 	if len(guards.Secrets(name)) == 0 {
 		return name

@@ -28,7 +28,8 @@ const (
 	weekCount  = 4                  // stats prints weeks 0 to 3
 	topReads   = 5                  // stats lists the five most-read memories
 	topErrors  = 5                  // stats lists the five largest groups of failed calls
-	// mistakeWindow is the time after a push in which a revise or a forget of a memory makes it a mistake.
+	// mistakeWindow is the time after a push that counts for mistakes. A revise or a forget of a memory in
+	// this time makes the memory a mistake.
 	mistakeWindow = 14 * 24 * time.Hour
 	unreadWindow  = 30 * 24 * time.Hour // stats lists the memories with no logged read in 30 days
 	unreadList    = 20                  // and names 20 of them at most
@@ -46,7 +47,8 @@ type fact struct {
 	changes []fileStatus
 }
 
-// fileStatus is a path that a commit changes, with its status letter from git diff-tree, such as A, M or D.
+// fileStatus is a path that a commit changes, with its status letter from git diff-tree. Examples of the
+// letter are A, M and D.
 type fileStatus struct{ status, path string }
 
 // review counts the commits of the review queue in a week, and the memories that its pushes accepted.
@@ -166,8 +168,9 @@ func summary(repo string, now time.Time) (string, error) {
 	return b.String(), nil
 }
 
-// readLog returns the events of the use log, in the order of the file, and the count of the lines that do not
-// parse: a line that is not an event, a blank line included, or whose time is not RFC 3339. A missing log holds no event.
+// readLog returns the events of the use log, in the order of the file. It also returns the count of the lines
+// that do not parse. Such a line is not an event, or its time is not RFC 3339. A blank line does not parse
+// either. A missing log holds no event.
 func readLog(repo string) ([]Event, int, error) {
 	f, err := os.Open(filepath.Join(store.StateDir(repo), "log.jsonl"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -217,8 +220,9 @@ func loggedCommits(events []Event) []string {
 var shaRE = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // commitFacts reads the subject and the changed paths of each commit from git. It runs one git cat-file to find
-// the commits that git lacks, and returns their count, then one git diff-tree for the rest. --always gives a
-// commit that changes nothing its subject too. Both outputs part at NUL bytes, so every path stays exact.
+// the commits that git lacks, and returns their count. Then it runs one git diff-tree for the rest. --always
+// gives a commit that changes nothing its subject too. The output of diff-tree parts at NUL bytes, so every
+// path stays exact.
 func commitFacts(repo string, shas []string) (map[string]fact, int, error) {
 	facts := map[string]fact{}
 	missing := 0
@@ -280,7 +284,7 @@ func commitFacts(repo string, shas []string) (map[string]fact, int, error) {
 }
 
 // measure computes the weeks 0 to 3 before now, newest first. It leaves out a week that ends before the log starts.
-// facts holds what git says about the logged commits, and a commit without facts counts as missing.
+// facts holds what git says about the logged commits. A commit without facts counts as missing.
 func measure(events []Event, facts map[string]fact, now time.Time) []week {
 	start, ok := logStart(events)
 	if !ok {
@@ -295,7 +299,7 @@ func measure(events []Event, facts map[string]fact, now time.Time) []week {
 		weeks = append(weeks, week{end: end})
 	}
 	// The order of time decides the last print of orient, and what follows a push. Parallel calls append out of
-	// that order, and the log keeps whole seconds, so lines of one second keep the order of the file.
+	// that order. The log keeps whole seconds, so lines of one second keep the order of the file.
 	lines := make([]logLine, len(events))
 	for i, e := range events {
 		lines[i] = logLine{Event: e, at: eventTime(e)}
@@ -331,8 +335,8 @@ type logLine struct {
 	place int
 }
 
-// add counts the lines of a week, oldest first. changed holds the committed revise and forget lines of each path,
-// in the whole log up to the call.
+// add counts the lines of a week, oldest first. changed holds the committed revise and forget lines of each
+// path. It covers the whole log up to the call.
 func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]logLine) {
 	lacked := map[string]bool{}
 	lookup := func(sha string) (fact, bool) {
@@ -547,9 +551,10 @@ func writeUnread(b *strings.Builder, repo string, events []Event, now time.Time)
 	return nil
 }
 
-// unread returns the memories at HEAD that no read of the use log names in the 30 days before now, sorted.
-// A memory counts only when its addition is older than 30 days: the author date of the newest commit that adds it,
-// since a fold keeps author dates. Every read counts, with a session or without one.
+// unread returns the memories at HEAD that no read of the use log names in the 30 days before now. The list
+// is sorted. A memory counts only when its addition is older than 30 days. The addition is the author date of
+// the newest commit that adds the memory, since a fold keeps author dates. Every read counts, with a session
+// or without one.
 func unread(repo string, events []Event, now time.Time) ([]string, error) {
 	since := now.Add(-unreadWindow)
 	read := map[string]bool{}
@@ -643,8 +648,8 @@ var (
 	digitsRE = regexp.MustCompile(`[0-9]+`)
 )
 
-// normalize returns the error of a failed line with its variable parts replaced, so that calls that failed
-// the same way fall in one group: each path of the line, then each commit, then each run of digits.
+// normalize returns the error of a failed line with its variable parts replaced. So calls that failed the
+// same way fall in one group. It replaces each path of the line, then each commit, then each run of digits.
 func normalize(e Event) string {
 	msg := e.Error
 	paths := slices.Clone(e.Paths)
@@ -710,7 +715,7 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "  Marks: %d #again, %d #wrong, %d #stale.\n", w.marks[0], w.marks[1], w.marks[2])
 }
 
-// acceptedText says how many memories the pushes accepted, and how many of them were mistakes.
+// acceptedText says how many memories the pushes accepted, and how many of these memories were mistakes.
 // soFar says that the mistakes can still grow.
 func acceptedText(r review, soFar bool) string {
 	if r.accepted == 0 {
@@ -739,7 +744,8 @@ func (w week) printsPerSession() float64 {
 	return math.Round(float64(w.prints)*10/float64(w.printers)) / 10
 }
 
-// wordsPerPrint returns the words of one print of orient with a session, rounded half away from zero, or 0 without one.
+// wordsPerPrint returns the words of one print of orient with a session, rounded half away from zero. It
+// returns 0 when the week has no such print.
 func (w week) wordsPerPrint() int {
 	if w.prints == 0 {
 		return 0

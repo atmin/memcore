@@ -115,7 +115,7 @@ func commits(n int, words ...string) string {
 // fetchedRef is where a fetch lands the main branch of the remote, before memcore accepts it.
 const fetchedRef = "refs/memcore/fetched/main"
 
-// rewritten is the marker of a remote that no longer holds the accepted history.
+// rewritten is the marker of a remote that lacks the accepted history.
 type rewritten struct{ accepted, fetched string }
 
 // refusal is the error of every write while the marker exists.

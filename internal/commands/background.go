@@ -46,9 +46,11 @@ var startBackground = func(repo string, args ...string) error {
 	return cmd.Process.Release()
 }
 
-// autoSnapshot starts a snapshot in the background after a command, when the projects folder of Claude Code
-// exists and the last snapshot started six hours ago or more. It skips snapshot, init and help, and a command
-// that started a snapshot itself.
+// autoSnapshot starts a snapshot in the background after a command, when both of these hold:
+//   - The projects folder of Claude Code exists.
+//   - The last snapshot ran six hours ago or more, by lastSnapshot.
+//
+// It skips snapshot, init and help, and a command that started a snapshot itself.
 func autoSnapshot(repo, command string, started bool) error {
 	if started || slices.Contains([]string{"snapshot", "init", "help"}, command) {
 		return nil
@@ -60,7 +62,7 @@ func autoSnapshot(repo, command string, started bool) error {
 	if _, err := os.Stat(filepath.Join(dir, "projects")); err != nil {
 		return nil
 	}
-	// One call at a time checks and marks, and a call that finds another one at it leaves the start to it.
+	// One call at a time checks and marks. A call that finds another call at it leaves the start to that call.
 	unlock, ok, err := store.TryLockFile(repo, "snapshot.schedule")
 	if err != nil || !ok {
 		return err

@@ -10,8 +10,8 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// runRecover drops the accepted commits that the remote lost, and moves the queue onto the fetched tip,
-// after the person confirms at the terminal.
+// runRecover drops the accepted commits that the remote lost, and moves the queue onto the fetched tip.
+// It does so after the person confirms at the terminal.
 func runRecover(env Env, args []string) error {
 	if len(args) != 0 {
 		return usageErr("usage: memcore recover")

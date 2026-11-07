@@ -75,8 +75,8 @@ func runRemember(env Env, args []string) error {
 		return inputErrf("the name %s is taken by %s: choose another name", m.Name, taken)
 	}
 	if !*isNew {
-		// The working directory sees every level on its path, so near-duplicates come from there,
-		// even when --at places the memory higher.
+		// The working directory sees every level on its path. So near-duplicates come from there, even when
+		// --at places the memory higher.
 		dups, err := nearDuplicates(repo, working, m.Description)
 		if err != nil {
 			return err
@@ -139,8 +139,8 @@ func runRemember(env Env, args []string) error {
 	return nil
 }
 
-// budgetLines returns the lines of a level that orient prints and the budget counts:
-// one for each memory, skill, script, conventions file and glossary.
+// budgetLines returns the lines of a level that orient prints and the budget counts. There is one line for
+// each memory, skill, script, conventions file and glossary.
 func budgetLines(ix store.Index) int {
 	n := 0
 	for _, kind := range []string{store.KindMemories, store.KindSkills, store.KindScripts, store.KindConventions, store.KindGlossary} {
@@ -161,7 +161,8 @@ func budgetWarning(level string, n int) string {
 	return fmt.Sprintf("warning: %s has %d lines in orient, over the budget of %d: merge or move memories to fit", title, n, budget)
 }
 
-// sizeWarning says that orient in a level prints more than the SessionStart hook shows in full, or "" when it does not.
+// sizeWarning says that orient in a level prints more than the SessionStart hook shows in full. It returns ""
+// when orient does not.
 // The budget counts lines, so a level within the budget can still pass hookBytes.
 func sizeWarning(level string, o orientText) string {
 	text, _, _ := o.full()

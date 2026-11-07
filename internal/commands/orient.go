@@ -11,7 +11,8 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// runOrient prints the commands, the pinned parts of the voice skill, and the indexes from the working directory to the root.
+// runOrient prints the commands and the pinned parts of the voice skill. Then it prints the indexes from the
+// working directory to the root.
 func runOrient(env Env, args []string) error {
 	if len(args) != 0 {
 		return usageErr("usage: memcore orient")
@@ -30,8 +31,8 @@ func runOrient(env Env, args []string) error {
 	return err
 }
 
-// orientText is the print of orient in parts: the header, then one part for each level,
-// from the working directory to the root. A level with no line and no count line has no part.
+// orientText is the print of orient in parts. The header comes first, then one part for each level, from the
+// working directory to the root. A level with no line and no count line has no part.
 type orientText struct {
 	header string
 	levels []levelPart
@@ -126,8 +127,8 @@ func orientation(repo, dir string) (orientText, error) {
 	return o, nil
 }
 
-// full returns the whole print of orient. It also returns the words of the header and of each level,
-// and the lines of each level that the budget counts.
+// full returns the whole print of orient. It also returns the words of the header and of each level.
+// And it returns the lines of each level that the budget counts.
 func (o orientText) full() (text string, words, lines map[string]int) {
 	var w strings.Builder
 	w.WriteString(o.header)
@@ -165,12 +166,12 @@ const (
 	formReplaced        // one line with the count of the documents
 )
 
-// fit returns the print of orient in at most limit bytes. It also returns the words of the header and of each level,
-// and the titles of the shortened levels. The print is the first of these forms that fits:
-//  1. the full print;
-//  2. the notice, the header and the levels, with levels made short one at a time, the largest full block first;
-//  3. the same, with short levels replaced one at a time, the largest short block first;
-//  4. the fixed text hookFallback.
+// fit returns the print of orient in at most limit bytes. It also returns the words of the header and of each
+// level, and the titles of the shortened levels. The print is the first of these forms that fits:
+//  1. the full print
+//  2. the notice, the header and the levels, with levels made short one at a time, the largest full block first
+//  3. the same, with short levels replaced one at a time, the largest short block first
+//  4. the fixed text hookFallback
 func (o orientText) fit(limit int) (text string, words map[string]int, short []string) {
 	text, words, _ = o.full()
 	if len(text) <= limit {
@@ -253,8 +254,8 @@ func (o orientText) shortened(forms []int) (text string, words map[string]int, s
 	return head + blocks.String(), words, short
 }
 
-// unreviewed returns the paths that a commit after the accepted history changed.
-// all is true when there is no accepted history, so every document is unreviewed.
+// unreviewed returns the paths that a commit after the accepted history changed. all is true when there is
+// no accepted history. Then every document is unreviewed.
 func unreviewed(repo string) (changed map[string]bool, all bool, err error) {
 	if !hasAccepted(repo) {
 		return nil, true, nil

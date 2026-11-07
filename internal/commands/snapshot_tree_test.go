@@ -34,7 +34,7 @@ func TestSnapshotHashesFolders(t *testing.T) {
 	// The tokens are built from parts, so no scanner takes this file for a leak.
 	tail := strings.Repeat("a1B2", 9)
 	answer := `{"type":"assistant","timestamp":"2026-11-04T10:00:00Z","sessionId":"s1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}` + "\n"
-	// Claude Code writes each character that is not a letter or a digit as -, so no check of the name finds
+	// Claude Code writes each character that is not a letter or a digit as -. So no check of the name finds
 	// every secret. Some transcripts name the directory, some name another one, and some none.
 	folders := map[string]string{
 		"-home-x-ghp-" + tail:           said("s1", "/home/x/ghp_"+tail, "Use small commits."),

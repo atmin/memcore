@@ -12,8 +12,8 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// staleIndexes returns the indexes that differ from what their levels generate, such as after a commit by
-// hand, as paths in the repo. A level with documents and no index counts as well.
+// staleIndexes returns the indexes that differ from what their levels generate, as paths in the repo. An
+// example is an index after a commit by hand. A level with documents and no index counts as well.
 func staleIndexes(repo string) ([]string, error) {
 	var stale []string
 	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {

@@ -16,8 +16,8 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// jsonNode is one JSON value that keeps the order of its keys and each number as written,
-// so an edit of the settings leaves every other line as it was.
+// jsonNode is one JSON value that keeps the order of its keys and each number as written. So an edit of the
+// settings leaves every other line as it was.
 type jsonNode struct {
 	kind  byte        // '{' an object, '[' an array, '"' a string, '0' a number, 't' true, 'f' false, 'n' null
 	keys  []string    // the keys of an object, in order
@@ -219,8 +219,13 @@ type autoMemoryChange struct {
 	Before string `json:"before,omitempty"` // its value, as JSON
 }
 
-// hookEvent is a hook that init adds: an event of Claude Code, the argument of memcore hook, and the matcher of its group.
-// An empty matcher runs the hook for every source of the event. A matcher of names and | runs it for those tools only.
+// hookEvent is a hook that init adds. It holds these values:
+//   - an event of Claude Code
+//   - the argument of memcore hook
+//   - the matcher of its group
+//
+// An empty matcher runs the hook for every source of the event. A matcher of names and | runs it for those
+// tools only.
 type hookEvent struct {
 	event, arg, matcher string
 }
@@ -289,7 +294,7 @@ func claudeChanges(tree *jsonNode, repo, home, exe string, autoOff bool) initRec
 }
 
 // hasCommand reports whether a matcher group with the matcher runs command. A group with another matcher, such as
-// startup or Bash, runs for other sources or tools, so it does not count.
+// startup or Bash, runs for other sources or tools. So it does not count.
 func hasCommand(groups *jsonNode, command, matcher string) bool {
 	for _, g := range groups.items {
 		if g.kind != '{' || !sameMatcher(g.get("matcher"), matcher) {
@@ -321,7 +326,7 @@ func sameMatcher(m *jsonNode, matcher string) bool {
 }
 
 // denyRules are the permissions that keep an agent away from the memory repo and from the commands of the person.
-// init gets no rule, because a rule cannot tell --dry-run apart, and memcore refuses an agent for the rest of init.
+// init gets no rule, because a rule cannot tell --dry-run apart. And memcore refuses an agent for the rest of init.
 // push gets no rule, because an agent pushes memories, notes and plans when the person asks.
 func denyRules(repo, home string) []string {
 	edit := "Edit(/" + filepath.ToSlash(repo) + "/**)"
@@ -331,8 +336,8 @@ func denyRules(repo, home string) []string {
 	return []string{edit, "Bash(memcore drop *)", "Bash(memcore recover *)"}
 }
 
-// applySettings shows the diff of the settings, asks once, then records the additions, keeps the original,
-// and writes the new settings. It does nothing, and asks nothing, when init adds nothing.
+// applySettings shows the diff of the settings and asks once. Then it records the additions, keeps the
+// original, and writes the new settings. It does nothing, and asks nothing, when init adds nothing.
 func applySettings(env Env, repo, settings string, tree *jsonNode, add initRecord) error {
 	if len(add.Hooks) == 0 && len(add.Deny) == 0 && add.AutoMemory == nil {
 		return nil

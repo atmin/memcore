@@ -55,8 +55,8 @@ type candidate struct {
 var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\n]+)\]\]`)
 
 // importAutoMemory imports the auto-memory of Claude Code into the memory repo, one commit per project, by the
-// rules of docs/install.md. It returns whether the import is complete: every source file is imported as it is
-// now, or the person accepted it.
+// rules of docs/install.md. It returns whether the import is complete. The import is complete when each source
+// file is imported as it is now, or the person accepted it.
 func importAutoMemory(env Env, repo, claude string) (bool, error) {
 	h, err := home()
 	if err != nil {
@@ -227,8 +227,8 @@ func importProject(env Env, repo, h string, rec *importRecord, projects, folder 
 		}
 	}
 
-	// The links follow the final names. A file with a fault leaves, and the links to it lose their brackets,
-	// so the check repeats until no file leaves.
+	// The links follow the final names. A file with a fault leaves, and the links to it lose their brackets.
+	// So the check repeats until no file leaves.
 	var files map[string][]byte
 	for {
 		// A link names a file of its project by any of its names: the files imported before, and this set.
@@ -302,7 +302,7 @@ func importProject(env Env, repo, h string, rec *importRecord, projects, folder 
 		return finish()
 	}
 
-	// The record of the project comes before its commit, so a rerun after a crash finds the commit by its token.
+	// The record of the project comes before its commit. So a rerun after a crash finds the commit by its token.
 	token, err := newToken()
 	if err != nil {
 		return err
@@ -367,7 +367,8 @@ func projectLevel(folder, h string) ([2]string, string) {
 }
 
 // settlePending marks a pending project done when its commit is in the history of HEAD. Otherwise the import
-// stopped before its commit, so settlePending puts back each file that it planned, and the indexes on their paths.
+// stopped before its commit. Then settlePending puts back each file that it planned, and the indexes on their
+// paths.
 // The caller holds the write lock.
 func settlePending(repo string, rec *importRecord) error {
 	for folder, p := range rec.Pending {
@@ -464,7 +465,10 @@ func normalizeName(s string) string {
 	return b.String()
 }
 
-// freeName returns name when it is free, then name with the segment of its level, then with -2, -3 and on.
+// freeName returns the first free name of these, in order:
+//   - name
+//   - name with the segment of its level, when the level has a segment
+//   - the name before, with -2, -3 and so on
 func freeName(name, segment string, taken map[string]bool) string {
 	if !taken[name] {
 		return name

@@ -29,7 +29,7 @@ type change struct {
 }
 
 // lockWrite takes the write lock and refuses while the remote is rewritten. Every write holds the
-// lock from its first check to its commit, so a command calls it before its checks and apply after them.
+// lock from its first check to its commit. So a command calls lockWrite before its checks, and apply after them.
 func lockWrite(repo string) (func(), error) {
 	unlock, err := store.Lock(repo)
 	if err != nil {
@@ -42,9 +42,13 @@ func lockWrite(repo string) (func(), error) {
 	return unlock, nil
 }
 
-// apply writes and removes the files of a change, regenerates the index of each level on their paths,
-// and commits them all, then returns the new commit. It refuses a symlink on any path and a path with
-// uncommitted changes. On a failure it restores every path from HEAD. The caller holds the lock of lockWrite.
+// apply makes a change and returns the new commit. It does these steps:
+//   - It writes and removes the files of the change.
+//   - It regenerates the index of each level on their paths.
+//   - It commits them all.
+//
+// It refuses a symlink on any path and a path with uncommitted changes. On a failure it restores every path
+// from HEAD. The caller holds the lock of lockWrite.
 func apply(repo string, c change) (string, error) {
 	var docs []string
 	for _, f := range c.writes {
@@ -172,8 +176,8 @@ func apply(repo string, c change) (string, error) {
 	return "", err
 }
 
-// docLevel returns the level of a document by its path in the repo: the folders before its kind folder,
-// or before its file when the file is a conventions file, a glossary or an index.
+// docLevel returns the level of a document by its path in the repo. The level is the folders before its
+// kind folder. For a conventions file, a glossary or an index, the level is the folders before the file.
 func docLevel(p string) (string, bool) {
 	parts := strings.Split(p, "/")
 	for i, part := range parts {
@@ -187,8 +191,8 @@ func docLevel(p string) (string, bool) {
 }
 
 // commitMessage returns the commit message of a command that changes one document. When the queue holds the
-// last change of the document, the message makes a fixup of that change, which push folds into it.
-// Otherwise it is "<command>: <path>". The reason goes in the body.
+// last change of the document, the message makes a fixup of that change. Push folds the fixup into it.
+// Otherwise the message is "<command>: <path>". The reason goes in the body.
 func commitMessage(repo, rel, command, reason string) (string, error) {
 	plain := command + ": " + rel + "\n\n" + reason
 	out, err := store.Git(repo, "--literal-pathspecs", "log", "-1", "--format=%H%x00%s", "--", rel)
@@ -234,8 +238,8 @@ func unchanged(repo string, c change) bool {
 	return true
 }
 
-// docKind returns the kind folder of a document by its path: memories, skills, bin, plans or notes,
-// or "" for a conventions file, a glossary or an index. A file inside a skill is of kind skills.
+// docKind returns the kind folder of a document by its path: memories, skills, bin, plans or notes.
+// It returns "" for a conventions file, a glossary or an index. A file inside a skill is of kind skills.
 func docKind(p string) string {
 	parts := strings.Split(p, "/")
 	for _, part := range parts[:len(parts)-1] {

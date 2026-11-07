@@ -26,9 +26,9 @@ func binDir() (string, error) {
 	return filepath.Join(h, ".local", "bin"), nil
 }
 
-// syncAccepted moves the checkout of the accepted history to origin/main, then links each of its scripts
-// onto ~/.local/bin and removes the links of scripts that are gone. A script runs as the person accepted it,
-// whatever the review queue holds. The caller holds the write lock.
+// syncAccepted moves the checkout of the accepted history to origin/main. Then it links each of its scripts
+// onto ~/.local/bin, and it removes the links of scripts that are gone. A script runs as the person accepted
+// it, whatever the review queue holds. The caller holds the write lock.
 func syncAccepted(repo string) error {
 	accepted, ok := revParse(repo, acceptedRef)
 	if !ok {
@@ -64,7 +64,7 @@ func syncAccepted(repo string) error {
 				continue
 			}
 			if !ours(repo, have) {
-				continue // a foreign link stays; push refuses a new script with its name
+				continue // a foreign link stays, and push refuses a new script with its name
 			}
 			if err := os.Remove(link); err != nil {
 				return fmt.Errorf("replace the link of the script %s: %w", name, err)
@@ -92,7 +92,7 @@ func syncAccepted(repo string) error {
 		if rel, ok := scripts[e.Name()]; ok && filepath.Clean(have) == filepath.Join(dir, filepath.FromSlash(rel)) {
 			continue
 		}
-		// The accepted history no longer holds this script, or holds it elsewhere or as a helper.
+		// The accepted history lacks this script, or holds it elsewhere or as a helper.
 		if err := os.Remove(link); err != nil {
 			return fmt.Errorf("remove the link %s of a script that the accepted history no longer holds: %w", link, err)
 		}
@@ -106,9 +106,9 @@ func ours(repo, target string) bool {
 	return filepath.IsAbs(t) && strings.HasPrefix(t, acceptedDir(repo)+string(filepath.Separator))
 }
 
-// scriptsIn returns the scripts of a commit by name: the regular executable files, mode 100755, directly in
-// the bin folder of a level. It reads the tree of git, so no symlink and no untracked file counts.
-// Two scripts with one name are an error that names both, since a script name is unique in the memory repo.
+// scriptsIn returns the scripts of a commit by name. A script is a regular executable file, mode 100755,
+// directly in the bin folder of a level. It reads the tree of git, so no symlink and no untracked file counts.
+// A script name is unique in the memory repo. So two scripts with one name are an error that names both.
 func scriptsIn(repo, rev string) (map[string]string, error) {
 	out, err := store.Git(repo, "ls-tree", "-r", "-z", "--full-tree", rev)
 	if err != nil {
@@ -136,8 +136,9 @@ func scriptsIn(repo, rev string) (map[string]string, error) {
 	return scripts, nil
 }
 
-// foreignNames refuses a script of the queue that the accepted history lacks, when a file in ~/.local/bin
-// that memcore did not link holds its name. It refuses two scripts with one name too.
+// foreignNames refuses a script of the queue that the accepted history lacks, when a foreign file holds its
+// name. A foreign file is a file in ~/.local/bin that memcore did not link. It refuses two scripts with one
+// name too.
 func foreignNames(repo string) error {
 	bin, err := binDir()
 	if err != nil {

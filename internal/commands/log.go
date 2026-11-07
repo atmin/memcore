@@ -42,7 +42,7 @@ type Event struct {
 	Short    []string       `json:"short,omitempty"`  // the levels that the SessionStart hook shortened to fit the output limit of Claude Code
 	Dir      string         `json:"dir,omitempty"`    // the directory of a hook, as ~/<path>
 	Source   string         `json:"source,omitempty"` // the source of a session start: startup, resume, clear, compact or fork
-	Marks    []string       `json:"marks,omitempty"`  // the marks of a prompt; no field holds the prompt
+	Marks    []string       `json:"marks,omitempty"`  // the marks of a prompt, but no field holds the prompt
 
 	inputs  []string // text from standard input, which redact removes from the error
 	started bool     // the command started a snapshot itself, so Run starts no second one
@@ -173,8 +173,8 @@ func (e *Event) input(texts ...string) {
 	}
 }
 
-// redact returns the message of an error without the parts of the input that it quotes,
-// and without any text that the command marked as input.
+// redact returns the message of an error without the parts of the input that it quotes. It also leaves out
+// any text that the command marked as input.
 func redact(err error, inputs []string) string {
 	msg := err.Error()
 	var ie *store.InputError
@@ -211,8 +211,8 @@ func appendEvent(repo string, e *Event) error {
 	return nil
 }
 
-// keep makes a ref under refs/memcore/seen/ for each commit of an event, accepted or not,
-// so no rewrite and no garbage collection loses a version that a session saw. push never sends these refs.
+// keep makes a ref under refs/memcore/seen/ for each commit of an event, accepted or not. So no rewrite and
+// no garbage collection loses a version that a session saw. push never sends these refs.
 func keep(repo string, e *Event) error {
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
 		return nil

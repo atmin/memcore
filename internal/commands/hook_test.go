@@ -212,8 +212,8 @@ func TestHook(t *testing.T) {
 	})
 }
 
-// longLevel commits n memories with long descriptions at a level, so its print of orient passes hookBytes
-// when n is 30. It returns the paths of the memories.
+// longLevel commits n memories with long descriptions at a level. When n is 30, the print of orient for
+// the level passes hookBytes. It returns the paths of the memories.
 func longLevel(t *testing.T, repo, level string, n int) []string {
 	t.Helper()
 	var paths []string

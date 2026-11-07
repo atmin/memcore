@@ -9,8 +9,11 @@ import (
 	"github.com/atmin/memcore/internal/store"
 )
 
-// runInbox fetches, rebases the review queue, prints the summary of the week, and lists the unpushed commits
-// as the fold at push leaves them.
+// runInbox does these steps:
+//   - It fetches, and rebases the review queue.
+//   - It prints the summary of the week.
+//   - It lists the unpushed commits as the fold at push leaves them.
+//
 // A fetch or a summary that fails only warns, so the person sees the queue offline too.
 func runInbox(env Env, args []string) error {
 	if len(args) != 0 {
@@ -37,9 +40,9 @@ func runInbox(env Env, args []string) error {
 }
 
 // report prints what waits on the person, without a fetch. First come a rewritten remote, the stale indexes and
-// the files that keep auto-memory on. Then comes the queue as the fold at push leaves it, with the index commits
-// that push adds, which the header counts apart. When the preview of the fold fails, report warns and lists each
-// commit of the queue as it is. The caller holds the write lock.
+// the files that keep auto-memory on. Then comes the queue as the fold at push leaves it. The queue includes the
+// index commits that push adds, and the header counts them apart. When the preview of the fold fails, report
+// warns and lists each commit of the queue as it is. The caller holds the write lock.
 func report(env Env, repo string) error {
 	if m, ok, err := readMarker(repo); err == nil && ok {
 		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)

@@ -26,7 +26,7 @@ func recordStarts(t *testing.T) *[][]string {
 func TestAutoSnapshot(t *testing.T) {
 	tests := []struct {
 		name     string
-		age      time.Duration // of the last snapshot; 0 means none
+		age      time.Duration // of the last snapshot, or 0 for none
 		command  string
 		projects bool
 		started  bool
