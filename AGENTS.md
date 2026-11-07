@@ -12,7 +12,7 @@ Read [README.md](README.md) first. It indexes the design docs and the skills.
 ## Code
 
 - memcore is one Go module, and it builds with `CGO_ENABLED=0`.
-- `cmd/memcore` holds the entry point. `internal/` holds one package for each part in [Architecture](docs/architecture.md): `commands`, `store`, `readers` and `guards`.
+- `cmd/memcore` holds the entry point. `internal/` holds one package for each part in [Architecture](docs/architecture.md): `commands`, `store`, `readers`, `guards` and `ui`.
 - Use the standard library first. A new dependency is an open question in the plan.
 - memcore runs the installed git, and never links a git library.
 - Wrap each error with its context: `fmt.Errorf("<what failed>: %w", err)`.

@@ -20,8 +20,25 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | | `push` | Refuses uncommitted changes, fetches, and folds in the fixups. It writes each stale index again before and after the fold. Then it asks for confirmation at your terminal and pushes. An agent runs it only when you ask. Without a terminal, it asks nothing and pushes a queue that holds only memories, notes, plans and indexes. For any other file, or a merge, it pushes nothing, and names the commits that you push at your terminal. After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. `--expect <commit>` pushes nothing unless `main` is at that commit before the fetch, so it pushes only the queue that you reviewed. |
 | yours | `drop <commit>` | Removes a commit of the review queue, with its fixups, after it asks at your terminal. It records your reason. |
 | | `recover` | Runs after a fetch finds that the remote lost accepted commits. It asks at your terminal, drops them here, and moves the queue onto the remote (see [Git](git.md)). |
+| | `ui` | Opens the window: a local page to review the queue, drop commits, push, browse the memory repo and search its text. See **The window** below. |
 | setup | `init <remote>` | Sets up the memory repo and Claude Code: the snapshot, the import, the hooks and the permissions. It creates the repo when the remote is empty, and clones the remote otherwise. `--dry-run` rehearses it, and `--undo` removes its changes to the settings. See [Install](install.md). |
 | | `hook <event>` | Runs a hook of Claude Code, with the hook input on standard input: `session-start`, `prompt`, `session-end` or `tool`. Only Claude Code runs it, so `orient` and `help` leave it out. |
+
+**The window.** `memcore ui` starts a server in the background, and opens the page in a window:
+- The window is a Chromium app window when Chrome, Edge, Brave or Chromium is installed. Otherwise it is a tab of the default browser.
+- The server listens on `127.0.0.1` only. Each request of its API carries a token of the run, which the page gets in the address of the window.
+- The server stops 10 s after the last window closes, or 60 s after it starts when no window connects.
+- A second `memcore ui` opens one more window on the same server. One server runs for each memory repo.
+
+The window has three views:
+- **Review** lists the queue as `inbox` does. Entries that change a skill or a script come first. A push confirms in a dialog, and runs `push --expect`, so it pushes only the queue that the window shows. A drop confirms in a dialog, and records your reason.
+- **Browse** shows each level, its index and its documents. Mermaid blocks render as diagrams, with pele.
+- **Search** finds text in every document, with `git grep`. It keeps no index on disk.
+
+In Review, each file of an entry has three views of its change:
+- **Changes**: the word diff of the text, which a changed markdown file shows first. When the word diff shows no change, as for a change of whitespace only, the file shows Patch first.
+- **Patch**: the unified diff, which keeps changes of whitespace. Any other changed file shows it first.
+- **New version**: the document rendered. An added or a removed file shows it first.
 
 **Verify.** `verify` blocks a write only on exact faults. These are a dead reference, or a word that a glossary on the path forbids. A forbidden word counts as a whole word or phrase, outside code and links. `verify` only warns on heuristic faults in a description. Such a description names no moment to read, or has over 25 words. A description without "when" or "before" names no moment.
 
@@ -83,7 +100,7 @@ Each hook runs memcore by its full path, so it does not depend on the `PATH` of 
 
 **Building.** memcore also ships three skills for changes to code: [plan](../skills/plan/SKILL.md), [build](../skills/build/SKILL.md) and [review](../skills/review/SKILL.md). The plan skill turns a task into small steps that an agent with no context can build. After you approve the plan, the build skill builds every step in a worktree. Each step gets one commit and one review. The review skill prefers an agent from another provider as the reviewer.
 
-Where the agent's permissions allow it, `init` also denies the agent direct edits under the memory repo. So `memcore` stays the only way in. It denies `drop` and `recover` there too, the commands that only you run. It leaves `push` allowed, because an agent pushes memories, notes and plans when you ask. `init` gets no rule, because a rule cannot tell `--dry-run` apart. memcore refuses an agent for the rest of `init`. Skill formats are standard, but the place where each agent looks for skills is not. memcore serves skills itself, from the checkout of the accepted history, so that location never matters.
+Where the agent's permissions allow it, `init` also denies the agent direct edits under the memory repo. So `memcore` stays the only way in. It denies `drop`, `recover` and `ui` there too, the commands that only you run. It leaves `push` allowed, because an agent pushes memories, notes and plans when you ask. `init` gets no rule, because a rule cannot tell `--dry-run` apart. memcore refuses an agent for the rest of `init`. Skill formats are standard, but the place where each agent looks for skills is not. memcore serves skills itself, from the checkout of the accepted history, so that location never matters.
 
 memcore ships as a single executable. It runs the installed git, so you install nothing else. See [Architecture](architecture.md).
 

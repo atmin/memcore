@@ -20,6 +20,7 @@ The docs use each term below with one meaning only.
 - **mark**: a word that you add to a prompt, `#again`, `#wrong` or `#stale`, to say that memory failed you.
 - **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch.
 - **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
+- **window**: the local page of `memcore ui`, in which you review, push, browse and search.
 - **accepted mistake**: a memory that a `revise` or a `forget` changed within 14 days after a push accepted it.
 - **fixup**: a commit that corrects an unpushed commit, and that `push` folds into it.
 - **fold**: the step of `push` that folds each fixup into the commit it corrects.

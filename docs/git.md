@@ -26,7 +26,9 @@ Skills and scripts are code, so they run only after you push them. memcore keeps
 
 An agent runs as you. It can fake a terminal and answer a prompt. So nothing on your machine can stop an agent from calling `push`.
 
-Two guards stop an agent's mistakes, and you do not rely on them. memcore refuses `drop` and `recover` when it finds no controlling terminal or sees the variables that agents set. `init` denies `drop` and `recover` in the permissions of Claude Code, but not `push`. Where the host can forbid force pushes, keep that protection on.
+Two guards stop an agent's mistakes, and you do not rely on them. memcore refuses `drop` and `recover` when it finds no controlling terminal or sees the variables that agents set. `init` denies `drop`, `recover` and `ui` in the permissions of Claude Code, but not `push`. Where the host can forbid force pushes, keep that protection on.
+
+The window of `memcore ui` is yours too. memcore refuses `ui` when it sees the variables that agents set. In the window, you confirm a push or a drop in a dialog instead of at the terminal, so a push from the window can push skills and scripts. The token of the server guards against an agent's mistake only: an agent that runs as you can read it.
 
 An agent pushes when you ask it to. memcore cannot see the chat, so `orient` tells an agent to push only then. Skills and scripts run from the accepted history, so their push stays yours. `push` uses the credential that git already has, for you and for an agent alike.
 

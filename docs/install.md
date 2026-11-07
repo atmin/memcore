@@ -33,9 +33,9 @@ A second run adds only what is new: new transcripts, new files of auto-memory, a
 
 ## Day to day
 
-Agents run `memcore` themselves. You run `memcore inbox` to see what waits for your review, and `memcore push` to accept it. `push` and a fetch link the accepted scripts onto `~/.local/bin`.
+Agents run `memcore` themselves. You run `memcore inbox` to see what waits for your review, and `memcore push` to accept it. Or you run `memcore ui`, which opens a window to review, push, browse and search. `push` and a fetch link the accepted scripts onto `~/.local/bin`.
 
-Nothing runs between sessions: there is no service and no scheduled job. Snapshots start the way `git gc --auto` does:
+Nothing of memcore runs between sessions: there is no service and no scheduled job. The one exception is the server of `memcore ui`. It runs in the background while a window is open, apart from any session, and stops 10 s after the last window closes. Snapshots start the way `git gc --auto` does:
 1. An agent calls `memcore`.
 2. If six hours have passed since the last snapshot, `memcore` starts a snapshot in the background.
 3. `memcore` answers the agent at once, without waiting for the snapshot.
