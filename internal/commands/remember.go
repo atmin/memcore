@@ -158,7 +158,7 @@ func budgetWarning(level string, n int) string {
 	if level != "" {
 		title += "/" + level
 	}
-	return fmt.Sprintf("warning: %s has %d lines in orient, over the budget of %d: a sleep pass consolidates it", title, n, budget)
+	return fmt.Sprintf("warning: %s has %d lines in orient, over the budget of %d: merge or move memories to fit", title, n, budget)
 }
 
 // sizeWarning says that orient in a level prints more than the SessionStart hook shows in full, or "" when it does not.
@@ -168,7 +168,7 @@ func sizeWarning(level string, o orientText) string {
 	if len(text) <= hookBytes {
 		return ""
 	}
-	return fmt.Sprintf("warning: orient in %s prints %d bytes, over the %d that the SessionStart hook shows in full: a sleep pass consolidates it",
+	return fmt.Sprintf("warning: orient in %s prints %d bytes, over the %d that the SessionStart hook shows in full: merge or move memories to fit",
 		title(level), len(text), hookBytes)
 }
 

@@ -280,8 +280,8 @@ func TestInitClaude(t *testing.T) {
 		}
 		t.Setenv("PATH", filepath.Dir(git))
 		before := readT(t, settings)
-		if _, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t)); err == nil || !strings.Contains(err.Error(), "PATH") {
-			t.Errorf("error = %v, want one that names PATH", err)
+		if _, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t)); err == nil || !strings.Contains(err.Error(), "memcore is not on PATH, so init adds no hook: put it on PATH, then run init again") {
+			t.Errorf("error = %v, want the one that says to put memcore on PATH", err)
 		}
 		if got := readT(t, settings); got != before {
 			t.Error("init changed the settings without memcore on PATH")

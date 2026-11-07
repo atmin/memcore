@@ -248,8 +248,8 @@ func TestBudgetWarning(t *testing.T) {
 	}{
 		{"", 40, ""},
 		{"dev/app", 40, ""},
-		{"", 41, "warning: ~ has 41 lines in orient, over the budget of 40: a sleep pass consolidates it"},
-		{"dev/app", 41, "warning: ~/dev/app has 41 lines in orient, over the budget of 40: a sleep pass consolidates it"},
+		{"", 41, "warning: ~ has 41 lines in orient, over the budget of 40: merge or move memories to fit"},
+		{"dev/app", 41, "warning: ~/dev/app has 41 lines in orient, over the budget of 40: merge or move memories to fit"},
 	}
 	for _, tt := range tests {
 		if got := budgetWarning(tt.level, tt.n); got != tt.want {
@@ -291,7 +291,7 @@ func TestRememberSizeWarning(t *testing.T) {
 				}
 				return
 			}
-			want := fmt.Sprintf("warning: orient in %s prints %d bytes, over the 9500 that the SessionStart hook shows in full: a sleep pass consolidates it\n", tt.want, len(full))
+			want := fmt.Sprintf("warning: orient in %s prints %d bytes, over the 9500 that the SessionStart hook shows in full: merge or move memories to fit\n", tt.want, len(full))
 			if !strings.Contains(out, want) {
 				t.Errorf("remember printed\n%s\nwant %q", out, want)
 			}

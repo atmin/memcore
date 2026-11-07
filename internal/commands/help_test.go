@@ -43,6 +43,16 @@ func TestHelp(t *testing.T) {
 		}
 	})
 
+	t.Run("drop records the reason and promises nothing", func(t *testing.T) {
+		help, err := run(t, home, "", "help", "drop")
+		if err != nil {
+			t.Fatalf("help drop: %v\n%s", err, help)
+		}
+		if !strings.Contains(help, "and records the reason.\n") || strings.Contains(help, "sleep") {
+			t.Errorf("help drop = %q", help)
+		}
+	})
+
 	t.Run("--help", func(t *testing.T) {
 		help, _ := run(t, home, "", "help", "remember")
 		for _, flag := range []string{"--help", "-h"} {

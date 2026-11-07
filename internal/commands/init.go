@@ -205,7 +205,7 @@ func setupClaude(env Env, repo string, dryRun bool) error {
 
 	found, err := exec.LookPath("memcore")
 	if err != nil {
-		return errors.New("memcore is not on PATH, so init adds no hook: put it on PATH, as the install script does, then run init again")
+		return errors.New("memcore is not on PATH, so init adds no hook: put it on PATH, then run init again")
 	}
 	exe, err := filepath.Abs(found)
 	if err != nil {

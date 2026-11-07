@@ -163,7 +163,7 @@ After the person confirms, it drops the lost commits here and moves the queue on
 	"drop": `memcore drop <commit> [--reason <text>]
 
 Only the person runs it, at a terminal. It removes one commit of the review queue, with the
-fixups that fold into it, and records the reason, so a later sleep pass learns from it.
+fixups that fold into it, and records the reason.
 It refuses an accepted commit, and a drop that leaves a reference dead. memcore inbox lists
 the commits. For example:
 
