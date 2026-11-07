@@ -3,14 +3,25 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/atmin/memcore/internal/guards"
 	"github.com/atmin/memcore/internal/store"
 	"github.com/atmin/memcore/internal/ui"
 )
@@ -262,3 +273,180 @@ func (b uiBackend) action(args ...string) (ui.Result, error) {
 }
 
 var _ ui.Backend = uiBackend{}
+
+// These values set the lifetime and the window of the server. Tests replace them.
+var (
+	uiGrace  = 10 * time.Second
+	uiStart  = 60 * time.Second
+	uiWindow = ui.Window
+	uiWait   = 5 * time.Second // how long memcore ui waits for the server that it started
+)
+
+// uiState is the server of the window that runs, as .git/memcore/ui.json records it.
+type uiState struct {
+	PID   int    `json:"pid"`
+	Port  int    `json:"port"`
+	Token string `json:"token"`
+	Nonce string `json:"nonce"` // the nonce of the memcore ui that started the server
+}
+
+// url returns the address of the page, with the token in the fragment.
+func (s uiState) url() string { return fmt.Sprintf("http://127.0.0.1:%d/#%s", s.Port, s.Token) }
+
+// runUI opens a window on the server of the window, and starts that server when none runs. Only the person
+// runs it. With --serve, it is that server: it serves until the last window closes.
+func runUI(env Env, args []string) error {
+	flags := flag.NewFlagSet("ui", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	serve := flags.Bool("serve", false, "run the server of the window")
+	nonce := flags.String("nonce", "", "the nonce of the memcore ui that starts the server")
+	pos, err := parseInterleaved(flags, args)
+	if err != nil || len(pos) != 0 {
+		return usageErr("usage: memcore ui")
+	}
+	if err := guards.Agent(); err != nil {
+		return err
+	}
+	repo, err := openRepo()
+	if err != nil {
+		return err
+	}
+	if *serve {
+		return serveUI(env, repo, *nonce)
+	}
+	if s, ok := runningUI(repo); ok {
+		if err := s.post("/api/window"); err != nil {
+			return err
+		}
+		fmt.Fprintf(env.Out, "Opened a window on the running server: %s\n", s.url())
+		return nil
+	}
+	// The nonce tells this call whether its own server won. Another memcore ui may start one at the same time,
+	// and then only one of the two servers runs.
+	mine := make([]byte, 16)
+	if _, err := rand.Read(mine); err != nil {
+		return fmt.Errorf("make the nonce of the window: %w", err)
+	}
+	if err := startBackground(repo, "ui", "--serve", "--nonce="+hex.EncodeToString(mine)); err != nil {
+		return err
+	}
+	// The server writes ui.json only after its first window opened, so a failed window never reads as success.
+	for deadline := time.Now().Add(uiWait); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		s, ok := runningUI(repo)
+		if !ok {
+			continue
+		}
+		if s.Nonce != hex.EncodeToString(mine) {
+			if err := s.post("/api/window"); err != nil {
+				return err
+			}
+			fmt.Fprintf(env.Out, "Opened a window on the running server: %s\n", s.url())
+			return nil
+		}
+		fmt.Fprintf(env.Out, "Opened the window: %s\nThe server stops when the last window closes.\n", s.url())
+		return nil
+	}
+	return fmt.Errorf("the server of the window did not start within %s: %s holds its errors", uiWait, tilde(filepath.Join(store.StateDir(repo), "background.log")))
+}
+
+// serveUI serves the window until the last one closes. Only one server runs for a memory repo: it holds
+// ui.lock for its whole life, and another server exits at once.
+func serveUI(env Env, repo, nonce string) error {
+	unlock, ok, err := store.TryLockFile(repo, "ui.lock")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil // another server runs, and memcore ui opens a window on it
+	}
+	defer unlock()
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return fmt.Errorf("make the token of the window: %w", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("listen for the window: %w", err)
+	}
+	defer ln.Close()
+	state := uiState{PID: os.Getpid(), Port: ln.Addr().(*net.TCPAddr).Port, Token: hex.EncodeToString(secret), Nonce: nonce}
+	file := filepath.Join(store.StateDir(repo), "ui.json")
+	defer os.Remove(file) // the lock makes this server the only one that writes it
+	s := &ui.Server{Backend: uiBackend{repo: repo, dir: env.Dir}, Token: state.Token, Grace: uiGrace, Start: uiStart, Window: uiWindow,
+		Ready: func() error { return writeState(file, state) }}
+	return s.Serve(ln)
+}
+
+// writeState writes ui.json with mode 0600 through a temporary file, so a reader never sees half of it.
+func writeState(file string, state uiState) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode the state of the window: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), "ui-*.json")
+	if err != nil {
+		return fmt.Errorf("write the state of the window: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write the state of the window: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write the state of the window: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write the state of the window: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), file); err != nil {
+		return fmt.Errorf("write the state of the window: %w", err)
+	}
+	return nil
+}
+
+// runningUI returns the server that ui.json names, when it answers with its token.
+func runningUI(repo string) (uiState, bool) {
+	data, err := os.ReadFile(filepath.Join(store.StateDir(repo), "ui.json"))
+	if err != nil {
+		return uiState{}, false
+	}
+	var s uiState
+	if json.Unmarshal(data, &s) != nil || s.Port == 0 || s.Token == "" {
+		return uiState{}, false
+	}
+	return s, s.get("/api/ping") == nil
+}
+
+// get asks the server for a path of its API.
+func (s uiState) get(p string) error {
+	return s.call("GET", p)
+}
+
+// post sends an empty JSON object to a path of the API, from the origin of the server.
+func (s uiState) post(p string) error {
+	return s.call("POST", p)
+}
+
+// call sends one request to the server, with its token, and refuses an answer other than 200.
+func (s uiState) call(method, p string) error {
+	origin := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
+	req, err := http.NewRequest(method, origin+p, strings.NewReader("{}"))
+	if err != nil {
+		return fmt.Errorf("ask the server of the window: %w", err)
+	}
+	req.Header.Set("X-Memcore-Token", s.Token)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Content-Type", "application/json")
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ask the server of the window: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("the server of the window answered %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}

@@ -63,12 +63,12 @@ func TestClaudeChanges(t *testing.T) {
 		autoOff   bool
 		additions int // hooks, rules and the setting
 	}{
-		{"no file", "", false, 5 + 3},
-		{"an empty file", "{}", true, 5 + 3 + 1},
-		{"a hook and a rule of yours", yours, false, 5 + 3},
-		{"a rule already there", `{"permissions":{"deny":["Bash(memcore drop *)"]}}`, false, 5 + 2},
-		{"auto-memory already off", `{"autoMemoryEnabled":false}`, true, 5 + 3},
-		{"a tool hook of yours with another matcher", `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"'` + exe + `' hook tool"}]}]}}`, false, 5 + 3},
+		{"no file", "", false, 5 + 4},
+		{"an empty file", "{}", true, 5 + 4 + 1},
+		{"a hook and a rule of yours", yours, false, 5 + 4},
+		{"a rule already there", `{"permissions":{"deny":["Bash(memcore drop *)"]}}`, false, 5 + 3},
+		{"auto-memory already off", `{"autoMemoryEnabled":false}`, true, 5 + 4},
+		{"a tool hook of yours with another matcher", `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"'` + exe + `' hook tool"}]}]}}`, false, 5 + 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -112,7 +112,7 @@ func TestClaudeChanges(t *testing.T) {
 				}
 				return s
 			}(), "\n")
-			for _, want := range []string{"Edit(~/memory/**)", "Bash(memcore drop *)", "Bash(memcore recover *)"} {
+			for _, want := range []string{"Edit(~/memory/**)", "Bash(memcore drop *)", "Bash(memcore recover *)", "Bash(memcore ui *)"} {
 				if strings.Count(deny, want) != 1 {
 					t.Errorf("deny =\n%s\nwant %s once", deny, want)
 				}
@@ -199,7 +199,7 @@ func TestApplySettings(t *testing.T) {
 			t.Errorf("kept = %v, want one copy of the original", kept)
 		}
 		rec := readInitRecordT(t, repo)
-		if len(rec.Hooks) != 5 || len(rec.Deny) != 3 || rec.AutoMemory == nil || !rec.AutoMemory.Absent {
+		if len(rec.Hooks) != 5 || len(rec.Deny) != 4 || rec.AutoMemory == nil || !rec.AutoMemory.Absent {
 			t.Errorf("record = %+v", rec)
 		}
 		for _, ev := range []string{"PostToolUse", "PostToolUseFailure"} {
@@ -225,7 +225,7 @@ func TestApplySettings(t *testing.T) {
 		if got := readT(t, settings); !strings.Contains(got, "hook session-end") {
 			t.Errorf("settings =\n%s\nwant the hooks back", got)
 		}
-		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 5 || len(rec.Deny) != 3 {
+		if rec := readInitRecordT(t, repo); len(rec.Hooks) != 5 || len(rec.Deny) != 4 {
 			t.Errorf("record = %+v, want each addition once", rec)
 		}
 	})

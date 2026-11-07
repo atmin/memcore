@@ -170,6 +170,15 @@ the commits. For example:
 
   memcore drop 1a2b3c4 --reason "Not a fact: a status of one ticket."
 `,
+	"ui": `memcore ui
+
+Only the person runs it. It opens a window to review the queue, drop commits, push, browse
+the memory repo and search its text. A push from the window pushes the queue that the window
+shows, after the person confirms there.
+The window is a Chromium app window when Chrome, Edge, Brave or Chromium is installed, and
+the default browser otherwise. Its server listens on 127.0.0.1 only, and stops when the last
+window closes. A second memcore ui opens one more window on the same server.
+`,
 	"help": `memcore help [<command>]
 
 Lists the commands, or shows the input of one command, with an example. For example:

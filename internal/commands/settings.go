@@ -333,7 +333,7 @@ func denyRules(repo, home string) []string {
 	if rel, err := filepath.Rel(home, repo); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 		edit = "Edit(~/" + filepath.ToSlash(rel) + "/**)"
 	}
-	return []string{edit, "Bash(memcore drop *)", "Bash(memcore recover *)"}
+	return []string{edit, "Bash(memcore drop *)", "Bash(memcore recover *)", "Bash(memcore ui *)"}
 }
 
 // applySettings shows the diff of the settings and asks once. Then it records the additions, keeps the

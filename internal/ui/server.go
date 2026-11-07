@@ -129,6 +129,8 @@ type Server struct {
 	Poll    time.Duration // how often the event stream checks the tip of main; 2 s when it is 0
 	// Window opens a window at a URL, and returns the function that closes it. Serve opens the first one.
 	Window func(url string) (stop func(), err error)
+	// Ready runs once the first window opened. Serve stops with its error.
+	Ready func() error
 
 	port    int
 	mu      sync.Mutex
@@ -169,6 +171,13 @@ func (s *Server) Serve(ln net.Listener) error {
 	defer s.closeWindows()
 	if s.Window != nil {
 		if err := s.openWindow(); err != nil {
+			srv.Close()
+			<-served
+			return err
+		}
+	}
+	if s.Ready != nil {
+		if err := s.Ready(); err != nil {
 			srv.Close()
 			<-served
 			return err

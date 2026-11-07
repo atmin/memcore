@@ -366,6 +366,10 @@ func TestLifetime(t *testing.T) {
 	t.Run("a window that fails", func(t *testing.T) {
 		s, _ := newServer()
 		s.Window = func(string) (func(), error) { return nil, errors.New("no browser") }
+		s.Ready = func() error {
+			t.Error("Ready ran after the window failed")
+			return nil
+		}
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
@@ -375,6 +379,31 @@ func TestLifetime(t *testing.T) {
 			t.Errorf("Serve = %v, want the error of the window", err)
 		}
 	})
+}
+
+func TestReady(t *testing.T) {
+	s, _ := newServer()
+	s.Start = 50 * time.Millisecond
+	var order []string
+	s.Window = func(string) (func(), error) {
+		order = append(order, "window")
+		return nil, nil
+	}
+	s.Ready = func() error {
+		order = append(order, "ready")
+		return errors.New("no state")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if err := s.Serve(ln); err == nil || err.Error() != "no state" {
+		t.Errorf("Serve = %v, want the error of Ready", err)
+	}
+	if strings.Join(order, " ") != "window ready" {
+		t.Errorf("order = %q, want the window, then Ready", order)
+	}
 }
 
 func TestStatic(t *testing.T) {
