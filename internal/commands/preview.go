@@ -15,8 +15,15 @@ import (
 type previewed struct {
 	subject, body string
 	files         []fileStatus
-	target        string   // This is the commit of the memory repo that the fold keeps. It is "" for an index that push commits.
-	fixups        []string // These are the commits of the memory repo that fold into the target, oldest first.
+	target        string     // This is the commit of the memory repo that the fold keeps. It is "" for an index that push commits.
+	fixups        []string   // These are the commits of the memory repo that fold into the target, oldest first.
+	diffs         []fileDiff // These are the diffs of the files, in the order of files, when preview reads patches.
+}
+
+// fileDiff is the change of one file in one commit: its diffs, and its texts before and after.
+type fileDiff struct {
+	patch, words  string  // the unified diff, and the word diff in the porcelain format of git
+	before, after *string // nil where the file is missing
 }
 
 // pick is a pick line of the todo of a fold, with the fixup lines after it.
@@ -27,8 +34,9 @@ type pick struct {
 
 // preview returns the review queue as push would leave it, oldest first. It runs regenerate, fold and regenerate
 // again, as prepare does, in a scratch clone of main. It removes the clone before it returns. So it changes
-// nothing in the memory repo, and runs no git hook and no file system monitor. The caller holds the write lock.
-func preview(repo string) ([]previewed, error) {
+// nothing in the memory repo, and runs no git hook and no file system monitor. With patches, it also reads the
+// diffs of each commit in the clone. The caller holds the write lock.
+func preview(repo string, patches bool) ([]previewed, error) {
 	// The clone lacks the ignored files, and an index of push might list them.
 	out, err := store.Git(repo, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain", "--ignored", "--untracked-files=all")
 	if err != nil {
@@ -70,7 +78,7 @@ func preview(repo string) ([]previewed, error) {
 	commits := make([]previewed, len(all))
 	keys := make([]string, len(all))
 	for i, sha := range all {
-		if commits[i], keys[i], err = describe(clone, sha); err != nil {
+		if commits[i], keys[i], err = describe(clone, sha, patches); err != nil {
 			return nil, err
 		}
 	}
@@ -164,13 +172,14 @@ func scratchClone(repo, tmp string) (string, error) {
 	return clone, nil
 }
 
-// describe returns a commit with its subject, body and files, and its key.
-func describe(repo, sha string) (previewed, string, error) {
+// describe returns a commit with its subject, body and files, and its key. With patches, it adds the diffs of
+// its files.
+func describe(repo, sha string, patches bool) (previewed, string, error) {
 	subject, key, err := keyOf(repo, sha)
 	if err != nil {
 		return previewed{}, "", err
 	}
-	body, err := store.Git(repo, "show", "-s", "--format=%b", sha)
+	body, err := store.Git(repo, "show", "-s", "--no-show-signature", "--format=%b", sha)
 	if err != nil {
 		return previewed{}, "", fmt.Errorf("read the commit %s: %w", short(sha), err)
 	}
@@ -178,12 +187,64 @@ func describe(repo, sha string) (previewed, string, error) {
 	if err != nil {
 		return previewed{}, "", err
 	}
-	return previewed{subject: subject, body: strings.TrimSpace(body), files: files}, key, nil
+	p := previewed{subject: subject, body: strings.TrimSpace(body), files: files}
+	if patches {
+		for _, f := range files {
+			d, err := diffOf(repo, sha, f)
+			if err != nil {
+				return previewed{}, "", err
+			}
+			p.diffs = append(p.diffs, d)
+		}
+	}
+	return p, key, nil
+}
+
+// diffOf returns the change of one file in a commit. No diff helper, textconv, signature check or other program
+// of the git configuration runs, and the path is literal, never a pattern.
+func diffOf(repo, sha string, f fileStatus) (fileDiff, error) {
+	var d fileDiff
+	args := []string{"--literal-pathspecs", "show", "--format=", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color"}
+	patch, err := store.Git(repo, append(args, sha, "--", f.path)...)
+	if err != nil {
+		return d, fmt.Errorf("read the diff of %s in %s: %w", f.path, short(sha), err)
+	}
+	words, err := store.Git(repo, append(args, "--word-diff=porcelain", sha, "--", f.path)...)
+	if err != nil {
+		return d, fmt.Errorf("read the word diff of %s in %s: %w", f.path, short(sha), err)
+	}
+	d.patch, d.words = patch, words
+	if f.status != "A" {
+		if parent, ok := revParse(repo, sha+"^"); ok {
+			if d.before, err = blobAt(repo, parent, f.path); err != nil {
+				return d, err
+			}
+		}
+	}
+	if f.status != "D" {
+		if d.after, err = blobAt(repo, sha, f.path); err != nil {
+			return d, err
+		}
+	}
+	return d, nil
+}
+
+// blobAt returns the text of a path at a commit, or nil when the commit has no file there. A document reads
+// with cat-file, so no textconv runs.
+func blobAt(repo, commit, p string) (*string, error) {
+	if out, err := store.Git(repo, "cat-file", "-t", commit+":"+p); err != nil || strings.TrimSpace(out) != "blob" {
+		return nil, nil
+	}
+	out, err := store.Git(repo, "cat-file", "blob", commit+":"+p)
+	if err != nil {
+		return nil, fmt.Errorf("read %s at %s: %w", p, short(commit), err)
+	}
+	return &out, nil
 }
 
 // keyOf returns the subject of a commit, and its key: the subject and the author date, which a rebase keeps.
 func keyOf(repo, sha string) (subject, key string, err error) {
-	out, err := store.Git(repo, "show", "-s", "--date=raw", "--format=%s%x00%ad", sha)
+	out, err := store.Git(repo, "show", "-s", "--no-show-signature", "--date=raw", "--format=%s%x00%ad", sha)
 	if err != nil {
 		return "", "", fmt.Errorf("read the commit %s: %w", short(sha), err)
 	}
@@ -193,16 +254,16 @@ func keyOf(repo, sha string) (subject, key string, err error) {
 }
 
 // filesOf returns the files that a commit changes, with their status letters, as git diff-tree prints them.
+// -z keeps each path exact, without the quotes of git.
 func filesOf(repo, sha string) ([]fileStatus, error) {
-	out, err := store.Git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", sha)
+	out, err := store.Git(repo, "diff-tree", "-z", "--no-commit-id", "--name-status", "--no-renames", "-r", "--root", sha)
 	if err != nil {
 		return nil, fmt.Errorf("list the files of %s: %w", short(sha), err)
 	}
 	var files []fileStatus
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if status, p, ok := strings.Cut(line, "\t"); ok {
-			files = append(files, fileStatus{status, p})
-		}
+	fields := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
+	for i := 0; i+1 < len(fields); i += 2 {
+		files = append(files, fileStatus{fields[i], fields[i+1]})
 	}
 	return files, nil
 }

@@ -61,7 +61,7 @@ func report(env Env, repo string) error {
 		return err
 	}
 	// regenerate can add an index commit to an empty queue, so every queue gets a preview.
-	entries, err := preview(repo)
+	entries, err := preview(repo, false)
 	if err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\nThe queue below lists each commit as it is, without the fold.\n", err)
 		return listQueue(env, repo, queue)

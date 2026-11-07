@@ -169,3 +169,19 @@ func TestInboxIndexHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestInboxExactPaths(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	pushYes(t, home)
+	commitOddPaths(t, repo)
+	out, err := run(t, home, "", "inbox")
+	if err != nil {
+		t.Fatalf("inbox: %v\n%s", err, out)
+	}
+	for _, p := range oddPaths {
+		if !strings.Contains(out, "A  "+p+"\n") {
+			t.Errorf("inbox = %q, want the path %s as it is", out, p)
+		}
+	}
+}
