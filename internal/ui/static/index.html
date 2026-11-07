@@ -3,9 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>memcore</title>
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/vendor/marked.umd.js" defer></script>
+<script src="/static/vendor/purify.min.js" defer></script>
+<script src="/static/vendor/pele.global.js" defer></script>
+<script src="/static/app.js" defer></script>
 </head>
 <body>
-<p>memcore ui is starting.</p>
+<header class="bar">
+  <a class="brand" href="#review"><img src="/static/icon.svg" alt="" width="24" height="24"><span>memcore</span></a>
+  <nav class="tabs">
+    <a href="#review" data-view="review">Review</a>
+    <a href="#browse" data-view="browse">Browse</a>
+    <a href="#search" data-view="search">Search</a>
+  </nav>
+  <button id="push" class="primary" type="button" hidden>Push</button>
+</header>
+<div id="notices"></div>
+<main id="main"><p class="muted">Loading.</p></main>
+
+<dialog id="push-dialog">
+  <form method="dialog">
+    <h2>Push to origin</h2>
+    <p id="push-text"></p>
+    <div class="actions">
+      <button type="button" data-cancel>Cancel</button>
+      <button value="push" type="submit" class="primary" id="push-confirm">Push</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="drop-dialog">
+  <form method="dialog">
+    <h2>Drop a commit</h2>
+    <p id="drop-text"></p>
+    <label for="drop-reason">Reason</label>
+    <input id="drop-reason" type="text" autocomplete="off" placeholder="Not a fact: a status of one ticket.">
+    <div class="actions">
+      <button type="button" data-cancel>Cancel</button>
+      <button value="drop" type="submit" class="danger" id="drop-confirm">Drop</button>
+    </div>
+  </form>
+</dialog>
 </body>
 </html>

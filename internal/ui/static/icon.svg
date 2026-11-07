@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+     viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <style>
+    .background { fill: #fff; }
+    .letters { fill: #000; }
+    @media (prefers-color-scheme: dark) {
+      .background { fill: #000; }
+      .letters { fill: #fff; }
+    }
+  </style>
+  <path class="background" d="M0 0h32v32H0z"/>
+  <path class="letters" d="M1 5h2v1H1z
+    M8 5h2v1H8z
+    M12 5h8v1H12z
+    M22 5h2v1H22z
+    M29 5h2v1H29z
+    M1 6h3v1H1z
+    M7 6h3v1H7z
+    M12 6h8v1H12z
+    M22 6h3v1H22z
+    M28 6h3v1H28z
+    M1 7h4v1H1z
+    M6 7h4v1H6z
+    M12 7h2v1H12z
+    M22 7h4v1H22z
+    M27 7h4v1H27z
+    M1 8h2v1H1z
+    M4 8h3v1H4z
+    M8 8h2v1H8z
+    M12 8h2v1H12z
+    M22 8h2v1H22z
+    M25 8h3v1H25z
+    M29 8h2v1H29z
+    M1 9h2v1H1z
+    M5 9h1v1H5z
+    M8 9h2v1H8z
+    M12 9h8v1H12z
+    M22 9h2v1H22z
+    M26 9h1v1H26z
+    M29 9h2v1H29z
+    M1 10h2v1H1z
+    M5 10h1v1H5z
+    M8 10h2v1H8z
+    M12 10h8v1H12z
+    M22 10h2v1H22z
+    M26 10h1v1H26z
+    M29 10h2v1H29z
+    M1 11h2v1H1z
+    M8 11h2v1H8z
+    M12 11h2v1H12z
+    M22 11h2v1H22z
+    M29 11h2v1H29z
+    M1 12h2v1H1z
+    M8 12h2v1H8z
+    M12 12h2v1H12z
+    M22 12h2v1H22z
+    M29 12h2v1H29z
+    M1 13h2v1H1z
+    M8 13h2v1H8z
+    M12 13h8v1H12z
+    M22 13h2v1H22z
+    M29 13h2v1H29z
+    M1 14h2v1H1z
+    M8 14h2v1H8z
+    M12 14h8v1H12z
+    M22 14h2v1H22z
+    M29 14h2v1H29z
+    M2 17h5v1H2z
+    M10 17h5v1H10z
+    M17 17h6v1H17z
+    M25 17h6v1H25z
+    M1 18h7v1H1z
+    M9 18h7v1H9z
+    M17 18h7v1H17z
+    M25 18h6v1H25z
+    M1 19h2v1H1z
+    M6 19h2v1H6z
+    M9 19h2v1H9z
+    M14 19h2v1H14z
+    M17 19h2v1H17z
+    M22 19h2v1H22z
+    M25 19h2v1H25z
+    M1 20h2v1H1z
+    M9 20h2v1H9z
+    M14 20h2v1H14z
+    M17 20h2v1H17z
+    M22 20h2v1H22z
+    M25 20h2v1H25z
+    M1 21h2v1H1z
+    M9 21h2v1H9z
+    M14 21h2v1H14z
+    M17 21h6v1H17z
+    M25 21h6v1H25z
+    M1 22h2v1H1z
+    M9 22h2v1H9z
+    M14 22h2v1H14z
+    M17 22h5v1H17z
+    M25 22h6v1H25z
+    M1 23h2v1H1z
+    M9 23h2v1H9z
+    M14 23h2v1H14z
+    M17 23h2v1H17z
+    M20 23h2v1H20z
+    M25 23h2v1H25z
+    M1 24h2v1H1z
+    M6 24h2v1H6z
+    M9 24h2v1H9z
+    M14 24h2v1H14z
+    M17 24h2v1H17z
+    M21 24h2v1H21z
+    M25 24h2v1H25z
+    M1 25h7v1H1z
+    M9 25h7v1H9z
+    M17 25h2v1H17z
+    M22 25h2v1H22z
+    M25 25h6v1H25z
+    M2 26h5v1H2z
+    M10 26h5v1H10z
+    M17 26h2v1H17z
+    M22 26h2v1H22z
+    M25 26h6v1H25z"/>
+</svg>
