@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -133,6 +134,9 @@ type Server struct {
 	Ready func() error
 	// Quit ends the lifetime at once when it closes, as Cmd+Q does. A nil Quit never closes.
 	Quit <-chan struct{}
+	// Reopen opens one more window each time it gets a value, as a click on the Dock icon does. A nil Reopen
+	// never does.
+	Reopen <-chan struct{}
 
 	port    int
 	mu      sync.Mutex
@@ -206,6 +210,19 @@ func (s *Server) wait(served chan error) error {
 			return err
 		case <-s.Quit:
 			return nil
+		case <-s.Reopen:
+			if err := s.openWindow(); err != nil {
+				fmt.Fprintf(os.Stderr, "memcore ui: %v\n", err)
+				continue
+			}
+			// The new window needs time to connect its event stream, as the first window does, so the
+			// server waits its start period again before it may stop.
+			s.mu.Lock()
+			open := s.streams
+			s.mu.Unlock()
+			if open == 0 {
+				timer.Reset(s.Start)
+			}
 		case <-timer.C:
 			s.mu.Lock()
 			open := s.streams

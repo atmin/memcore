@@ -280,7 +280,7 @@ var (
 	uiStart  = 60 * time.Second
 	uiWindow = ui.Window
 	// uiHost runs the server with the native windows of the main thread. Tests replace it to use uiWindow.
-	uiHost = func(serve func(window func(string) (func(), error), quit <-chan struct{}) error) error {
+	uiHost = func(serve func(window func(string) (func(), error), quit, reopen <-chan struct{}) error) error {
 		return ui.RunHost(serve)
 	}
 	uiWait = 5 * time.Second // how long memcore ui waits for the server that it started
@@ -412,9 +412,9 @@ func serveUI(env Env, repo, nonce string) error {
 	state := uiState{PID: os.Getpid(), Port: ln.Addr().(*net.TCPAddr).Port, Token: hex.EncodeToString(secret), Nonce: nonce}
 	file := filepath.Join(store.StateDir(repo), "ui.json")
 	defer os.Remove(file) // the lock makes this server the only one that writes it
-	return uiHost(func(window func(string) (func(), error), quit <-chan struct{}) error {
+	return uiHost(func(window func(string) (func(), error), quit, reopen <-chan struct{}) error {
 		s := &ui.Server{Backend: uiBackend{repo: repo, dir: env.Dir}, Token: state.Token, Grace: uiGrace, Start: uiStart, Window: window,
-			Ready: func() error { return writeState(file, state) }, Quit: quit}
+			Ready: func() error { return writeState(file, state) }, Quit: quit, Reopen: reopen}
 		return s.Serve(ln)
 	})
 }

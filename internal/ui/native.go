@@ -17,15 +17,15 @@ import (
 // main thread, so RunHost must run on the main goroutine, which main locked to the main thread. serve runs in
 // another goroutine. When glaze cannot open a window, as on a Linux without WebKitGTK, the window falls back
 // to Window: a Chrome app window or the default browser. MEMCORE_UI_WINDOW=chrome forces that fallback.
-func RunHost(serve func(window func(url string) (stop func(), err error), quit <-chan struct{}) error) error {
+func RunHost(serve func(window func(url string) (stop func(), err error), quit, reopen <-chan struct{}) error) error {
 	if os.Getenv("MEMCORE_UI_WINDOW") == "chrome" {
-		return serve(Window, nil)
+		return serve(Window, nil, nil)
 	}
 	runtime.LockOSThread()
 	h := newHost()
 	var served error
 	go func() {
-		served = serve(h.window, h.quit)
+		served = serve(h.window, h.quit, h.reopen)
 		close(h.done)
 		if loop := h.getLoop(); loop != nil {
 			loop.Terminate()
@@ -62,12 +62,14 @@ type host struct {
 	done     chan struct{}
 	quit     chan struct{} // closes when the person quits, so the server stops at once
 	quitOnce sync.Once
+	reopen   chan struct{} // gets a value when the person clicks the Dock icon with no window open
 
 	// open opens a native window on the main thread, dispatch runs a function on the main thread, and
 	// fallback opens the window of a browser. Tests replace them, so they run without AppKit.
 	open     func(url string) (*nativeWindow, error)
 	dispatch func(w *nativeWindow, f func())
 	fallback func(url string) (stop func(), err error)
+	delegate func(reopen func()) // installs the app delegate of memcore: keepDelegate
 	warn     io.Writer
 
 	mu     sync.Mutex
@@ -78,9 +80,11 @@ type host struct {
 func newHost() *host {
 	return &host{
 		first: make(chan string), opened: make(chan error), done: make(chan struct{}), quit: make(chan struct{}),
+		reopen:   make(chan struct{}, 1),
 		open:     openNative,
 		dispatch: func(w *nativeWindow, f func()) { w.Dispatch(f) },
 		fallback: Window,
+		delegate: keepDelegate,
 		warn:     os.Stderr,
 	}
 }
@@ -94,7 +98,7 @@ func (h *host) getLoop() *nativeWindow {
 // openFirst opens the first window on the main thread, and reports whether it opened. Then the window that
 // asked for it gets the result.
 func (h *host) openFirst(url string) bool {
-	w, err := h.open(url)
+	w, err := h.opened1(url)
 	h.mu.Lock()
 	if err != nil {
 		h.failed = true
@@ -104,6 +108,29 @@ func (h *host) openFirst(url string) bool {
 	h.mu.Unlock()
 	h.opened <- err
 	return err == nil
+}
+
+// opened1 opens one native window on the main thread. The window keeps the app delegate of memcore when it
+// goes, and opening it keeps the delegate too.
+func (h *host) opened1(url string) (*nativeWindow, error) {
+	w, err := h.open(url)
+	if err != nil {
+		return nil, err
+	}
+	w.gone = h.keep
+	h.keep()
+	return w, nil
+}
+
+// keep installs the app delegate of memcore again, and asks for a window through reopen on a click on the
+// Dock icon. It runs on the main thread.
+func (h *host) keep() {
+	h.delegate(func() {
+		select {
+		case h.reopen <- struct{}{}:
+		default: // a window is already on its way
+		}
+	})
 }
 
 // window opens a native window at url, and returns the function that closes it. A native window that fails
@@ -128,7 +155,7 @@ func (h *host) window(url string) (func(), error) {
 	}
 	ch := make(chan made, 1)
 	h.dispatch(loop, func() {
-		w, err := h.open(url)
+		w, err := h.opened1(url)
 		ch <- made{w, err}
 	})
 	m := <-ch
@@ -190,6 +217,7 @@ func (h *host) closer(w *nativeWindow) func() {
 type nativeWindow struct {
 	glaze.WebView
 	once sync.Once
+	gone func() // runs on the main thread after the web view is freed
 }
 
 // destroy frees the web view once. Before the web view exists, it does nothing, and keeps its one call.
@@ -197,7 +225,12 @@ func (w *nativeWindow) destroy() {
 	if w.WebView == nil {
 		return
 	}
-	w.once.Do(w.Destroy)
+	w.once.Do(func() {
+		w.Destroy()
+		if w.gone != nil {
+			w.gone()
+		}
+	})
 }
 
 // openNative opens one window of glaze at url. It runs on the main thread.

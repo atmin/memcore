@@ -503,3 +503,64 @@ func TestQuit(t *testing.T) {
 		t.Errorf("the window stopped %d times, want 1", stopped.Load())
 	}
 }
+
+func TestReopen(t *testing.T) {
+	s, _ := newServer()
+	s.Start, s.Grace = 300*time.Millisecond, 300*time.Millisecond
+	reopen := make(chan struct{})
+	s.Reopen = reopen
+	var opened atomic.Int32
+	s.Window = func(string) (func(), error) {
+		opened.Add(1)
+		return nil, nil
+	}
+	_, done := served(t, s)
+	for range 2 {
+		select {
+		case reopen <- struct{}{}:
+		case <-done:
+			t.Fatal("Serve returned before a reopen")
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for opened.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if opened.Load() != 3 {
+		t.Errorf("the server opened %d windows, want the first and two more", opened.Load())
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Serve = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after its start period")
+	}
+}
+
+// TestReopenNearDeadline checks that a window from the Dock gets the start period to connect, even when the
+// grace of the server nearly ended.
+func TestReopenNearDeadline(t *testing.T) {
+	s, _ := newServer()
+	s.Start, s.Grace = 400*time.Millisecond, 400*time.Millisecond
+	reopen := make(chan struct{})
+	s.Reopen = reopen
+	s.Window = func(string) (func(), error) { return nil, nil }
+	_, done := served(t, s)
+	time.Sleep(300 * time.Millisecond) // no stream connects, so the server would stop at 400 ms
+	reopened := time.Now()
+	select {
+	case reopen <- struct{}{}:
+	case <-done:
+		t.Fatal("Serve returned before the reopen")
+	}
+	select {
+	case <-done:
+		if waited := time.Since(reopened); waited < 350*time.Millisecond {
+			t.Errorf("Serve returned %v after the reopen, want the start period of 400 ms", waited)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return")
+	}
+}

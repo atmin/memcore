@@ -12,10 +12,10 @@ import (
 func TestRunHostFallback(t *testing.T) {
 	t.Setenv("MEMCORE_UI_WINDOW", "chrome")
 	called := false
-	err := RunHost(func(window func(string) (func(), error), quit <-chan struct{}) error {
+	err := RunHost(func(window func(string) (func(), error), quit, reopen <-chan struct{}) error {
 		called = true
-		if quit != nil {
-			t.Error("the fallback gets a quit channel")
+		if quit != nil || reopen != nil {
+			t.Error("the fallback gets a channel of the menu or the Dock")
 		}
 		if reflect.ValueOf(window).Pointer() != reflect.ValueOf(Window).Pointer() {
 			t.Error("RunHost passes another function than Window")
@@ -38,6 +38,7 @@ func fakeHost(fail func(url string) bool) (h *host, fellBack *[]string, warned *
 		return &nativeWindow{}, nil
 	}
 	h.dispatch = func(_ *nativeWindow, f func()) { f() }
+	h.delegate = func(func()) {}
 	h.fallback = func(url string) (func(), error) {
 		*fellBack = append(*fellBack, url)
 		return nil, nil
