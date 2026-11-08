@@ -17,8 +17,20 @@ import (
 	"testing"
 )
 
-// fakeMemcore is the executable of the fake release. It prints a version, as memcore version does.
-const fakeMemcore = "#!/bin/sh\necho 'memcore v0.0.0-test'\n"
+// fakeMemcore is the executable of the fake release. It records its arguments in $HOME/memcore-calls, and
+// prints a version for version, as memcore version does.
+const fakeMemcore = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/memcore-calls\"\n" +
+	"case \"$1\" in\nversion) echo 'memcore v0.0.0-test' ;;\nesac\n"
+
+// calls returns the arguments of each run of the fake memcore in a home, one line for each run.
+func calls(t *testing.T, home string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(home, "memcore-calls"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(b)
+}
 
 // release is a fake release on a test server, which counts the requests that it gets.
 type release struct {
@@ -175,7 +187,26 @@ func TestInstall(t *testing.T) {
 			if left := staged(t, bin); len(left) != 0 {
 				t.Errorf("staging files left: %v", left)
 			}
+			if got := calls(t, home); got != "version\nui --install\n" {
+				t.Errorf("memcore ran with %q, want version, then ui --install", got)
+			}
 		})
+	}
+}
+
+func TestInstallAppFails(t *testing.T) {
+	failing := "#!/bin/sh\ncase \"$1\" in\nversion) echo 'memcore v0.0.0-test' ;;\nui) echo 'memcore ui: no window here' >&2; exit 1 ;;\nesac\n"
+	r := serve(t, map[string]string{"memcore-linux-amd64-static": failing}, sumLine("memcore-linux-amd64-static", failing))
+	home := t.TempDir()
+	out, err := install("sh", script(t), home, r.url, fakeUname(t, "Linux", "x86_64")+":"+os.Getenv("PATH"), t.TempDir())
+	if err != nil {
+		t.Fatalf("install failed with the application: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "memcore install: the application of the window failed, so open the window with: memcore ui") {
+		t.Errorf("no warning about the application:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "memcore")); err != nil {
+		t.Errorf("memcore is not installed: %v", err)
 	}
 }
 
@@ -221,6 +252,9 @@ func TestInstallRefuses(t *testing.T) {
 			}
 			if !strings.Contains(out, "memcore install:") {
 				t.Errorf("the output names no failure of the install:\n%s", out)
+			}
+			if got := calls(t, home); strings.Contains(got, "ui") {
+				t.Errorf("a refused install ran ui: %q", got)
 			}
 			if got, _ := os.ReadFile(existing); string(got) != old {
 				t.Errorf("the existing memcore changed to %q", got)

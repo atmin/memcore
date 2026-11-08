@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs memcore. It downloads the executable of the latest release for this machine
 # into ~/.local/bin, after it checks the SHA-256 against SHA256SUMS of the release.
+# Then memcore ui --install adds the application of the window.
 # It needs no sudo. Read it before you run it: curl -fsSL https://memco.re/install
 # The script is one group, which sh reads whole before it runs any of it.
 # So a download that stops early runs nothing.
@@ -80,6 +81,9 @@ main() {
 	mv -f "$stage" "$bin/memcore"
 	stage=
 	printf 'Installed memcore in ~/.local/bin: %s\n' "$version"
+	# The application of the window: memcore.app in ~/Applications on macOS, or a desktop entry on Linux.
+	"$bin/memcore" ui --install ||
+		printf 'memcore install: the application of the window failed, so open the window with: memcore ui\n' >&2
 
 	case ":$PATH:" in
 	*":$bin:"*) ;;
