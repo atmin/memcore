@@ -125,7 +125,10 @@ ins { background: var(--add-bg); color: var(--add-fg); text-decoration: none; }
 .tree > ul { padding-left: 0; }
 .tree a { text-decoration: none; display: block; padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
 .tree a.on { background: var(--surface); font-weight: 600; }
-.tree .folder { color: var(--muted); margin-top: 6px; }
+.tree button.folder { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 2px; padding: 1px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); text-align: left; overflow-wrap: anywhere; }
+.tree button.folder:hover { background: var(--surface); }
+.tree button.folder::before { content: ""; flex: none; width: 0; height: 0; border-style: solid; border-width: 4px 0 4px 6px; border-color: transparent transparent transparent currentColor; transition: transform 0.1s; }
+.tree button.folder[aria-expanded="true"]::before { transform: rotate(90deg); }
 .doc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .doc-head .path { font: 13px var(--mono); flex: 1; overflow-wrap: anywhere; }
 .source { margin: 0; font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }

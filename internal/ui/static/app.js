@@ -3,6 +3,10 @@
 "use strict";
 
 (() => {
+  const { h, render } = preact;
+  const { useState, useEffect, useLayoutEffect, useMemo, useRef } = preactHooks;
+  const html = htm.bind(h);
+
   // The token arrives in the fragment once, and the page keeps it for reloads of this window.
   const TOKEN_KEY = "memcore-token";
   let token = "";
@@ -260,6 +264,130 @@
     return box;
   }
 
+  // ---------- Components ----------
+
+  // preactOwns says whether Preact rendered #main last. A view of el must unmount Preact first, and a view of
+  // Preact must start from an empty #main, so the two renderers never share the children of #main.
+  let preactOwns = false;
+
+  function plain() {
+    if (preactOwns) {
+      render(null, main);
+      preactOwns = false;
+    }
+  }
+
+  function mount(vnode) {
+    if (!preactOwns) {
+      main.replaceChildren();
+      preactOwns = true;
+    }
+    render(vnode, main);
+  }
+
+  // Raw mounts a DOM node that renderMarkdown or a diff view built. The node passed DOMPurify where it holds a
+  // document, so no component needs dangerouslySetInnerHTML.
+  function Raw({ node }) {
+    const ref = useRef(null);
+    useLayoutEffect(() => {
+      ref.current.replaceChildren(node);
+    }, [node]);
+    return html`<div ref=${ref}></div>`;
+  }
+
+  // Seg is a row of buttons that picks one view.
+  function Seg({ label, views, value, onChange }) {
+    return html`<div class="seg" role="group" aria-label=${label}>
+      ${views.map(
+        ([v, text]) =>
+          html`<button type="button" key=${v} class=${v === value ? "on" : undefined} data-view=${v} onClick=${() => onChange(v)}>${text}</button>`
+      )}
+    </div>`;
+  }
+
+  // ancestors returns the folders above a path, the outermost first.
+  function ancestors(path) {
+    const parts = path.split("/").slice(0, -1);
+    return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+  }
+
+  // nest puts the files of docs into their folders. A folder holds its path, its folders by name, and its files.
+  function nest(docs) {
+    const root = { path: "", dirs: new Map(), files: [] };
+    for (const d of docs) {
+      let node = root;
+      for (const dir of ancestors(d.path)) {
+        const name = dir.split("/").pop();
+        if (!node.dirs.has(name)) node.dirs.set(name, { path: dir, dirs: new Map(), files: [] });
+        node = node.dirs.get(name);
+      }
+      node.files.push(d);
+    }
+    return root;
+  }
+
+  const indexFirst = (a, b) => (a.path.endsWith("README.md") ? -1 : b.path.endsWith("README.md") ? 1 : a.path.localeCompare(b.path));
+
+  // Tree lists the files and folders of docs: README.md first, then the files, then the folders. A folder shows
+  // its children only when opened holds its path. current is the path that the tree marks, and badge returns extra
+  // children of a file. A file is a link into Browse, unless the caller passes onPick.
+  function Tree({ docs, current, opened, onToggle, badge, onPick }) {
+    const root = useMemo(() => nest(docs), [docs]);
+    const ref = useRef(null);
+    const revealed = useRef("");
+    // The link of current appears once its folders open, so each render checks for it, and scrolls to it once.
+    useEffect(() => {
+      const on = ref.current && ref.current.querySelector("a.on");
+      if (on && revealed.current !== current) {
+        revealed.current = current;
+        on.scrollIntoView({ block: "nearest" });
+      }
+    });
+    const file = (d) => {
+      const pick = onPick
+        ? (e) => {
+            e.preventDefault();
+            onPick(d);
+          }
+        : undefined;
+      const extra = badge ? badge(d) : d.unreviewed ? " •" : null;
+      return html`<li key=${d.path}>
+        <a href=${"#browse/" + encodeURIComponent(d.path)} class=${d.path === current ? "on" : undefined} onClick=${pick}>${d.path.split("/").pop()}${extra}</a>
+      </li>`;
+    };
+    const list = (node) => html`<ul>
+      ${[...node.files].sort(indexFirst).map(file)}
+      ${[...node.dirs.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, child]) => {
+          const open = opened.has(child.path);
+          return html`<li key=${child.path + "/"}>
+            <button type="button" class="folder" aria-expanded=${open ? "true" : "false"} onClick=${() => onToggle(child.path)}>${name}/</button>
+            ${open ? list(child) : null}
+          </li>`;
+        })}
+    </ul>`;
+    return html`<nav class="tree" aria-label="Documents" ref=${ref}>${list(root)}</nav>`;
+  }
+
+  // Rendered shows a markdown document as renderMarkdown builds it.
+  function Rendered({ text, path }) {
+    const node = useMemo(() => renderMarkdown(text, path), [text, path]);
+    return html`<${Raw} node=${node} />`;
+  }
+
+  // Source shows the lines of a document, with line marked, and scrolls to it.
+  function Source({ text, line }) {
+    const ref = useRef(null);
+    useEffect(() => {
+      const hit = ref.current.querySelector(".line.hit");
+      if (hit) hit.scrollIntoView({ block: "center" });
+    }, [text, line]);
+    return html`<pre class="source" ref=${ref}>${text
+      .split("\n")
+      .map((l, i) => html`<span class=${i + 1 === line ? "line hit" : "line"} data-line=${i + 1}>${l || " "}</span>`)}</pre>`;
+  }
+
   // ---------- Review ----------
 
   const isCode = (entry) => entry.files.some((f) => f.kind === "skills" || f.kind === "bin");
@@ -318,11 +446,13 @@
 
   async function loadQueue() {
     clearNotices("queue");
+    plain();
     main.replaceChildren(el("p", { class: "muted" }, "Reading the queue."));
     let q;
     try {
       q = await api("/api/queue");
     } catch (e) {
+      plain();
       main.replaceChildren(el("p", { class: "notice bad" }, `The queue cannot load: ${e.message}`));
       return;
     }
@@ -354,6 +484,7 @@
       });
     }
     state.entries = entries;
+    plain();
     main.replaceChildren(...parts);
     pushButton.hidden = !entries.length;
     pushButton.textContent = `Push ${plural(entries.length, "commit")}`;
@@ -422,93 +553,96 @@
     return state.tree;
   }
 
-  // treeView lists the folders and files of main, with the open path marked.
-  function treeView(docs, open) {
-    const root = { dirs: new Map(), files: [] };
-    for (const d of docs) {
-      const parts = d.path.split("/");
-      let node = root;
-      for (const p of parts.slice(0, -1)) {
-        if (!node.dirs.has(p)) node.dirs.set(p, { dirs: new Map(), files: [] });
-        node = node.dirs.get(p);
-      }
-      node.files.push(d);
+  const OPENED_KEY = "memcore-browse-open";
+
+  // loadOpened returns the folders that the person opened in Browse. They are a convenience only.
+  function loadOpened() {
+    try {
+      const v = JSON.parse(localStorage.getItem(OPENED_KEY) || "[]");
+      return new Set(Array.isArray(v) ? v.filter((p) => typeof p === "string") : []);
+    } catch (e) {
+      return new Set();
     }
-    const list = (node) =>
-      el(
-        "ul",
-        {},
-        [...node.files]
-          .sort((a, b) => (a.path.endsWith("README.md") ? -1 : b.path.endsWith("README.md") ? 1 : a.path.localeCompare(b.path)))
-          .map((d) =>
-            el(
-              "li",
-              {},
-              el(
-                "a",
-                { href: "#browse/" + encodeURIComponent(d.path), class: d.path === open ? "on" : false },
-                d.path.split("/").pop(),
-                d.unreviewed ? " •" : ""
-              )
-            )
-          ),
-        [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, child]) => el("li", {}, el("div", { class: "folder" }, name + "/"), list(child)))
-      );
-    return el("nav", { class: "tree", "aria-label": "Documents" }, list(root));
   }
 
-  async function showBrowse(target) {
-    let path = target || "README.md";
+  function saveOpened(opened) {
+    try {
+      localStorage.setItem(OPENED_KEY, JSON.stringify([...opened]));
+    } catch (e) {
+      /* the opened folders are a convenience only */
+    }
+  }
+
+  // BrowseView shows the tree of main beside a document. target is a path, or a path and a line as path:line.
+  // The folders above the document open, so the tree reveals it.
+  function BrowseView({ target }) {
+    let wanted = target || "README.md";
     let line = 0;
-    const m = /^(.*):(\d+)$/.exec(path);
+    const m = /^(.*):(\d+)$/.exec(wanted);
     if (m) {
-      path = m[1];
+      wanted = m[1];
       line = Number(m[2]);
     }
-    main.replaceChildren(el("p", { class: "muted" }, "Reading the documents."));
-    let tree, doc;
-    try {
-      tree = await loadTree();
-      if (!tree.docs.some((d) => d.path === path) && tree.docs.some((d) => d.path === path + "/README.md")) path += "/README.md";
-      doc = await api("/api/doc?path=" + encodeURIComponent(path));
-    } catch (e) {
-      main.replaceChildren(el("div", { class: "browse" }, tree ? treeView(tree.docs, path) : el("div"), el("p", { class: "notice bad" }, e.message)));
-      return;
-    }
-    const body = el("div");
-    const source = () => {
-      const pre = el("pre", { class: "source" });
-      doc.text.split("\n").forEach((l, i) => pre.append(el("span", { class: i + 1 === line ? "line hit" : "line", "data-line": i + 1 }, l || " ")));
-      return pre;
+    const [tree, setTree] = useState(state.tree);
+    const [doc, setDoc] = useState(null);
+    const [error, setError] = useState("");
+    const [opened, setOpened] = useState(loadOpened);
+    const [picked, setView] = useState(null); // the view that the person picked, if any
+    useEffect(() => {
+      let live = true;
+      (async () => {
+        try {
+          const t = await loadTree();
+          if (!live) return;
+          setTree(t);
+          let path = wanted;
+          if (!t.docs.some((d) => d.path === path) && t.docs.some((d) => d.path === path + "/README.md")) path += "/README.md";
+          const d = await api("/api/doc?path=" + encodeURIComponent(path));
+          if (live) setDoc(d);
+        } catch (e) {
+          if (live) setError(e.message);
+        }
+      })();
+      return () => {
+        live = false;
+      };
+    }, []);
+    const current = doc ? doc.path : wanted;
+    useEffect(() => {
+      const above = ancestors(current).filter((p) => !opened.has(p));
+      if (!above.length) return;
+      const next = new Set([...opened, ...above]);
+      saveOpened(next);
+      setOpened(next);
+    }, [current]);
+    const toggle = (folder) => {
+      const next = new Set(opened);
+      if (next.has(folder)) next.delete(folder);
+      else next.add(folder);
+      saveOpened(next);
+      setOpened(next);
     };
-    const seg = el("div", { class: "seg", role: "group", "aria-label": "View of the document" });
-    const show = (v) => {
-      for (const b of seg.children) b.classList.toggle("on", b.dataset.view === v);
-      body.replaceChildren(v === "rendered" ? renderMarkdown(doc.text, doc.path) : source());
-      const hit = body.querySelector(".line.hit");
-      if (hit) hit.scrollIntoView({ block: "center" });
-    };
-    if (isMarkdown(path)) {
-      for (const [v, label] of [["rendered", "Rendered"], ["source", "Source"]]) {
-        const b = el("button", { type: "button", onclick: () => show(v) }, label);
-        b.dataset.view = v;
-        seg.append(b);
-      }
+    if (!tree && !error) return html`<p class="muted">Reading the documents.</p>`;
+    let body;
+    if (error) body = html`<p class="notice bad">${error}</p>`;
+    else if (!doc) body = html`<p class="muted">Reading the document.</p>`;
+    else {
+      const markdown = isMarkdown(doc.path);
+      // The view depends on the resolved path: #browse/dev opens dev/README.md, rendered.
+      const view = picked || (markdown && !line ? "rendered" : "source");
+      body = html`<div class="doc-head">
+          <span class="path">${doc.path}</span>
+          ${doc.unreviewed ? html`<span class="tag unreviewed">unreviewed</span>` : null}
+          ${markdown
+            ? html`<${Seg} label="View of the document" views=${[["rendered", "Rendered"], ["source", "Source"]]} value=${view} onChange=${setView} />`
+            : null}
+        </div>
+        ${markdown && view === "rendered" ? html`<${Rendered} text=${doc.text} path=${doc.path} />` : html`<${Source} text=${doc.text} line=${line} />`}`;
     }
-    main.replaceChildren(
-      el(
-        "div",
-        { class: "browse" },
-        treeView(tree.docs, path),
-        el(
-          "article",
-          {},
-          el("div", { class: "doc-head" }, el("span", { class: "path" }, path), doc.unreviewed ? el("span", { class: "tag unreviewed" }, "unreviewed") : null, isMarkdown(path) ? seg : null),
-          body
-        )
-      )
-    );
-    show(isMarkdown(path) && !line ? "rendered" : "source");
+    return html`<div class="browse">
+      ${tree ? html`<${Tree} docs=${tree.docs} current=${current} opened=${opened} onToggle=${toggle} />` : html`<div></div>`}
+      <article>${body}</article>
+    </div>`;
   }
 
   // ---------- Search ----------
@@ -569,6 +703,7 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(run, 250);
     });
+    plain();
     main.replaceChildren(input, results);
     input.focus();
     if (query) run();
@@ -582,7 +717,7 @@
     const arg = decodeURIComponent(rest.join("/"));
     for (const a of document.querySelectorAll(".tabs a")) a.classList.toggle("on", a.dataset.view === (view || "review"));
     pushButton.hidden = true;
-    if (view === "browse") showBrowse(arg);
+    if (view === "browse") mount(html`<${BrowseView} key=${arg} target=${arg} />`);
     else if (view === "search") showSearch(arg);
     else if (state.queue && (!state.head || state.queue.main === state.head)) renderReview();
     else loadQueue();
