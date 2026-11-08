@@ -34,3 +34,10 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
   - the state of the server of the window, `ui.json`, with its port and its token at mode `0600`, and its lock, `ui.lock`.
 - The tool hooks of Claude Code run after every call of `Bash`, `Read` and `Grep`. So a tool call that reads no document logs no line, and starts no git process.
 - memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. memcore never pushes these refs.
+
+## Release
+
+- A push of a `v*` tag runs the full checks on GitHub Actions. Then it builds memcore for darwin and linux, each on arm64 and amd64, with `CGO_ENABLED=0`.
+- The workflow makes a GitHub Release of the tag with the four executables, `memcore-<system>-<processor>`, and `SHA256SUMS`. A tag with a `-` makes a prerelease. The install script skips it, unless `MEMCORE_RELEASE_URL` names the download folder of that tag.
+- The build sets the version to the tag, with `-ldflags -X`. So `memcore version` names the release.
+- The site `memco.re` is the folder `site/` with the icon of the window. A push to `main` that changes it deploys it to GitHub Pages. The site serves the install script at `/install`.

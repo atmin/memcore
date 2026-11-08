@@ -1,20 +1,25 @@
 # Install
 
-Build memcore from source, then set it up on a machine with one command:
+Install memcore on macOS or Linux, then set it up on a machine with one command:
 
 ```
+curl -fsSL https://memco.re/install | sh
 memcore init git@github.com:you/memory.git
 ```
 
 ## The executable
 
-memcore builds from source with Go 1.27. Clone the memcore repo, and run this command in it:
+The install script downloads the executable of the latest release for your system and processor into `~/.local/bin`. It supports macOS and Linux, each on arm64 and amd64. It checks the SHA-256 of the download against `SHA256SUMS` of the release, and refuses a download that differs. It needs no `sudo`. Read it before you run it, with `curl -fsSL https://memco.re/install`. To update, run `curl -fsSL https://memco.re/install | sh` again.
+
+You can also build memcore from source with Go 1.27. Clone the memcore repo, and run this command in it:
 
 ```
 CGO_ENABLED=0 go build -o ~/.local/bin/memcore ./cmd/memcore
 ```
 
-Put `~/.local/bin` on `PATH` before you run `init`. Without memcore on `PATH`, `init` adds no hook. To update, pull the repo and build again. At run time, memcore needs only git.
+To update a build from source, pull the repo and build again. `memcore version` names the build that runs: the tag of a release, or `dev` for a build from source. It adds the commit of the build when the build records one.
+
+Put `~/.local/bin` on `PATH` before you run `init`. Without memcore on `PATH`, `init` adds no hook. At run time, memcore needs only git.
 
 ## `memcore init <remote>`
 
