@@ -12,7 +12,7 @@ import (
 )
 
 // gridSize is the side of the pixel grid of the icon, in pixels.
-const gridSize = 32
+const gridSize = 16
 
 // rectPath matches one pixel run of the letters in icon.svg: "M<x> <y>h<w>v<h>H<x>z".
 var rectPath = regexp.MustCompile(`M(\d+) (\d+)h(\d+)v(\d+)H\d+z`)
@@ -47,73 +47,55 @@ func IconGrid() ([gridSize][gridSize]bool, error) {
 	return g, nil
 }
 
-// IconImage draws the icon on a square of size pixels, in the shape of a macOS application icon: a white
-// tile with round corners and a margin, and the black letters on it, scaled by whole pixels.
+// IconImage draws the icon on a square of size pixels, with whole pixels for each cell of the grid. At 16 and
+// 32 px, the grid fills the white square, as icon.svg draws it. From 64 px, it sits inset on a white tile with
+// round corners, the shape of a macOS application icon, because the letters span the full width of the grid.
 func IconImage(size int) (image.Image, error) {
-	if size < 64 {
-		big, err := IconImage(64)
-		if err != nil {
-			return nil, err
-		}
-		return shrink(big, size), nil
+	if size != 16 && size != 32 && (size <= 0 || size%64 != 0) {
+		return nil, fmt.Errorf("draw the icon at %d px: the size is 16, 32 or a multiple of 64", size)
 	}
 	g, err := IconGrid()
 	if err != nil {
 		return nil, err
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	// macOS draws an icon tile of 824 of 1024 pixels, with a corner radius of about 185.
-	tile := size * 824 / 1024
-	off := (size - tile) / 2
-	radius := float64(tile) * 185 / 824
-	for y := 0; y < tile; y++ {
-		for x := 0; x < tile; x++ {
-			if inRound(x, y, tile, radius) {
-				img.SetNRGBA(off+x, off+y, color.NRGBA{255, 255, 255, 255})
+	white, black := color.NRGBA{255, 255, 255, 255}, color.NRGBA{0, 0, 0, 255}
+	cell, inner := size/gridSize, 0
+	if size <= 32 {
+		for y := range size {
+			for x := range size {
+				img.SetNRGBA(x, y, white)
 			}
 		}
+	} else {
+		// macOS draws an icon tile of 824 of 1024 pixels, with a corner radius of about 185.
+		tile := size * 824 / 1024
+		off := (size - tile) / 2
+		radius := float64(tile) * 185 / 824
+		for y := range tile {
+			for x := range tile {
+				if inRound(x, y, tile, radius) {
+					img.SetNRGBA(off+x, off+y, white)
+				}
+			}
+		}
+		// A cell of a twentieth of the tile leaves two cells of margin on each side of the full-width letters.
+		cell = tile / 20
+		inner = (size - cell*gridSize) / 2
 	}
-	cell := tile / gridSize
-	if cell < 1 {
-		cell = 1
-	}
-	inner := (size - cell*gridSize) / 2
-	for gy := 0; gy < gridSize; gy++ {
-		for gx := 0; gx < gridSize; gx++ {
+	for gy := range gridSize {
+		for gx := range gridSize {
 			if !g[gy][gx] {
 				continue
 			}
-			for y := 0; y < cell; y++ {
-				for x := 0; x < cell; x++ {
-					img.SetNRGBA(inner+gx*cell+x, inner+gy*cell+y, color.NRGBA{0, 0, 0, 255})
+			for y := range cell {
+				for x := range cell {
+					img.SetNRGBA(inner+gx*cell+x, inner+gy*cell+y, black)
 				}
 			}
 		}
 	}
 	return img, nil
-}
-
-// shrink scales a square image down to size pixels, by the average of each block.
-func shrink(src image.Image, size int) image.Image {
-	n := src.Bounds().Dx()
-	dst := image.NewNRGBA(image.Rect(0, 0, size, size))
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			var r, g, b, a, count uint32
-			for sy := y * n / size; sy < (y+1)*n/size; sy++ {
-				for sx := x * n / size; sx < (x+1)*n/size; sx++ {
-					c := color.NRGBAModel.Convert(src.At(sx, sy)).(color.NRGBA)
-					r, g, b, a = r+uint32(c.R)*uint32(c.A), g+uint32(c.G)*uint32(c.A), b+uint32(c.B)*uint32(c.A), a+uint32(c.A)
-					count++
-				}
-			}
-			if a == 0 {
-				continue
-			}
-			dst.SetNRGBA(x, y, color.NRGBA{uint8(r / a), uint8(g / a), uint8(b / a), uint8(a / count)})
-		}
-	}
-	return dst
 }
 
 // inRound reports whether a pixel lies inside a square of side n with corners of the radius.
