@@ -3,11 +3,13 @@ package ui
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,7 +40,9 @@ func (f *fakeBackend) Queue(context.Context) (Queue, error) {
 	return Queue{Main: f.head}, nil
 }
 
-func (f *fakeBackend) Tree(context.Context) (Tree, error) { return Tree{Main: f.head}, nil }
+func (f *fakeBackend) Tree(context.Context) (Tree, error) {
+	return Tree{Main: f.head, Docs: []TreeDoc{{Path: "a.md"}, {Path: "b/a.md"}, {Path: "c.md"}}}, nil
+}
 
 func (f *fakeBackend) Doc(_ context.Context, path string) (Doc, error) {
 	switch path {
@@ -137,6 +141,7 @@ func TestToken(t *testing.T) {
 		{"/api/tree", "", 403},
 		{"/api/doc?path=a.md", "", 403},
 		{"/api/search?q=a", "", 403},
+		{"/api/find?q=a", "", 403},
 		{"/api/doc?path=a.md", "secret", 200},
 		{"/api/doc?path=bad", "secret", 400},
 		{"/api/doc?path=missing", "secret", 404},
@@ -444,5 +449,30 @@ func TestWindowAfterClose(t *testing.T) {
 	}
 	if stopped.Load() != 2 {
 		t.Errorf("a window that opened after the close stays open")
+	}
+}
+
+func TestFindAPI(t *testing.T) {
+	s, _ := newServer()
+	port, _ := served(t, s)
+	resp := call(t, port, "GET", "/api/find?q=a", fmt.Sprintf("127.0.0.1:%d", port), "secret", "", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /api/find = %d, want 200", resp.StatusCode)
+	}
+	var got Finds
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, f := range got.Found {
+		paths = append(paths, f.Path)
+	}
+	if got.Main != "aaa" || !reflect.DeepEqual(paths, []string{"a.md", "b/a.md"}) {
+		t.Errorf("GET /api/find?q=a = %+v, want main aaa with a.md and b/a.md", got)
+	}
+	resp = call(t, port, "GET", "/api/find?q=zzz", fmt.Sprintf("127.0.0.1:%d", port), "secret", "", "", "")
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"found":[]`) {
+		t.Errorf("GET /api/find?q=zzz = %s, want an empty list, not null", body)
 	}
 }

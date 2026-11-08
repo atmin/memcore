@@ -284,6 +284,18 @@ func (s *Server) handler() http.Handler {
 	api.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		reply(w)(s.Backend.Search(r.Context(), r.URL.Query().Get("q")))
 	})
+	api.HandleFunc("GET /api/find", func(w http.ResponseWriter, r *http.Request) {
+		t, err := s.Backend.Tree(r.Context())
+		if err != nil {
+			reply(w)(nil, err)
+			return
+		}
+		found := Find(t.Docs, r.URL.Query().Get("q"), findLimit)
+		if found == nil {
+			found = []Found{}
+		}
+		reply(w)(Finds{Main: t.Main, Found: found}, nil)
+	})
 	api.HandleFunc("POST /api/push", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Head string }
 		if !decode(w, r, &in) {

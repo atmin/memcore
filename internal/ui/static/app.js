@@ -388,6 +388,122 @@
       .map((l, i) => html`<span class=${i + 1 === line ? "line hit" : "line"} data-line=${i + 1}>${l || " "}</span>`)}</pre>`;
   }
 
+  // ---------- Finder ----------
+
+  const findDialog = document.getElementById("find-dialog");
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+  // Marked shows a path with its matched characters in <mark>, one mark for each run of characters.
+  function Marked({ path, marks }) {
+    const chars = Array.from(path);
+    const on = new Set(marks);
+    const parts = [];
+    for (let i = 0; i < chars.length; ) {
+      let j = i;
+      while (j < chars.length && on.has(j) === on.has(i)) j++;
+      const text = chars.slice(i, j).join("");
+      parts.push(on.has(i) ? html`<mark>${text}</mark>` : text);
+      i = j;
+    }
+    return parts;
+  }
+
+  // Finder asks the server for the files whose paths match the query, and opens the chosen one in Browse.
+  function Finder() {
+    const [found, setFound] = useState([]);
+    const [selected, setSelected] = useState(0);
+    const [error, setError] = useState("");
+    const list = useRef(null);
+    const latest = useRef(""); // the query in the input
+    const shown = useRef(""); // the query of the files that the list shows
+    useEffect(() => {
+      const row = list.current && list.current.children[selected];
+      if (row) row.scrollIntoView({ block: "nearest" });
+    }, [selected, found]);
+    const ask = async (q) => {
+      latest.current = q;
+      if (!q.trim()) {
+        shown.current = q;
+        setFound([]);
+        setError("");
+        return;
+      }
+      try {
+        const r = await api("/api/find?q=" + encodeURIComponent(q));
+        if (latest.current !== q) return; // a newer query runs
+        shown.current = q;
+        setFound(r.found);
+        setSelected(0);
+        setError("");
+      } catch (e) {
+        if (latest.current === q) setError(e.message);
+      }
+    };
+    const go = (f) => {
+      findDialog.close();
+      const hash = "#browse/" + encodeURIComponent(f.path);
+      if (location.hash !== hash) location.hash = hash;
+      else {
+        browseVisit++; // the same hash fires no hashchange, so Browse mounts again to reveal the document
+        route();
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "ArrowDown") setSelected((s) => Math.min(s + 1, found.length - 1));
+      else if (e.key === "ArrowUp") setSelected((s) => Math.max(s - 1, 0));
+      else if (e.key === "Enter") {
+        if (found[selected] && shown.current === latest.current) go(found[selected]); // never a file of an older query
+      }
+      else return;
+      e.preventDefault();
+    };
+    let body = null;
+    if (error) body = html`<p class="notice bad">${error}</p>`;
+    else if (latest.current.trim() && !found.length) body = html`<p class="muted">No file matches.</p>`;
+    // autofocus: showModal focuses the input at once, with no frame of the browser in between.
+    return html`<input autofocus type="search" placeholder="Search files by name" aria-label="Search files by name" autocomplete="off"
+        onInput=${(e) => ask(e.currentTarget.value)} onKeyDown=${onKey} />
+      ${body}
+      <ul class="found" ref=${list} role="listbox" aria-label="Files">
+        ${found.map(
+          (f, i) => html`<li key=${f.path} role="option" aria-selected=${i === selected ? "true" : "false"} class=${i === selected ? "on" : undefined}
+            onClick=${() => go(f)} onMouseMove=${() => i !== selected && setSelected(i)}>
+            <${Marked} path=${f.path} marks=${f.marks} />${f.unreviewed ? " •" : null}
+          </li>`
+        )}
+      </ul>`;
+  }
+
+  // openFinder renders a new finder into its dialog, so each opening starts empty.
+  function openFinder() {
+    if (findDialog.open) {
+      findDialog.querySelector("input").focus();
+      return;
+    }
+    render(html`<${Finder} key=${Date.now()} />`, findDialog);
+    findDialog.showModal();
+  }
+
+  // The close event comes as a task of its own, after a fast Escape and Cmd+P may have opened a new finder.
+  findDialog.addEventListener("close", () => {
+    if (!findDialog.open) render(null, findDialog);
+  });
+  findDialog.addEventListener("click", (e) => {
+    if (e.target === findDialog) findDialog.close(); // a click on the backdrop
+  });
+  document.getElementById("find-key").textContent = isMac ? "⌘P" : "Ctrl+P";
+  document.getElementById("find").addEventListener("click", openFinder);
+
+  // Cmd+P on macOS, or Ctrl+P elsewhere, opens the finder from every view, also from an input. The browser
+  // never prints the page. It runs before the keys of the views, which ignore a key with a modifier.
+  document.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() !== "p" || e.altKey || e.shiftKey || (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const other = document.querySelector("dialog[open]");
+    if (other && other !== findDialog) return;
+    openFinder();
+  });
+
   // ---------- Review ----------
 
   const isCode = (entry) => entry.files.some((f) => f.kind === "skills" || f.kind === "bin");
@@ -711,13 +827,16 @@
 
   // ---------- Routing and keys ----------
 
+  // browseVisit changes to mount Browse again on the same target.
+  let browseVisit = 0;
+
   function route() {
     const hash = location.hash.slice(1);
     const [view, ...rest] = hash.split("/");
     const arg = decodeURIComponent(rest.join("/"));
     for (const a of document.querySelectorAll(".tabs a")) a.classList.toggle("on", a.dataset.view === (view || "review"));
     pushButton.hidden = true;
-    if (view === "browse") mount(html`<${BrowseView} key=${arg} target=${arg} />`);
+    if (view === "browse") mount(html`<${BrowseView} key=${arg + "\n" + browseVisit} target=${arg} />`);
     else if (view === "search") showSearch(arg);
     else if (state.queue && (!state.head || state.queue.main === state.head)) renderReview();
     else loadQueue();
