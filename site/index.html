@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>memcore</title>
+<meta name="description" content="Long-term memory for the agents you work with, kept as plain markdown in git.">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<style>
+  :root { --fg: #000; --bg: #fff; --muted: #555; --line: #ddd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #fff; --bg: #000; --muted: #aaa; --line: #333; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 17px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 42rem; margin: 0 auto; padding: 4rem 1rem; }
+  header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; }
+  header img { width: 64px; height: 64px; image-rendering: pixelated; }
+  h1 { margin: 0; font-size: 2rem; letter-spacing: 0.02em; }
+  .tagline { margin: 0; color: var(--muted); font-style: italic; }
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 0.5rem; }
+  pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    font: 15px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  a { color: var(--fg); }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icon.svg" alt="">
+    <div>
+      <h1>memcore</h1>
+      <p class="tagline">A palimpsest for agents.</p>
+    </div>
+  </header>
+
+  <p>memcore is long-term memory for the agents you work with, kept as plain markdown in git. The working tree holds what is true now, and history holds earlier beliefs. The <code>memcore</code> command does the git work for the agents. It runs the installed git, so you install nothing else.</p>
+
+  <p>Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.</p>
+
+  <h2>Install</h2>
+  <p>On macOS or Linux, install memcore into <code>~/.local/bin</code>, then set up a machine with your memory remote:</p>
+  <pre>curl -fsSL https://memco.re/install | sh
+memcore init git@github.com:you/memory.git</pre>
+  <p>The script checks the SHA-256 of the download, and needs no <code>sudo</code>. <a href="https://github.com/atmin/memcore/blob/main/site/install">Read the script</a> before you run it. To update, run the first line again.</p>
+
+  <footer>
+    <a href="https://github.com/atmin/memcore">github.com/atmin/memcore</a>
+  </footer>
+</main>
+</body>
+</html>

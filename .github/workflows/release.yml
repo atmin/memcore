@@ -1,0 +1,51 @@
+# A push of a v* tag runs the full checks, builds memcore for each target, and makes a GitHub Release
+# with the executables and SHA256SUMS. A tag with a - makes a prerelease, which releases/latest skips.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Full checks
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test ./...
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/memcore
+
+      - name: Build
+        # The executables go outside the checkout, so no build records vcs.modified=true.
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
+            os=${target%/*}
+            arch=${target#*/}
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X github.com/atmin/memcore/internal/commands.Version=${GITHUB_REF_NAME}" \
+              -o "$RUNNER_TEMP/dist/memcore-$os-$arch" ./cmd/memcore
+          done
+          cd "$RUNNER_TEMP/dist"
+          sha256sum memcore-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=
+          case "$GITHUB_REF_NAME" in
+          *-*) prerelease=--prerelease ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/* --generate-notes $prerelease
