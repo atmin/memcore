@@ -243,6 +243,7 @@ func TestOrientExact(t *testing.T) {
   memcore drop <commit> [--reason <text>] Removes a commit of the review queue, with its fixups, after the person confirms.
   memcore ui                   Opens a window to review, push, browse and search the memory repo.
   memcore help [<command>]     Shows the input of a command, with an example.
+  memcore version              Prints the version of memcore and the commit that it was built from.
   memcore init [--dry-run] <remote> | --undo Sets up the memory repo, ~/memory or $MEMCORE_REPO, and Claude Code: its transcripts, its auto-memory, its hooks and its permissions.
 
 Only the person runs recover, drop, ui and init.
@@ -280,7 +281,7 @@ The indexes, from the working directory to the root. Each line says when to read
 		t.Errorf("output =\n%s\nwant\n%s", out, want)
 	}
 	e := last(t, repo)
-	wantWords := map[string]int{"header": 447, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantWords := map[string]int{"header": 462, "~/dev/app": 34, "~/dev": 30, "~": 7}
 	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
 	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
 		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)

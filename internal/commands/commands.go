@@ -50,6 +50,7 @@ func Table() []Command {
 		{Name: "ui", Does: "Opens a window to review, push, browse and search the memory repo.", Yours: true, Run: runUI},
 		{Name: "hook", Args: "session-start|prompt|session-end|tool", Does: "Runs a hook of Claude Code, with the hook input on standard input.", Hidden: true, Run: runHook},
 		{Name: "help", Args: "[<command>]", Does: "Shows the input of a command, with an example.", Run: runHelp},
+		{Name: "version", Does: "Prints the version of memcore and the commit that it was built from.", Run: runVersion},
 		{Name: "init", Args: "[--dry-run] <remote> | --undo", Does: "Sets up the memory repo, ~/memory or $MEMCORE_REPO, and Claude Code: its transcripts, its auto-memory, its hooks and its permissions.", Yours: true, Run: runInit},
 	}
 }
