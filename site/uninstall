@@ -1,0 +1,36 @@
+#!/bin/sh
+# Uninstalls memcore. It removes what init added to the settings of Claude Code, the application of the
+# window, and ~/.local/bin/memcore. It keeps the memory repo, which holds your memories and transcripts.
+# It needs no sudo. Read it before you run it: curl -fsSL https://memco.re/uninstall
+# The script is one group, which sh reads whole before it runs any of it.
+# So a download that stops early runs nothing.
+{
+set -eu
+
+# fail prints the reason of a failure, and exits.
+fail() {
+	printf 'memcore uninstall: %s\n' "$1" >&2
+	exit 1
+}
+
+main() {
+	# The script runs this memcore only, never another one on PATH.
+	memcore=$HOME/.local/bin/memcore
+	[ -f "$memcore" ] || fail "~/.local/bin/memcore does not exist, so there is nothing to uninstall"
+
+	# A hook that runs memcore would fail in every session without it. So a failed or refused undo stops here.
+	"$memcore" init --undo ||
+		fail "the settings of Claude Code still run memcore, so memcore stays: fix the settings, then run the uninstall again"
+	"$memcore" ui --uninstall ||
+		fail "the application of the window stays, so memcore stays: fix the cause, then run the uninstall again"
+	rm -f "$memcore"
+
+	repo=${MEMCORE_REPO:-$HOME/memory}
+	case "$repo" in
+	"$HOME"/*) repo="~/${repo#"$HOME"/}" ;;
+	esac
+	printf 'Removed memcore. The memory repo stays in %s: remove it yourself when you no longer need it.\n' "$repo"
+}
+
+main "$@"
+}
