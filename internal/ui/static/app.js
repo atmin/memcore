@@ -25,7 +25,7 @@
   const notices = document.getElementById("notices");
   const pushButton = document.getElementById("push");
   // queue is the queue that the window shows. head is the newest tip of main that the event stream sent.
-  const state = { queue: null, head: "", selected: 0, tree: null };
+  const state = { queue: null, head: "", selected: 0, collapsed: new Set(), tree: null };
 
   // ---------- Helpers ----------
 
@@ -243,25 +243,6 @@
     if (file.before === null || file.after === null) return "version";
     if (isMarkdown(file.path) && wordChanges(file.words)) return "words";
     return "patch";
-  }
-
-  function fileView(file) {
-    const views = { words: "Changes", patch: "Patch", version: "New version" };
-    const body = el("div");
-    const seg = el("div", { class: "seg", role: "group", "aria-label": "View of the file" });
-    const show = (v) => {
-      for (const b of seg.children) b.classList.toggle("on", b.dataset.view === v);
-      body.replaceChildren(v === "words" ? wordsView(file.words) : v === "patch" ? patchView(file.patch) : versionView(file));
-    };
-    for (const [v, label] of Object.entries(views)) {
-      const b = el("button", { type: "button", onclick: () => show(v) }, label);
-      b.dataset.view = v;
-      seg.append(b);
-    }
-    const status = file.before === null ? el("span", { class: "tag new" }, "new") : file.after === null ? el("span", { class: "tag removed" }, "removed") : null;
-    const box = el("div", { class: "file" }, el("div", { class: "file-head" }, el("span", { class: "path" }, file.path), status, seg), body);
-    show(defaultView(file));
-    return box;
   }
 
   // ---------- Components ----------
@@ -526,33 +507,64 @@
     }
   }
 
-  function entryView(entry, index) {
-    const box = el("section", { class: "entry", "data-index": index, tabindex: "-1" });
-    if (isSeen(entry)) box.classList.add("seen");
-    const seen = el("input", { type: "checkbox", "aria-label": "Seen", checked: isSeen(entry) });
-    seen.addEventListener("change", () => {
-      setSeen(entry, seen.checked);
-      box.classList.toggle("seen", seen.checked);
-    });
+  const FILE_VIEWS = [["words", "Changes"], ["patch", "Patch"], ["version", "New version"]];
+
+  // FileDiff shows a file of an entry in one of three views: Changes, Patch and New version.
+  function FileDiff({ file }) {
+    const [view, setView] = useState(() => defaultView(file));
+    const node = useMemo(() => (view === "words" ? wordsView(file.words) : view === "patch" ? patchView(file.patch) : versionView(file)), [view, file]);
+    const status =
+      file.before === null ? html`<span class="tag new">new</span>` : file.after === null ? html`<span class="tag removed">removed</span>` : null;
+    return html`<div class="file">
+      <div class="file-head"><span class="path">${file.path}</span>${status}<${Seg} label="View of the file" views=${FILE_VIEWS} value=${view} onChange=${setView} /></div>
+      <${Raw} node=${node} />
+    </div>`;
+  }
+
+  // Entry shows a commit of the queue, with its files. "Seen" is a mark of this browser only.
+  function Entry({ entry, index, selected, collapsed }) {
+    const [seen, setSeenState] = useState(() => isSeen(entry));
     const meta = [];
     if (entry.body) meta.push(entry.body);
     if (entry.fixups.length) meta.push(`${plural(entry.fixups.length, "fixup")} fold${entry.fixups.length === 1 ? "s" : ""} in.`);
-    box.append(
-      el(
-        "div",
-        { class: "entry-head" },
-        el("span", { class: "sha" }, entry.commit ? short(entry.commit) : "new"),
-        isCode(entry) ? el("span", { class: "tag code" }, "Code") : null,
-        el("span", { class: "subject" }, entry.subject),
-        el("span", { class: "grow" }),
-        el("label", { class: "muted" }, seen, " Seen"),
-        entry.commit ? el("button", { type: "button", onclick: () => askDrop(entry) }, "Drop") : null
-      ),
-      ...(meta.length ? [el("div", { class: "entry-meta" }, meta.join("\n"))] : []),
-      ...entry.files.map(fileView)
-    );
-    box.addEventListener("click", () => select(index, false));
-    return box;
+    const cls = ["entry", selected && "selected", seen && "seen", collapsed && "collapsed"].filter(Boolean).join(" ");
+    return html`<section class=${cls} data-index=${index} tabindex="-1" onClick=${() => select(index, false)}>
+      <div class="entry-head">
+        <span class="sha">${entry.commit ? short(entry.commit) : "new"}</span>
+        ${isCode(entry) ? html`<span class="tag code">Code</span>` : null}
+        <span class="subject">${entry.subject}</span>
+        <span class="grow"></span>
+        <label class="muted"><input type="checkbox" aria-label="Seen" checked=${seen}
+          onClick=${(e) => {
+            // click, not change: the click of the entry re-renders Review at once, before change fires
+            setSeen(entry, e.currentTarget.checked);
+            setSeenState(e.currentTarget.checked);
+          }} /> Seen</label>
+        ${entry.commit ? html`<button type="button" onClick=${() => askDrop(entry)}>Drop</button>` : null}
+      </div>
+      ${meta.length ? html`<div class="entry-meta">${meta.join("\n")}</div>` : null}
+      ${entry.files.map((f) => html`<${FileDiff} key=${f.path} file=${f} />`)}
+    </section>`;
+  }
+
+  // ReviewView shows the queue that the window holds: the code first, then the documents.
+  function ReviewView({ queue, entries, selected, collapsed }) {
+    if (!entries.length) {
+      return html`${queue.warning ? html`<div class="notice warn">${queue.warning}</div>` : null}<p class="muted">Nothing waits for review.</p>`;
+    }
+    let header = queue.folded
+      ? `Push leaves ${plural(entries.length, "commit")}, after the fold.`
+      : `The review queue holds ${plural(entries.length, "commit")}, each as it is.`;
+    if (queue.dropped) header += ` The fold drops ${plural(queue.dropped, "commit")} that leave every document as it was.`;
+    const code = entries.filter(isCode).length;
+    return html`${queue.warning ? html`<div class="notice warn">${queue.warning}</div>` : null}
+      <p class="muted">${header}</p>
+      ${entries.map(
+        (entry, i) => html`
+          ${i === 0 && code ? html`<h2 class="group" key="code">Code: skills and scripts</h2>` : null}
+          ${i === code ? html`<h2 class="group" key="docs">Documents</h2>` : null}
+          <${Entry} key=${entry.commit || "new-" + i} entry=${entry} index=${i} selected=${i === selected} collapsed=${collapsed.has(seenKey(entry))} />`
+      )}`;
   }
 
   // ordered returns the entries with the code first, each group newest first.
@@ -562,6 +574,7 @@
 
   async function loadQueue() {
     clearNotices("queue");
+    state.entries = null; // the keys wait for the new queue
     plain();
     main.replaceChildren(el("p", { class: "muted" }, "Reading the queue."));
     let q;
@@ -574,45 +587,27 @@
     }
     state.queue = q;
     state.selected = 0;
+    state.collapsed = new Set();
     renderReview();
     clearNotices("queue");
     if (state.head && state.head !== q.main) showChanged(); // a commit landed while the queue loaded
   }
 
+  // renderReview renders the queue of the window, with the selection and the collapsed entries of state.
   function renderReview() {
-    const q = state.queue;
-    const entries = ordered(q.entries || []);
-    const parts = [];
-    if (q.warning) parts.push(el("div", { class: "notice warn" }, q.warning));
-    if (!entries.length) {
-      parts.push(el("p", { class: "muted" }, "Nothing waits for review."));
-    } else {
-      let header = q.folded
-        ? `Push leaves ${plural(entries.length, "commit")}, after the fold.`
-        : `The review queue holds ${plural(entries.length, "commit")}, each as it is.`;
-      if (q.dropped) header += ` The fold drops ${plural(q.dropped, "commit")} that leave every document as it was.`;
-      parts.push(el("p", { class: "muted" }, header));
-      const code = entries.filter(isCode);
-      entries.forEach((entry, i) => {
-        if (i === 0 && code.length) parts.push(el("h2", { class: "group" }, "Code: skills and scripts"));
-        if (i === code.length) parts.push(el("h2", { class: "group" }, "Documents"));
-        parts.push(entryView(entry, i));
-      });
-    }
+    const entries = ordered(state.queue.entries || []);
     state.entries = entries;
-    plain();
-    main.replaceChildren(...parts);
+    state.selected = Math.max(0, Math.min(state.selected, entries.length - 1));
+    mount(html`<${ReviewView} queue=${state.queue} entries=${entries} selected=${state.selected} collapsed=${state.collapsed} />`);
     pushButton.hidden = !entries.length;
     pushButton.textContent = `Push ${plural(entries.length, "commit")}`;
-    select(state.selected, false);
   }
 
   function select(i, scroll) {
-    const boxes = main.querySelectorAll(".entry");
-    if (!boxes.length) return;
-    state.selected = Math.max(0, Math.min(i, boxes.length - 1));
-    boxes.forEach((b, j) => b.classList.toggle("selected", j === state.selected));
-    if (scroll) boxes[state.selected].scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (!state.entries || !state.entries.length) return;
+    state.selected = Math.max(0, Math.min(i, state.entries.length - 1));
+    renderReview();
+    if (scroll) main.querySelectorAll(".entry")[state.selected].scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   function askDrop(entry) {
@@ -851,11 +846,15 @@
       return;
     }
     if (typing || !location.hash.startsWith("#review") || !state.entries) return;
-    const boxes = main.querySelectorAll(".entry");
+    const entry = state.entries[state.selected];
     if (e.key === "j") select(state.selected + 1, true);
     else if (e.key === "k") select(state.selected - 1, true);
-    else if (e.key === "Enter" && boxes[state.selected]) boxes[state.selected].classList.toggle("collapsed");
-    else if (e.key === "d" && state.entries[state.selected] && state.entries[state.selected].commit) askDrop(state.entries[state.selected]);
+    else if (e.key === "Enter" && entry) {
+      const key = seenKey(entry);
+      if (!state.collapsed.delete(key)) state.collapsed.add(key);
+      renderReview();
+    }
+    else if (e.key === "d" && entry && entry.commit) askDrop(entry);
     else if (e.key === "p") askPush();
     else return;
     e.preventDefault();
