@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,38 +34,22 @@ func pushedCommits(t *testing.T, remote, base string) []previewed {
 	return commits
 }
 
-func TestPreviewMatchesPush(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	for _, patches := range []bool{false, true} {
-		for _, c := range foldCases() {
-			t.Run(fmt.Sprintf("%s, patches %v", c.name, patches), func(t *testing.T) {
-				home, repo, remote := newMemory(t)
-				c.queue(t, home, repo, remote)
-				got, err := preview(repo, patches)
-				if err != nil {
-					t.Fatalf("preview: %v", err)
-				}
-				if c.preview != nil {
-					c.preview(t, repo, got)
-				}
-				base, _ := revParse(repo, acceptedRef)
-				pushYes(t, home)
-				want := pushedCommits(t, remote, base)
-				var seen []previewed
-				for _, p := range got {
-					seen = append(seen, previewed{subject: p.subject, body: p.body, files: p.files})
-					if patches && len(p.diffs) != len(p.files) {
-						t.Errorf("%s has %d diffs for %d files", p.subject, len(p.diffs), len(p.files))
-					}
-					if !patches && p.diffs != nil {
-						t.Errorf("%s has diffs without patches", p.subject)
-					}
-				}
-				if !reflect.DeepEqual(seen, want) {
-					t.Errorf("preview:\n%+v\npushed:\n%+v", seen, want)
-				}
-			})
+// matchesPush fails the test when a preview, with or without patches, differs from the commits that the push
+// left on the remote.
+func matchesPush(t *testing.T, got []previewed, patches bool, want []previewed) {
+	t.Helper()
+	var seen []previewed
+	for _, p := range got {
+		seen = append(seen, previewed{subject: p.subject, body: p.body, files: p.files})
+		if patches && len(p.diffs) != len(p.files) {
+			t.Errorf("%s has %d diffs for %d files", p.subject, len(p.diffs), len(p.files))
 		}
+		if !patches && p.diffs != nil {
+			t.Errorf("%s has diffs without patches", p.subject)
+		}
+	}
+	if !reflect.DeepEqual(seen, want) {
+		t.Errorf("preview with patches %v:\n%+v\npushed:\n%+v", patches, seen, want)
 	}
 }
 

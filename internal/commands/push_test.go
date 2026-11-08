@@ -198,7 +198,7 @@ func handIndex(t *testing.T, repo, description, message, date string) {
 	commitAt(t, repo, message, date)
 }
 
-// foldCases holds the review queues that TestFold and TestPreviewMatchesPush share.
+// foldCases holds the review queues of TestFold. Each case checks the push, and both previews must match it.
 func foldCases() []foldCase {
 	const (
 		fact     = "Read when you test a fact."
@@ -547,7 +547,23 @@ func TestFold(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			home, repo, remote := newMemory(t)
 			check := c.queue(t, home, repo, remote)
+			previews := map[bool][]previewed{}
+			for _, patches := range []bool{false, true} {
+				got, err := preview(repo, patches)
+				if err != nil {
+					t.Fatalf("preview with patches %v: %v", patches, err)
+				}
+				if c.preview != nil {
+					c.preview(t, repo, got)
+				}
+				previews[patches] = got
+			}
+			base, _ := revParse(repo, acceptedRef)
 			check(t, pushYes(t, home))
+			want := pushedCommits(t, remote, base)
+			for _, patches := range []bool{false, true} {
+				matchesPush(t, previews[patches], patches, want)
+			}
 		})
 	}
 
