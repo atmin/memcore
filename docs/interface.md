@@ -36,6 +36,19 @@ The window has three views:
 - **Browse** shows each level, its index and its documents. Mermaid blocks render as diagrams, with pele.
 - **Search** finds text in every document, with `git grep`. It keeps no index on disk.
 
+Review and Browse show the folders of the memory repo in a tree beside the documents:
+- In Browse, every folder starts closed, and the window remembers the folders that you open. The folders above the open document open by themselves, and the tree scrolls to it.
+- In Review, the tree marks each file that the queue changes with its status across the queue. The folders above a changed file start open. "Changed only" limits the tree to the changed files.
+- In Review, a click on a changed file marks the entries that change it, and scrolls to the first. A click on another file shows that document in place of the queue, until "Back to the queue".
+
+The status of a changed file is one of these:
+- `A`: the queue adds the file.
+- `M`: the queue changes the file.
+- `D`: the queue removes the file.
+- `AD`: the queue adds the file and then removes it.
+
+The finder opens any file of the memory repo by a fuzzy match of its path. Cmd+P on macOS, Ctrl+P elsewhere, or "Search files by name" in the bar opens it, from every view. The arrows move through the files, and Enter opens one in Browse.
+
 In Review, each file of an entry has three views of its change:
 - **Changes**: the word diff of the text, which a changed markdown file shows first. When the word diff shows no change, as for a change of whitespace only, the file shows Patch first.
 - **Patch**: the unified diff, which keeps changes of whitespace. Any other changed file shows it first.

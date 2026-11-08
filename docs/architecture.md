@@ -8,7 +8,7 @@ memcore is one Go executable. It runs the installed git, so it ships no git of i
 2. **Store.** The memory repo, its indexes and the transcripts branch. memcore changes the store only through the installed git.
 3. **Readers.** One adapter, for the JSONL of Claude Code. It converts that format into one trimmed conversation format. The readers also read the auto-memory of Claude Code, and find the directory behind each of its project folders.
 4. **Guards.** Redaction, `verify`, the write lock, the confirmation behind `push`, and the check of the files that an agent pushes.
-5. **UI.** The server and the page of `memcore ui`. It imports nothing of the commands: they give it the data, and run its actions. The page embeds three vendored files, marked, DOMPurify and pele, pinned by SHA-256.
+5. **UI.** The server and the page of `memcore ui`. It imports nothing of the commands: they give it the data, and run its actions. The page embeds six vendored files, pinned by SHA-256: marked, DOMPurify, pele, Preact, the hooks of Preact and htm. Preact renders Review, Browse and the finder, with no build step.
 
 Redaction stays local, with patterns and entropy.
 
