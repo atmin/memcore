@@ -23,6 +23,7 @@ Read [README.md](README.md) first. It indexes the design docs and the skills.
 - A test that needs git runs the installed git in a temporary repo from `t.TempDir()`.
 - No test calls a real agent. Tests replace the headless agent with a fake.
 - Checks with a real agent live in `scripts/`, and run by hand. `go test` never runs them.
+- The tests of `internal/commands` set the process environment, so `t.Parallel()` cannot run them. `TestMain` runs each top-level test in its own process instead, `MEMCORE_TEST_PROCS` at a time. `MEMCORE_TEST_PROCS=1` runs them all in one process.
 
 ## Verification
 
