@@ -294,18 +294,30 @@ type uiState struct {
 func (s uiState) url() string { return fmt.Sprintf("http://127.0.0.1:%d/#%s", s.Port, s.Token) }
 
 // runUI opens a window on the server of the window, and starts that server when none runs. Only the person
-// runs it. With --serve, it is that server: it serves until the last window closes.
+// runs it. With --serve, it is that server: it serves until the last window closes. --install and --uninstall
+// write and remove the application of the window, and need no memory repo.
 func runUI(env Env, args []string) error {
 	flags := flag.NewFlagSet("ui", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	serve := flags.Bool("serve", false, "run the server of the window")
 	nonce := flags.String("nonce", "", "the nonce of the memcore ui that starts the server")
+	install := flags.Bool("install", false, "write the application of the window")
+	uninstall := flags.Bool("uninstall", false, "remove the application of the window")
 	pos, err := parseInterleaved(flags, args)
 	if err != nil || len(pos) != 0 {
-		return usageErr("usage: memcore ui")
+		return usageErr("usage: memcore ui [--install | --uninstall]")
+	}
+	if (*install || *uninstall) && (len(args) != 1) {
+		return usageErr("usage: memcore ui [--install | --uninstall]")
 	}
 	if err := guards.Agent(); err != nil {
 		return err
+	}
+	if *install {
+		return installApp(env)
+	}
+	if *uninstall {
+		return uninstallApp(env)
 	}
 	repo, err := openRepo()
 	if err != nil {

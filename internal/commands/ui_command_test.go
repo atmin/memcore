@@ -37,7 +37,7 @@ func TestUIRefusesAgent(t *testing.T) {
 	home, _, _ := newMemory(t)
 	calls := recordStarts(t)
 	t.Setenv("CLAUDECODE", "1")
-	for _, args := range [][]string{{"ui"}, {"ui", "--serve"}} {
+	for _, args := range [][]string{{"ui"}, {"ui", "--serve"}, {"ui", "--install"}, {"ui", "--uninstall"}} {
 		if _, err := run(t, home, "", args...); err == nil || !strings.Contains(err.Error(), "CLAUDECODE") {
 			t.Errorf("%q by an agent: %v, want a refusal", args, err)
 		}

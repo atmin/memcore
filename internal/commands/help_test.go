@@ -92,6 +92,14 @@ is at that commit, so it pushes only the queue that the person reviewed.
 		}
 	})
 
+	t.Run("ui names the application", func(t *testing.T) {
+		out, err := run(t, home, "", "help", "ui")
+		if err != nil || !strings.HasPrefix(out, "memcore ui\nmemcore ui --install | --uninstall\n") ||
+			!strings.Contains(out, "--uninstall removes the application") || !strings.Contains(out, "work before init") {
+			t.Errorf("help ui: %v, output\n%s", err, out)
+		}
+	})
+
 	t.Run("input errors point to the help", func(t *testing.T) {
 		for _, c := range []struct {
 			dir, stdin string
