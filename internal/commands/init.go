@@ -48,13 +48,16 @@ func runInit(env Env, args []string) error {
 		if err := guards.Agent(); err != nil {
 			return err
 		}
-		repo, err := openRepo()
+		repo, err := memoryRepo()
 		if err != nil {
 			return err
 		}
 		claude, err := claudeDir()
 		if err != nil {
 			return err
+		}
+		if _, err := os.Stat(filepath.Join(repo, ".git")); errors.Is(err, fs.ErrNotExist) {
+			return undoWithoutRepo(env, repo, filepath.Join(claude, "settings.json"))
 		}
 		unlock, err := store.LockFile(repo, "init.lock")
 		if err != nil {

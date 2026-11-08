@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -593,7 +594,10 @@ func undoSettings(env Env, repo, settings string) error {
 		if len(conflicts) == 0 {
 			fmt.Fprintf(env.Out, "%s holds nothing that init added.\n", tilde(settings))
 		}
-		return writeInitRecord(repo, left)
+		if err := writeInitRecord(repo, left); err != nil {
+			return err
+		}
+		return keptHooks(settings, tree)
 	}
 	diff, err := settingsDiff(old, updated, tilde(settings))
 	if err != nil {
@@ -609,7 +613,8 @@ func undoSettings(env Env, repo, settings string) error {
 	}
 	if !ok {
 		fmt.Fprintf(env.Out, "%s stays as it was.\n", tilde(settings))
-		return nil
+		// The uninstall script stops on this error, so no hook calls a memcore that it removed.
+		return inputErrf("you answered no, so %s keeps what init added", tilde(settings))
 	}
 	// The person approved the diff of the file as it was. A change meanwhile would be lost, so it stops the write.
 	if now, err := os.ReadFile(settings); err != nil || !bytes.Equal(now, old) {
@@ -619,7 +624,73 @@ func undoSettings(env Env, repo, settings string) error {
 		return err
 	}
 	fmt.Fprintf(env.Out, "Removed what init added to %s.\n", tilde(settings))
-	return writeInitRecord(repo, left)
+	if err := writeInitRecord(repo, left); err != nil {
+		return err
+	}
+	return keptHooks(settings, tree)
+}
+
+// keptHooks fails when the settings still run memcore in a hook, such as a hook that changed since init.
+// Without memcore, such a hook fails in every session.
+func keptHooks(settings string, tree *jsonNode) error {
+	if events := memcoreHooks(tree); len(events) > 0 {
+		return inputErrf("%s still runs memcore in the hooks of %s: remove them by hand", tilde(settings), strings.Join(events, ", "))
+	}
+	return nil
+}
+
+// memcoreHooks returns the events of the settings with a hook that runs memcore, with any command.
+func memcoreHooks(tree *jsonNode) []string {
+	hooks := tree.get("hooks")
+	if hooks == nil || hooks.kind != '{' {
+		return nil
+	}
+	var events []string
+	for i, groups := range hooks.items {
+		if groups.kind == '[' && slices.ContainsFunc(groups.items, runsAnyHook) {
+			events = append(events, hooks.keys[i])
+		}
+	}
+	return events
+}
+
+// runsMemcore matches a command that runs an executable named memcore, by any path, quoted or not, with
+// any command of memcore after it.
+var runsMemcore = regexp.MustCompile(`(^|[\s/'"])memcore['"]?(\s|$|[;&|)])`)
+
+// runsAnyHook reports whether a matcher group runs memcore, with any command.
+func runsAnyHook(g *jsonNode) bool {
+	if g.kind != '{' {
+		return false
+	}
+	hs := g.get("hooks")
+	if hs == nil {
+		return false
+	}
+	for _, h := range hs.items {
+		if c := h.get("command"); h.kind == '{' && c != nil && runsMemcore.MatchString(c.text) {
+			return true
+		}
+	}
+	return false
+}
+
+// undoWithoutRepo is init --undo when the memory repo does not exist: init changed nothing that it recorded,
+// but the settings may still run memcore in a hook.
+func undoWithoutRepo(env Env, repo, settings string) error {
+	b, err := os.ReadFile(settings)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read the settings %s: %w", settings, err)
+	}
+	tree, err := parseSettings(b)
+	if err != nil {
+		return err
+	}
+	if err := keptHooks(settings, tree); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Out, "%s does not exist, so init changed no settings to undo.\n", tilde(repo))
+	return nil
 }
 
 // parseValueJSON reads one JSON value of the record, such as the value of a setting before init.

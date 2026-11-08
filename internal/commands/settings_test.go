@@ -328,28 +328,29 @@ func TestUndoSettings(t *testing.T) {
 		want      []string                            // what the settings hold after the undo
 		wantNot   []string
 		conflicts []string
+		keptHook  string // the event of a hook of memcore that stays, so the undo fails
 	}{
-		{"a plain undo restores the original", nil, nil, []string{"hook", "memcore", "autoMemoryEnabled"}, nil},
+		{"a plain undo restores the original", nil, nil, []string{"hook", "memcore", "autoMemoryEnabled"}, nil, ""},
 		{"a setting added after init stays", func(t *testing.T, s string) {
 			replaceT(t, s, `"theme": "dark",`, `"theme": "dark",`+"\n  \"model\": \"opus\",")
-		}, []string{`"model": "opus"`}, []string{"hook session-start", "Bash(memcore drop *)"}, nil},
+		}, []string{`"model": "opus"`}, []string{"hook session-start", "Bash(memcore drop *)"}, nil, ""},
 		{"a changed hook and auto-memory turned back on stay", func(t *testing.T, s string) {
 			replaceT(t, s, "hook session-start\"", "hook session-start --quiet\"")
 			replaceT(t, s, `"autoMemoryEnabled": false`, `"autoMemoryEnabled": true`)
 		}, []string{"hook session-start --quiet", `"autoMemoryEnabled": true`}, []string{"hook prompt", "hook session-end"},
-			[]string{"SessionStart", "autoMemoryEnabled"}},
+			[]string{"SessionStart", "autoMemoryEnabled"}, "SessionStart"},
 		{"an addition that you removed is skipped", func(t *testing.T, s string) {
 			replaceT(t, s, `"Bash(memcore drop *)",`, ``)
-		}, nil, []string{"memcore"}, nil},
+		}, nil, []string{"memcore"}, nil, ""},
 		{"a hook with a new path is a conflict", func(t *testing.T, s string) {
 			replaceT(t, s, "'"+exe+"' hook session-start", "/usr/local/bin/memcore hook session-start")
-		}, []string{"/usr/local/bin/memcore hook session-start"}, []string{"hook prompt"}, []string{"SessionStart"}},
+		}, []string{"/usr/local/bin/memcore hook session-start"}, []string{"hook prompt"}, []string{"SessionStart"}, "SessionStart"},
 		{"an edited rule is a conflict", func(t *testing.T, s string) {
 			replaceT(t, s, `"Bash(memcore drop *)"`, `"Bash(memcore drop:*)"`)
-		}, []string{"Bash(memcore drop:*)"}, []string{"Bash(memcore recover *)"}, []string{"Bash(memcore drop *)"}},
+		}, []string{"Bash(memcore drop:*)"}, []string{"Bash(memcore recover *)"}, []string{"Bash(memcore drop *)"}, ""},
 		{"a changed matcher is a conflict", func(t *testing.T, s string) {
 			replaceT(t, s, `"matcher": "Bash|Read|Grep"`, `"matcher": "Bash"`)
-		}, []string{`"matcher": "Bash"`, "hook tool"}, []string{"hook prompt", "PostToolUseFailure", "Bash|Read|Grep"}, []string{"the PostToolUse hook"}},
+		}, []string{`"matcher": "Bash"`, "hook tool"}, []string{"hook prompt", "PostToolUseFailure", "Bash|Read|Grep"}, []string{"the PostToolUse hook"}, "PostToolUse"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,11 +368,19 @@ func TestUndoSettings(t *testing.T) {
 			if tt.after != nil {
 				tt.after(t, settings)
 			}
+			// undone checks the error of an undo: a hook of memcore that stays fails it.
+			undone := func(err error, out string) {
+				t.Helper()
+				if tt.keptHook == "" && err != nil {
+					t.Fatalf("undo: %v\n%s", err, out)
+				}
+				if want := "still runs memcore in the hooks of " + tt.keptHook + ":"; tt.keptHook != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+					t.Fatalf("undo: %v, want %q\n%s", err, want, out)
+				}
+			}
 			var out strings.Builder
 			asked = ""
-			if err := undoSettings(Env{Dir: home, Out: &out, Confirm: answer(true, &asked)}, repo, settings); err != nil {
-				t.Fatalf("undo: %v\n%s", err, out.String())
-			}
+			undone(undoSettings(Env{Dir: home, Out: &out, Confirm: answer(true, &asked)}, repo, settings), out.String())
 			got := readT(t, settings)
 			if tt.after == nil && got != original {
 				t.Errorf("settings =\n%s\nwant the original", got)
@@ -397,9 +406,7 @@ func TestUndoSettings(t *testing.T) {
 			// A second undo finds only the conflicts, and changes nothing.
 			before := readT(t, settings)
 			out.Reset()
-			if err := undoSettings(Env{Dir: home, Out: &out, Confirm: answer(true, &asked)}, repo, settings); err != nil {
-				t.Fatal(err)
-			}
+			undone(undoSettings(Env{Dir: home, Out: &out, Confirm: answer(true, &asked)}, repo, settings), out.String())
 			if readT(t, settings) != before {
 				t.Error("a second undo changed the settings")
 			}
@@ -522,4 +529,33 @@ func TestUndoSettingsSafety(t *testing.T) {
 			t.Errorf("settings =\n%s\nwant your change, and the hooks still there", got)
 		}
 	})
+}
+
+func TestMemcoreHooks(t *testing.T) {
+	hook := func(command string) string {
+		b, _ := json.Marshal(command)
+		return `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": ` + string(b) + `}]}]}}`
+	}
+	for _, tt := range []struct {
+		command string
+		runs    bool
+	}{
+		{"'/home/a/.local/bin/memcore' hook session-start", true},
+		{"memcore orient", true},
+		{"/usr/local/bin/memcore\thook tool", true},
+		{`"/opt/my tools/memcore" snapshot`, true},
+		{"memcore", true},
+		{"cd ~/dev && memcore inbox; true", true},
+		{"echo hello", false},
+		{"memcore-notes sync", false},
+		{"cat ~/notes/memcore.md", false},
+	} {
+		tree, err := parseSettings([]byte(hook(tt.command)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(memcoreHooks(tree)) == 1; got != tt.runs {
+			t.Errorf("memcoreHooks finds %q: %v, want %v", tt.command, got, tt.runs)
+		}
+	}
 }

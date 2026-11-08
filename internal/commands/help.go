@@ -201,6 +201,8 @@ the diff and asks. It ends with the report of inbox. A second run adds only what
 
 --dry-run builds the memory repo at MEMCORE_REPO, and prints the change of the settings
 without making it. An agent may run it. --undo removes what init added to the settings.
+It fails when you answer no to its diff, and while a hook in the settings still runs memcore.
+Without a memory repo, it has nothing to undo.
 For example:
 
   memcore init git@example.com:you/memory.git

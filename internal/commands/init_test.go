@@ -307,6 +307,64 @@ func TestInitClaude(t *testing.T) {
 		}
 	})
 
+	t.Run("--undo without a memory repo", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		before := readT(t, settings)
+		out, err := run(t, home, "", "init", "--undo")
+		if err != nil || !strings.Contains(out, "~/memory does not exist, so init changed no settings to undo.") {
+			t.Errorf("init --undo: %v\n%s", err, out)
+		}
+		if readT(t, settings) != before {
+			t.Error("init --undo changed the settings")
+		}
+	})
+
+	t.Run("--undo without a memory repo, with a hook of memcore", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		hooks := "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"'/opt/memcore' hook session-start\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+		writeT(t, filepath.Dir(settings), "settings.json", hooks)
+		_, err := run(t, home, "", "init", "--undo")
+		if err == nil || !strings.Contains(err.Error(), "~/.claude/settings.json still runs memcore in the hooks of SessionStart: remove them by hand") {
+			t.Errorf("init --undo: %v, want the hook named", err)
+		}
+		if readT(t, settings) != hooks {
+			t.Error("init --undo changed the settings")
+		}
+	})
+
+	t.Run("--undo answered no", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		fakeMemcore(t)
+		if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t)); err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		before := readT(t, settings)
+		out, err := runWith(t, Env{Dir: home, Confirm: answer(false, new(string))}, "init", "--undo")
+		if err == nil || !strings.Contains(err.Error(), "you answered no, so ~/.claude/settings.json keeps what init added") {
+			t.Errorf("init --undo answered no: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "stays as it was") || readT(t, settings) != before {
+			t.Errorf("init --undo answered no changed the settings:\n%s", out)
+		}
+	})
+
+	t.Run("--undo leaves a changed hook", func(t *testing.T) {
+		home, settings := claudeHome(t)
+		exe := fakeMemcore(t)
+		if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", bareRemote(t)); err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		replaceT(t, settings, "' hook session-start\"", "' hook session-start --changed\"")
+		out, err := runWith(t, Env{Dir: home, Confirm: answer(true, new(string))}, "init", "--undo")
+		if err == nil || !strings.Contains(err.Error(), "still runs memcore in the hooks of SessionStart") {
+			t.Errorf("init --undo: %v, want the changed hook named\n%s", err, out)
+		}
+		got := readT(t, settings)
+		if !strings.Contains(got, "'"+exe+"' hook session-start --changed") || strings.Contains(got, "hook session-end") {
+			t.Errorf("settings =\n%s\nwant only the changed hook of memcore", got)
+		}
+	})
+
 	t.Run("a fresh init denies drop and recover, and not push", func(t *testing.T) {
 		home, settings := claudeHome(t)
 		fakeMemcore(t)
