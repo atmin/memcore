@@ -35,7 +35,16 @@ func syncAccepted(repo string) error {
 		return nil
 	}
 	dir := acceptedDir(repo)
-	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, fs.ErrNotExist) {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	fresh := errors.Is(err, fs.ErrNotExist)
+	if !fresh && !belongs(repo, dir) {
+		// A copy of the memory repo holds the checkout of the original, and moving it would move the original's.
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("remove the checkout of another repo: %w", err)
+		}
+		fresh = true
+	}
+	if fresh {
 		store.Git(repo, "worktree", "prune")
 		if _, err := store.Git(repo, "worktree", "add", "-q", "--detach", "-f", dir, accepted); err != nil {
 			return fmt.Errorf("check out the accepted history: %w", err)
@@ -98,6 +107,25 @@ func syncAccepted(repo string) error {
 		}
 	}
 	return nil
+}
+
+// belongs reports whether the checkout in dir is a worktree of repo. A checkout copied from another repo
+// keeps a .git file that names the worktree of that repo, and a broken one names nothing.
+func belongs(repo, dir string) bool {
+	common := func(d string) (string, bool) {
+		out, err := store.Git(d, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return "", false
+		}
+		p, err := filepath.EvalSymlinks(strings.TrimSpace(out))
+		return p, err == nil
+	}
+	want, ok := common(repo)
+	if !ok {
+		return true // the repo itself is broken, and the checkout reports it
+	}
+	got, ok := common(dir)
+	return ok && got == want
 }
 
 // ours reports whether a link target points into the accepted checkout of the repo, after any .. resolves.

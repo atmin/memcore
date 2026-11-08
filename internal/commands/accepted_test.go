@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -239,5 +240,62 @@ func TestRecoverBeforeLinks(t *testing.T) {
 	}
 	if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "origin/main")); got != first {
 		t.Errorf("origin/main = %s, want %s", got, first)
+	}
+}
+
+// A copy of the memory repo, made with cp, keeps the .git file of its accepted checkout. That file names the
+// worktree of the original. syncAccepted in the copy must never move the checkout of the original.
+func TestAcceptedCheckoutOfACopy(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	_, repo, _ := newMemory(t)
+	gitT(t, repo, "update-ref", acceptedRef, "HEAD")
+	if err := syncAccepted(repo); err != nil {
+		t.Fatalf("sync the original: %v", err)
+	}
+	original := strings.TrimSpace(gitT(t, acceptedDir(repo), "rev-parse", "HEAD"))
+	writeT(t, repo, "dev/notes/unpushed.md", "---\nname: unpushed\ndescription: \"Read when you test.\"\n---\n")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: an unpushed note")
+
+	copyOf := func(t *testing.T) string {
+		t.Helper()
+		dst := filepath.Join(t.TempDir(), "copy")
+		if out, err := exec.Command("cp", "-R", repo, dst).CombinedOutput(); err != nil {
+			t.Fatalf("cp: %v\n%s", err, out)
+		}
+		return dst
+	}
+	cases := []struct {
+		name   string
+		commit func(t *testing.T, cp string) string
+	}{
+		{"a commit that only the copy has", func(t *testing.T, cp string) string {
+			writeT(t, cp, "dev/notes/copied.md", "---\nname: copied\ndescription: \"Read when you test.\"\n---\n")
+			gitT(t, cp, "add", "-A")
+			gitT(t, cp, "commit", "-q", "-m", "test: a note in the copy")
+			return strings.TrimSpace(gitT(t, cp, "rev-parse", "HEAD"))
+		}},
+		{"a commit that the original has too", func(t *testing.T, cp string) string {
+			return strings.TrimSpace(gitT(t, cp, "rev-parse", "HEAD"))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cp := copyOf(t)
+			want := c.commit(t, cp)
+			gitT(t, cp, "update-ref", acceptedRef, want)
+			if err := syncAccepted(cp); err != nil {
+				t.Fatalf("sync the copy: %v", err)
+			}
+			if got := strings.TrimSpace(gitT(t, acceptedDir(cp), "rev-parse", "HEAD")); got != want {
+				t.Errorf("the checkout of the copy is at %s, want %s", got, want)
+			}
+			if got := strings.TrimSpace(gitT(t, acceptedDir(repo), "rev-parse", "HEAD")); got != original {
+				t.Errorf("the checkout of the original moved to %s, want %s", got, original)
+			}
+			if _, err := os.Stat(filepath.Join(acceptedDir(cp), "dev", "notes", "unpushed.md")); err != nil {
+				t.Errorf("the checkout of the copy lacks the files of %s: %v", want, err)
+			}
+		})
 	}
 }

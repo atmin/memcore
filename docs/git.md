@@ -20,7 +20,7 @@ Agents load unreviewed memories at once, and `orient` labels them as unreviewed.
 
 Hostile text can make an agent plant a memory or a skill. Such text is a web page, an issue or an email. Later agents then follow that memory or skill.
 
-Skills and scripts are code, so they run only after you push them. memcore keeps a checkout of the accepted history under its local state. It moves the checkout forward at every push and fetch. It serves skills and links scripts from that checkout. So a revision in the review queue changes nothing that runs. A helper beside a script is the accepted helper.
+Skills and scripts are code, so they run only after you push them. memcore keeps a checkout of the accepted history under its local state. A copy of the memory repo gets a checkout of its own, and never moves the checkout of the original. memcore moves the checkout forward at every push and fetch. It serves skills and links scripts from that checkout. So a revision in the review queue changes nothing that runs. A helper beside a script is the accepted helper.
 
 ## Only you
 
