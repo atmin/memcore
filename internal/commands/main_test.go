@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 // TestMain isolates git from the configuration and the agent of the machine.
 func TestMain(m *testing.M) {
+	flag.Parse()
 	for k, v := range map[string]string{
 		"GIT_CONFIG_GLOBAL":   os.DevNull,
 		"GIT_CONFIG_NOSYSTEM": "1",
@@ -35,7 +37,11 @@ func TestMain(m *testing.M) {
 	os.Setenv("HOME", empty)
 	// No test starts a process in the background. recordStarts records the starts of one test.
 	startBackground = func(string, ...string) error { return nil }
-	code := m.Run()
+	ran, code := runInProcs()
+	if !ran {
+		code = m.Run()
+		recordControls()
+	}
 	os.RemoveAll(empty)
 	os.Exit(code)
 }
