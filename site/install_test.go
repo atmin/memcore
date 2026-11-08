@@ -54,12 +54,21 @@ func sumLine(name, body string) string {
 	return fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(body)), name)
 }
 
-// fullRelease returns the assets of all four targets, and their SHA256SUMS.
+// assetNames are the executables of a release: one build for each macOS processor, and two for each Linux processor.
+var assetNames = []string{
+	"memcore-darwin-arm64", "memcore-darwin-amd64",
+	"memcore-linux-arm64-glibc", "memcore-linux-arm64-static",
+	"memcore-linux-amd64-glibc", "memcore-linux-amd64-static",
+}
+
+// loaders are the glibc loaders that pick the glibc build, by processor.
+var loaders = map[string]string{"arm64": "/lib/ld-linux-aarch64.so.1", "amd64": "/lib64/ld-linux-x86-64.so.2"}
+
+// fullRelease returns the assets of all targets, and their SHA256SUMS.
 func fullRelease() (map[string]string, string) {
 	assets := map[string]string{}
 	var sums strings.Builder
-	for _, target := range []string{"darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64"} {
-		name := "memcore-" + target
+	for _, name := range assetNames {
 		assets[name] = fakeMemcore
 		sums.WriteString(sumLine(name, fakeMemcore))
 	}
@@ -87,11 +96,12 @@ func script(t *testing.T) []byte {
 	return b
 }
 
-// install pipes the script into the shell, with only the environment that the test sets.
-func install(shell string, text []byte, home, url, path string) (string, error) {
+// install pipes the script into the shell, with only the environment that the test sets. The loaders of
+// the glibc build are looked up under root, so the test decides which Linux build the script picks.
+func install(shell string, text []byte, home, url, path, root string) (string, error) {
 	cmd := exec.Command(shell)
 	cmd.Stdin = bytes.NewReader(text)
-	cmd.Env = []string{"HOME=" + home, "MEMCORE_RELEASE_URL=" + url, "PATH=" + path}
+	cmd.Env = []string{"HOME=" + home, "MEMCORE_RELEASE_URL=" + url, "PATH=" + path, "MEMCORE_INSTALL_ROOT=" + root}
 	if tmp := os.Getenv("TMPDIR"); tmp != "" {
 		cmd.Env = append(cmd.Env, "TMPDIR="+tmp)
 	}
@@ -110,18 +120,34 @@ func staged(t *testing.T, bin string) []string {
 }
 
 func TestInstall(t *testing.T) {
-	tests := []struct{ system, processor, asset string }{
-		{"Darwin", "arm64", "memcore-darwin-arm64"},
-		{"Darwin", "x86_64", "memcore-darwin-amd64"},
-		{"Linux", "aarch64", "memcore-linux-arm64"},
-		{"Linux", "x86_64", "memcore-linux-amd64"},
+	tests := []struct {
+		system, processor string
+		loader            string // the loader that exists under the root, if any
+		asset             string
+	}{
+		{"Darwin", "arm64", "", "memcore-darwin-arm64"},
+		{"Darwin", "x86_64", "", "memcore-darwin-amd64"},
+		{"Linux", "aarch64", loaders["arm64"], "memcore-linux-arm64-glibc"},
+		{"Linux", "aarch64", "", "memcore-linux-arm64-static"},
+		{"Linux", "x86_64", loaders["amd64"], "memcore-linux-amd64-glibc"},
+		{"Linux", "x86_64", "", "memcore-linux-amd64-static"},
+		{"Linux", "x86_64", loaders["arm64"], "memcore-linux-amd64-static"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.system+" "+tt.processor, func(t *testing.T) {
+		t.Run(tt.system+" "+tt.processor+" "+tt.loader, func(t *testing.T) {
 			t.Parallel()
+			root := t.TempDir()
+			if tt.loader != "" {
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, tt.loader)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, tt.loader), nil, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
 			// Only the asset of the target holds a working executable, so a wrong choice fails the version.
 			assets, sums := map[string]string{}, ""
-			for _, name := range []string{"memcore-darwin-arm64", "memcore-darwin-amd64", "memcore-linux-arm64", "memcore-linux-amd64"} {
+			for _, name := range assetNames {
 				body := "#!/bin/sh\nexit 3\n"
 				if name == tt.asset {
 					body = fakeMemcore
@@ -131,7 +157,7 @@ func TestInstall(t *testing.T) {
 			}
 			r := serve(t, assets, sums)
 			home := t.TempDir()
-			out, err := install("sh", script(t), home, r.url, fakeUname(t, tt.system, tt.processor)+":"+os.Getenv("PATH"))
+			out, err := install("sh", script(t), home, r.url, fakeUname(t, tt.system, tt.processor)+":"+os.Getenv("PATH"), root)
 			if err != nil {
 				t.Fatalf("install: %v\n%s", err, out)
 			}
@@ -161,12 +187,12 @@ func TestInstallRefuses(t *testing.T) {
 		sums                    string
 		folder                  bool // ~/.local/bin/memcore is a folder
 	}{
-		{"a wrong digest", "Linux", "x86_64", assets, sumLine("memcore-linux-amd64", "another executable"), false},
+		{"a wrong digest", "Linux", "x86_64", assets, sumLine("memcore-linux-amd64-static", "another executable"), false},
 		{"a target missing from SHA256SUMS", "Linux", "x86_64", assets, sumLine("memcore-darwin-arm64", fakeMemcore), false},
 		{"a 404 for the asset", "Linux", "x86_64", map[string]string{}, sums, false},
 		{"an unsupported system", "FreeBSD", "amd64", assets, sums, false},
 		{"an unsupported processor", "Linux", "i686", assets, sums, false},
-		{"an executable that does not run", "Linux", "x86_64", map[string]string{"memcore-linux-amd64": "#!/bin/sh\nexit 3\n"}, sumLine("memcore-linux-amd64", "#!/bin/sh\nexit 3\n"), false},
+		{"an executable that does not run", "Linux", "x86_64", map[string]string{"memcore-linux-amd64-static": "#!/bin/sh\nexit 3\n"}, sumLine("memcore-linux-amd64-static", "#!/bin/sh\nexit 3\n"), false},
 		{"memcore is a folder", "Linux", "x86_64", assets, sums, true},
 	}
 	for _, tt := range tests {
@@ -189,7 +215,7 @@ func TestInstallRefuses(t *testing.T) {
 			if err := os.WriteFile(existing, []byte(old), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			out, err := install("sh", script(t), home, r.url, fakeUname(t, tt.system, tt.processor)+":"+os.Getenv("PATH"))
+			out, err := install("sh", script(t), home, r.url, fakeUname(t, tt.system, tt.processor)+":"+os.Getenv("PATH"), t.TempDir())
 			if err == nil {
 				t.Fatalf("install succeeded:\n%s", out)
 			}
@@ -238,7 +264,7 @@ func TestInstallPrefixes(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				out, _ := install(j.shell, text[:j.n], home, r.url, path)
+				out, _ := install(j.shell, text[:j.n], home, r.url, path, home)
 				if strings.Contains(out, "memcore v0.0.0-test") {
 					mu.Lock()
 					ran = append(ran, fmt.Sprintf("%s at %d bytes", j.shell, j.n))
@@ -277,7 +303,7 @@ func TestInstallPath(t *testing.T) {
 			if onPath {
 				path = filepath.Join(home, ".local", "bin") + ":" + path
 			}
-			out, err := install("sh", script(t), home, r.url, path)
+			out, err := install("sh", script(t), home, r.url, path, t.TempDir())
 			if err != nil {
 				t.Fatalf("install: %v\n%s", err, out)
 			}

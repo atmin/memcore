@@ -30,6 +30,17 @@ target() {
 	printf '%s-%s\n' "$system" "$processor"
 }
 
+# linux_build prints glibc when the loader of the glibc build exists for the processor, and static otherwise.
+# The glibc build is for the native window, which will need that loader. The static build runs on any Linux.
+linux_build() {
+	case "$1" in
+	amd64) loader=/lib64/ld-linux-x86-64.so.2 ;;
+	arm64) loader=/lib/ld-linux-aarch64.so.1 ;;
+	*) echo static; return ;;
+	esac
+	if [ -e "${MEMCORE_INSTALL_ROOT:-}$loader" ]; then echo glibc; else echo static; fi
+}
+
 # sha256 prints the SHA-256 of a file.
 sha256() {
 	if command -v sha256sum >/dev/null 2>&1; then
@@ -44,6 +55,9 @@ sha256() {
 main() {
 	url=${MEMCORE_RELEASE_URL:-https://github.com/atmin/memcore/releases/latest/download}
 	asset=memcore-$(target)
+	case "$asset" in
+	memcore-linux-*) asset=$asset-$(linux_build "${asset##*-}") ;;
+	esac
 	tmp=$(mktemp -d)
 	stage=
 	trap 'rm -rf "$tmp"; if [ -n "$stage" ]; then rm -f "$stage"; fi' EXIT

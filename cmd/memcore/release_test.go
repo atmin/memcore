@@ -39,6 +39,7 @@ func TestReleaseWorkflow(t *testing.T) {
 		"tags: ['v*']",
 		"CGO_ENABLED=0",
 		"darwin/arm64", "darwin/amd64", "linux/arm64", "linux/amd64",
+		"-tags nonative", "-glibc", "-static",
 		"SHA256SUMS",
 		versionFlag + "${GITHUB_REF_NAME}",
 		"actions/checkout@", "actions/setup-go@",

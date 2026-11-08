@@ -9,7 +9,7 @@ memcore init git@github.com:you/memory.git
 
 ## The executable
 
-The install script downloads the executable of the latest release for your system and processor into `~/.local/bin`. It supports macOS and Linux, each on arm64 and amd64. It checks the SHA-256 of the download against `SHA256SUMS` of the release, and refuses a download that differs. It needs no `sudo`. Read it before you run it, with `curl -fsSL https://memco.re/install`. To update, run `curl -fsSL https://memco.re/install | sh` again.
+The install script downloads the executable of the latest release for your system and processor into `~/.local/bin`. It supports macOS and Linux, each on arm64 and amd64. On Linux, it installs the glibc build when the system has the glibc loader, and the static build otherwise. It checks the SHA-256 of the download against `SHA256SUMS` of the release, and refuses a download that differs. It needs no `sudo`. Read it before you run it, with `curl -fsSL https://memco.re/install`. To update, run `curl -fsSL https://memco.re/install | sh` again.
 
 You can also build memcore from source with Go 1.27. Clone the memcore repo, and run this command in it:
 
