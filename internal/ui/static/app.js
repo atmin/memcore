@@ -25,7 +25,7 @@
   const notices = document.getElementById("notices");
   const pushButton = document.getElementById("push");
   // queue is the queue that the window shows. head is the newest tip of main that the event stream sent.
-  const state = { queue: null, head: "", selected: 0, collapsed: new Set(), tree: null };
+  const state = { queue: null, head: "", selected: 0, collapsed: new Set(), tree: null, reviewTree: null };
 
   // ---------- Helpers ----------
 
@@ -515,19 +515,19 @@
     const node = useMemo(() => (view === "words" ? wordsView(file.words) : view === "patch" ? patchView(file.patch) : versionView(file)), [view, file]);
     const status =
       file.before === null ? html`<span class="tag new">new</span>` : file.after === null ? html`<span class="tag removed">removed</span>` : null;
-    return html`<div class="file">
+    return html`<div class="file" data-path=${file.path}>
       <div class="file-head"><span class="path">${file.path}</span>${status}<${Seg} label="View of the file" views=${FILE_VIEWS} value=${view} onChange=${setView} /></div>
       <${Raw} node=${node} />
     </div>`;
   }
 
   // Entry shows a commit of the queue, with its files. "Seen" is a mark of this browser only.
-  function Entry({ entry, index, selected, collapsed }) {
+  function Entry({ entry, index, selected, collapsed, touches }) {
     const [seen, setSeenState] = useState(() => isSeen(entry));
     const meta = [];
     if (entry.body) meta.push(entry.body);
     if (entry.fixups.length) meta.push(`${plural(entry.fixups.length, "fixup")} fold${entry.fixups.length === 1 ? "s" : ""} in.`);
-    const cls = ["entry", selected && "selected", seen && "seen", collapsed && "collapsed"].filter(Boolean).join(" ");
+    const cls = ["entry", selected && "selected", seen && "seen", collapsed && "collapsed", touches && "touches"].filter(Boolean).join(" ");
     return html`<section class=${cls} data-index=${index} tabindex="-1" onClick=${() => select(index, false)}>
       <div class="entry-head">
         <span class="sha">${entry.commit ? short(entry.commit) : "new"}</span>
@@ -547,8 +547,103 @@
     </section>`;
   }
 
-  // ReviewView shows the queue that the window holds: the code first, then the documents.
-  function ReviewView({ queue, entries, selected, collapsed }) {
+  // changes returns the status of each file that the queue changes, across the queue: AD when the file is missing
+  // both before the oldest entry that changes it and after the newest, A or D when it is missing at one end only,
+  // and M otherwise. entries come newest first, as the queue lists them.
+  function changes(entries) {
+    const newest = new Map();
+    const oldest = new Map();
+    for (const entry of entries) {
+      for (const f of entry.files) {
+        if (!newest.has(f.path)) newest.set(f.path, f);
+        oldest.set(f.path, f);
+      }
+    }
+    const status = new Map();
+    for (const [path, last] of newest) {
+      const added = oldest.get(path).before === null;
+      const removed = last.after === null;
+      status.set(path, added && removed ? "AD" : added ? "A" : removed ? "D" : "M");
+    }
+    return status;
+  }
+
+  const CHANGED_ONLY_KEY = "memcore-review-changed-only";
+
+  function loadChangedOnly() {
+    try {
+      return localStorage.getItem(CHANGED_ONLY_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function saveChangedOnly(on) {
+    try {
+      if (on) localStorage.setItem(CHANGED_ONLY_KEY, "1");
+      else localStorage.removeItem(CHANGED_ONLY_KEY);
+    } catch (e) {
+      /* the toggle is a convenience only */
+    }
+  }
+
+  // DocView shows a document of main in place of the queue, with a button back to it.
+  function DocView({ path, onBack }) {
+    const [doc, setDoc] = useState(null);
+    const [error, setError] = useState("");
+    const [picked, setView] = useState(null);
+    useEffect(() => {
+      let live = true;
+      api("/api/doc?path=" + encodeURIComponent(path)).then(
+        (d) => live && setDoc(d),
+        (e) => live && setError(e.message)
+      );
+      return () => {
+        live = false;
+      };
+    }, [path]);
+    const back = html`<button type="button" onClick=${onBack}>Back to the queue</button>`;
+    if (error) return html`<article><div class="doc-head"><span class="path">${path}</span>${back}</div><p class="notice bad">${error}</p></article>`;
+    if (!doc) return html`<article><div class="doc-head"><span class="path">${path}</span>${back}</div><p class="muted">Reading the document.</p></article>`;
+    const markdown = isMarkdown(doc.path);
+    const view = picked || (markdown ? "rendered" : "source");
+    return html`<article>
+      <div class="doc-head">
+        <span class="path">${doc.path}</span>
+        ${markdown ? html`<${Seg} label="View of the document" views=${[["rendered", "Rendered"], ["source", "Source"]]} value=${view} onChange=${setView} />` : null}
+        ${back}
+      </div>
+      ${markdown && view === "rendered" ? html`<${Rendered} text=${doc.text} path=${doc.path} />` : html`<${Source} text=${doc.text} line=${0} />`}
+    </article>`;
+  }
+
+  // ReviewView shows the tree of main beside the queue that the window holds: the code first, then the documents.
+  // The tree marks each file that the queue changes. A click on a changed file marks the entries that change it,
+  // and a click on another file shows that document in place of the queue.
+  function ReviewView({ queue, entries, selected, collapsed, tree }) {
+    const status = useMemo(() => changes(queue.entries || []), [queue]);
+    const docs = useMemo(() => {
+      const all = tree ? tree.docs.map((d) => ({ ...d })) : [];
+      const known = new Set(all.map((d) => d.path));
+      for (const path of status.keys()) if (!known.has(path)) all.push({ path, kind: "", unreviewed: true });
+      return all;
+    }, [tree, status]);
+    const [opened, setOpened] = useState(() => new Set([...status.keys()].flatMap(ancestors)));
+    const [changedOnly, setChangedOnly] = useState(loadChangedOnly);
+    const [touched, setTouched] = useState("");
+    const [shown, setShown] = useState(""); // the document that replaces the queue, or ""
+    const scroll = useRef(0); // the scroll of the queue before a document replaced it
+    const [jump, setJump] = useState(0); // counts the clicks on changed files
+    useLayoutEffect(() => {
+      if (!shown) window.scrollTo(0, scroll.current);
+    }, [shown]);
+    // After a click on a changed file, the queue is visible again, so its first entry with the file can scroll.
+    useEffect(() => {
+      if (!jump) return;
+      const first = entries.findIndex((e) => e.files.some((f) => f.path === touched));
+      const file = main.querySelector(`.entry[data-index="${first}"] .file[data-path="${CSS.escape(touched)}"]`);
+      if (file) file.scrollIntoView({ block: "start" });
+    }, [jump]);
     if (!entries.length) {
       return html`${queue.warning ? html`<div class="notice warn">${queue.warning}</div>` : null}<p class="muted">Nothing waits for review.</p>`;
     }
@@ -557,14 +652,54 @@
       : `The review queue holds ${plural(entries.length, "commit")}, each as it is.`;
     if (queue.dropped) header += ` The fold drops ${plural(queue.dropped, "commit")} that leave every document as it was.`;
     const code = entries.filter(isCode).length;
+    const toggle = (folder) => {
+      const next = new Set(opened);
+      if (next.has(folder)) next.delete(folder);
+      else next.add(folder);
+      setOpened(next);
+    };
+    const pick = (d) => {
+      if (status.has(d.path)) {
+        setShown("");
+        setTouched(d.path);
+        setJump((n) => n + 1);
+        const first = entries.findIndex((e) => e.files.some((f) => f.path === d.path));
+        state.collapsed.delete(seenKey(entries[first])); // a collapsed entry hides the file
+        select(first, false);
+        return;
+      }
+      if (!shown) scroll.current = window.scrollY;
+      setShown(d.path);
+      window.scrollTo(0, 0);
+    };
+    const badge = (d) => (status.has(d.path) ? html` <span class=${"badge " + status.get(d.path)}>${status.get(d.path)}</span>` : null);
+    const visible = changedOnly ? docs.filter((d) => status.has(d.path)) : docs;
     return html`${queue.warning ? html`<div class="notice warn">${queue.warning}</div>` : null}
-      <p class="muted">${header}</p>
-      ${entries.map(
-        (entry, i) => html`
-          ${i === 0 && code ? html`<h2 class="group" key="code">Code: skills and scripts</h2>` : null}
-          ${i === code ? html`<h2 class="group" key="docs">Documents</h2>` : null}
-          <${Entry} key=${entry.commit || "new-" + i} entry=${entry} index=${i} selected=${i === selected} collapsed=${collapsed.has(seenKey(entry))} />`
-      )}`;
+      <div class="review">
+        <aside class="review-tree">
+          <label class="muted toggle"><input type="checkbox" checked=${changedOnly}
+            onClick=${(e) => {
+              saveChangedOnly(e.currentTarget.checked);
+              setChangedOnly(e.currentTarget.checked);
+            }} /> Changed only</label>
+          ${tree
+            ? html`<${Tree} docs=${visible} current=${shown || touched} opened=${opened} onToggle=${toggle} badge=${badge} onPick=${pick} />`
+            : html`<p class="muted">The tree of main cannot load.</p>`}
+        </aside>
+        <div>
+          ${shown ? html`<${DocView} key=${shown} path=${shown} onBack=${() => setShown("")} />` : null}
+          <div class="queue" hidden=${!!shown}>
+            <p class="muted">${header}</p>
+            ${entries.map(
+              (entry, i) => html`
+                ${i === 0 && code ? html`<h2 class="group" key="code">Code: skills and scripts</h2>` : null}
+                ${i === code ? html`<h2 class="group" key="docs">Documents</h2>` : null}
+                <${Entry} key=${entry.commit || "new-" + i} entry=${entry} index=${i} selected=${i === selected}
+                  collapsed=${collapsed.has(seenKey(entry))} touches=${!!touched && entry.files.some((f) => f.path === touched)} />`
+            )}
+          </div>
+        </div>
+      </div>`;
   }
 
   // ordered returns the entries with the code first, each group newest first.
@@ -585,12 +720,22 @@
       main.replaceChildren(el("p", { class: "notice bad" }, `The queue cannot load: ${e.message}`));
       return;
     }
+    // The tree comes after the queue. A commit between the two requests moves main, so the tree loads once more.
+    let tree = null;
+    try {
+      tree = await api("/api/tree");
+      if (tree.main !== q.main) tree = await api("/api/tree");
+    } catch (e) {
+      tree = null; // Review shows the queue without its tree
+    }
     state.queue = q;
+    state.reviewTree = tree;
     state.selected = 0;
     state.collapsed = new Set();
     renderReview();
     clearNotices("queue");
-    if (state.head && state.head !== q.main) showChanged(); // a commit landed while the queue loaded
+    // a commit landed while the queue or the tree loaded
+    if ((state.head && state.head !== q.main) || (tree && tree.main !== q.main)) showChanged();
   }
 
   // renderReview renders the queue of the window, with the selection and the collapsed entries of state.
@@ -598,7 +743,9 @@
     const entries = ordered(state.queue.entries || []);
     state.entries = entries;
     state.selected = Math.max(0, Math.min(state.selected, entries.length - 1));
-    mount(html`<${ReviewView} queue=${state.queue} entries=${entries} selected=${state.selected} collapsed=${state.collapsed} />`);
+    mount(
+      html`<${ReviewView} key=${state.queue.main} queue=${state.queue} entries=${entries} selected=${state.selected} collapsed=${state.collapsed} tree=${state.reviewTree} />`
+    );
     pushButton.hidden = !entries.length;
     pushButton.textContent = `Push ${plural(entries.length, "commit")}`;
   }
@@ -846,6 +993,11 @@
       return;
     }
     if (typing || !location.hash.startsWith("#review") || !state.entries) return;
+    // The keys act on the queue only while it is visible, and never from the tree. Enter keeps its own action on
+    // a button or a link.
+    const focus = document.activeElement;
+    if (main.querySelector(".queue[hidden]") || focus.closest(".tree")) return;
+    if (e.key === "Enter" && /^(BUTTON|A)$/.test(focus.tagName)) return;
     const entry = state.entries[state.selected];
     if (e.key === "j") select(state.selected + 1, true);
     else if (e.key === "k") select(state.selected - 1, true);

@@ -87,7 +87,7 @@ h2.group { font-size: 13px; text-transform: none; color: var(--muted); font-weig
 .entry-meta { font-size: 13px; color: var(--muted); margin: 4px 0 8px; white-space: pre-wrap; }
 .entry.collapsed .file { display: none; }
 
-.file { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+.file { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; scroll-margin-top: 64px; }
 .file-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .file-head .path { font: 13px var(--mono); overflow-wrap: anywhere; flex: 1; }
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
@@ -131,6 +131,14 @@ ins { background: var(--add-bg); color: var(--add-fg); text-decoration: none; }
 .tree button.folder:hover { background: var(--surface); }
 .tree button.folder::before { content: ""; flex: none; width: 0; height: 0; border-style: solid; border-width: 4px 0 4px 6px; border-color: transparent transparent transparent currentColor; transition: transform 0.1s; }
 .tree button.folder[aria-expanded="true"]::before { transform: rotate(90deg); }
+.review { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); gap: 24px; }
+.review-tree { position: sticky; top: 64px; align-self: start; max-height: calc(100vh - 80px); overflow-y: auto; }
+.review-tree .toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 8px; }
+.badge { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.badge.A { background: var(--add-bg); color: var(--add-fg); }
+.badge.D, .badge.AD { background: var(--del-bg); color: var(--del-fg); }
+.badge.M { background: var(--warn-bg); color: var(--warn-fg); }
+.entry.touches { border-color: var(--border-strong); box-shadow: inset 3px 0 0 var(--fg); }
 .doc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .doc-head .path { font: 13px var(--mono); flex: 1; overflow-wrap: anywhere; }
 .source { margin: 0; font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -158,5 +166,6 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
   .bar { padding: 10px 16px; gap: 12px; }
   button.find kbd { display: none; }
   main { padding: 12px 16px 48px; }
-  .browse { grid-template-columns: minmax(0, 1fr); }
+  .browse, .review { grid-template-columns: minmax(0, 1fr); }
+  .review-tree { position: static; max-height: none; }
 }
