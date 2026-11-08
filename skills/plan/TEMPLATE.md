@@ -47,11 +47,13 @@ One line each: **<decision>.** <reason>.
 1. **<goal>.** <what changes, and where>.
    Pattern: <the convention that it follows>.
    Evidence: `<path::test_name>`, or the check for a change that a test cannot prove.
+   Step checks: <the command that runs only the tests of the step>
    Commit: `<one line>`
 
 ## Verification
 
-The commands in the conventions of the repo, plus any that this task needs.
+- Step checks: the step checks in the conventions of the repo, with the tests of each step.
+- Full checks: the full checks in the conventions of the repo, plus any that this task needs. Without a split in the conventions, both are the commands of the conventions.
 
 ## Out of scope
 

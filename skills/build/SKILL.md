@@ -15,10 +15,12 @@ The person approved the plan, so build every step without asking. The person rev
 ## Each step
 
 1. Write the evidence of the step first, then the change.
-2. Run the verification of the plan.
+2. Run the step checks of the plan until they pass.
 3. Stage the files of the step by path, and check the staged diff. Commit with the message of the step.
-4. Have the commit reviewed with the [review](../review/SKILL.md) skill.
-5. Answer every finding. Fix it with `git commit --fixup=<step sha>`, or give the reason that it stands. Run the verification again after each fix.
+4. Start the full checks of the plan in the background. Meanwhile, have the commit reviewed with the [review](../review/SKILL.md) skill.
+5. Answer every finding, and a failure of the full checks. Fix it with `git commit --fixup=<step sha>`, or give the reason that it stands. Run the step checks after each fix. The full checks of the next commit cover the fixups.
+
+Start the next step only after the full checks and the review are done. So a failure of the full checks belongs to one step. When the plan names no step checks, the full checks are the step checks too.
 
 ## Stop
 
@@ -31,9 +33,9 @@ Add the question to the open questions of the plan.
 
 ## Ready for review
 
-After the last step, run the verification once more on the final commit. Then report:
+After the last step, run the full checks on the final commit. Then report:
 1. the output of `git log --oneline <base>..` for each repo, and whether anything is pushed;
-2. the commit that the verification passed on, and any check that did not run;
+2. the commit that the full checks passed on, and any check that did not run;
 3. each finding, with its fixup or the reason that it stands;
 4. anything that the plan got wrong.
 

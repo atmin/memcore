@@ -12,7 +12,7 @@ A plan gives an agent with no context everything it needs to do one task. A plan
 1. **No context.** Put everything that the builder needs in the plan, or one link away. That includes the task, the design docs and the conventions. Never assume that the builder saw this conversation.
 2. **Criteria define success, and steps define the changes.** Map every acceptance criterion to a step. The builder changes nothing that no step names.
 3. **Small steps that stay green.** Each step passes the tests, the type checks and the lint on its own. No step depends on a later step.
-4. **Evidence for each step.** Name the tests that prove a step, and write them before its code. For a change that a test cannot prove, name the check instead.
+4. **Evidence for each step.** Name the tests that prove a step, and write them before its code. Give the command that runs only those tests, as the step checks of the step. For a change that a test cannot prove, name the check instead.
 5. **Existing patterns only.** Name the convention that each step follows. Raise a new pattern as an open question, with the complexity that it removes.
 6. **Decisions belong in the design docs.** Cite them as constraints. A missing decision is an open question.
 7. **The doc update is a step.** When behaviour changes, a step rewrites the affected docs as current truth.

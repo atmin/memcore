@@ -24,15 +24,27 @@ Read [README.md](README.md) first. It indexes the design docs and the skills.
 - No test calls a real agent. Tests replace the headless agent with a fake.
 - Checks with a real agent live in `scripts/`, and run by hand. `go test` never runs them.
 - The tests of `internal/commands` set the process environment, so `t.Parallel()` cannot run them. `TestMain` runs each top-level test in its own process instead, `MEMCORE_TEST_PROCS` at a time. `MEMCORE_TEST_PROCS=1` runs them all in one process.
+- `newMemory` copies a memory repo that `TestMain` built once with `init`. A test that changes the environment before `newMemory` gets a real `init`.
 
 ## Verification
 
-Run these commands from the root of the repo. Each must pass, and `gofmt -l .` must print nothing:
+Run the checks from the root of the repo. Each command must pass, and `gofmt -l .` must print nothing.
+
+The step checks run while a step is built, and before its commit. They run only the tests of the step:
+
+    gofmt -l .
+    go vet ./...
+    go test -run '<the tests of the step>' <their packages>
+    CGO_ENABLED=0 go build ./cmd/memcore
+
+The full checks run every test. They run in the background during the review of each commit, and on the final commit of a branch, before a merge or a push:
 
     gofmt -l .
     go vet ./...
     go test ./...
     CGO_ENABLED=0 go build ./cmd/memcore
+
+A step that changes a helper of many tests, such as `newMemory`, runs the full checks as its step checks.
 
 ## Worktree
 
