@@ -8,7 +8,7 @@ memcore is one Go executable. It runs the installed git, so it ships no git of i
 2. **Store.** The memory repo, its indexes and the transcripts branch. memcore changes the store only through the installed git.
 3. **Readers.** One adapter, for the JSONL of Claude Code. It converts that format into one trimmed conversation format. The readers also read the auto-memory of Claude Code, and find the directory behind each of its project folders.
 4. **Guards.** Redaction, `verify`, the write lock, the confirmation behind `push`, and the check of the files that an agent pushes.
-5. **UI.** The server and the page of `memcore ui`. It imports nothing of the commands: they give it the data, and run its actions. The page embeds six vendored files, pinned by SHA-256: marked, DOMPurify, pele, Preact, the hooks of Preact and htm. Preact renders Review, Browse and the finder, with no build step.
+5. **UI.** The server and the page of `memcore ui`. It imports nothing of the commands: they give it the data, and run its actions. The page embeds six vendored files, pinned by SHA-256: marked, DOMPurify, pele, Preact, the hooks of Preact and htm. Preact renders Review, Browse and the finder, with no build step. The window is a native window of glaze, which reaches AppKit and WebKitGTK through purego, with no cgo. Its loop runs on the main thread, which `main` locks, and the server runs beside it. The page talks to the server over HTTP only.
 
 Redaction stays local, with patterns and entropy.
 
@@ -40,6 +40,6 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
 - A push of a `v*` tag runs the full checks on GitHub Actions. Then it builds memcore for darwin and linux, each on arm64 and amd64, with `CGO_ENABLED=0`.
 - The workflow makes a GitHub Release of the tag with six executables and `SHA256SUMS`. macOS gets one build for each processor, `memcore-darwin-<processor>`.
 - Linux gets two builds for each processor: the glibc build, `memcore-linux-<processor>-glibc`, and the static build, `memcore-linux-<processor>-static`, built with `-tags nonative`. The install script picks the glibc build only where the glibc loader exists.
-- memcore has no native window yet. So both Linux builds open the browser window, and both run on any Linux. The pair exists for the native window, which will need the glibc loader in the glibc build. A tag with a `-` makes a prerelease. The install script skips it, unless `MEMCORE_RELEASE_URL` names the download folder of that tag.
+- The glibc build holds the native window, which loads WebKitGTK through the glibc loader. The static build has no native window, so it opens the browser window, and it runs on any Linux. A tag with a `-` makes a prerelease. The install script skips it, unless `MEMCORE_RELEASE_URL` names the download folder of that tag.
 - The build sets the version to the tag, with `-ldflags -X`. So `memcore version` names the release.
 - The site `memco.re` is the folder `site/` with the icon of the window. A push to `main` that changes it deploys it to GitHub Pages. The site serves the install script at `/install`, and the uninstall script at `/uninstall`.

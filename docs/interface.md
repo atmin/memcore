@@ -26,10 +26,15 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | | `hook <event>` | Runs a hook of Claude Code, with the hook input on standard input: `session-start`, `prompt`, `session-end` or `tool`. Only Claude Code runs it, so `orient` and `help` leave it out. |
 
 **The window.** `memcore ui` starts a server in the background, and opens the page in a window:
-- The window is a Chromium app window when Chrome, Edge, Brave or Chromium is installed. Otherwise it is a tab of the default browser.
+- The window is a native window of glaze, with no browser. On macOS, its menu gives Cmd+W, Cmd+Q, Cmd+H, Cmd+M and the edit shortcuts. Cmd+Q stops the server at once.
+- A link out of a document opens in the default browser. Only `http`, `https` and `mailto` links open.
+- When glaze cannot open a window, as on a Linux without WebKitGTK, the window falls back to a Chromium app window, or to a tab of the default browser. `MEMCORE_UI_WINDOW=chrome` forces that fallback.
 - The server listens on `127.0.0.1` only. Each request of its API carries a token of the run, which the page gets in the address of the window.
 - The server stops 10 s after the last window closes, or 60 s after it starts when no window connects.
 - A second `memcore ui` opens one more window on the same server. One server runs for each memory repo.
+- memcore.app runs its own copy of memcore. With no server running, the application is the server, so the Dock and Cmd+Tab show memcore. A click on its Dock icon with no window open opens a window, until the server stops.
+
+**The icon.** `internal/ui/static/icon.svg` is the one source of the icon: a 16 x 16 pixel wordmark, MEM above CORE. It has black letters on white in light mode, and white letters on black in dark mode. The window, its favicon and memco.re use the file itself. The application icon draws its pixels as whole pixels: full bleed at 16 and 32 px, and inset on a white tile with round corners from 64 px.
 
 The window has three views:
 - **Review** lists the queue as `inbox` does. Entries that change a skill or a script come first. A push confirms in a dialog, and runs `push --expect`, so it pushes only the queue that the window shows. A drop confirms in a dialog, and records your reason.

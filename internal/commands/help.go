@@ -176,14 +176,14 @@ memcore ui --install | --uninstall
 Only the person runs it. It opens a window to review the queue, drop commits, push, browse
 the memory repo and search its text. A push from the window pushes the queue that the window
 shows, after the person confirms there.
-The window is a Chromium app window when Chrome, Edge, Brave or Chromium is installed, and
-the default browser otherwise. Its server listens on 127.0.0.1 only, and stops when the last
-window closes. A second memcore ui opens one more window on the same server.
+The window is a native window. Without one, as on a Linux without WebKitGTK, it is a
+Chromium app window or the default browser. Its server listens on 127.0.0.1 only, and stops
+when the last window closes. A second memcore ui opens one more window on the same server.
 
---install writes the application of the window, which runs memcore ui: memcore.app in
-~/Applications on macOS, where Spotlight finds it, or a desktop entry on Linux. It keeps the
-PATH of the call, and MEMCORE_REPO when it is set. --uninstall removes the application. Both
-work before init.
+--install writes the application of the window: memcore.app in ~/Applications on macOS,
+with a copy of memcore, or a desktop entry on Linux. Run it again after a build from source.
+It keeps the PATH of the call, and MEMCORE_REPO when it is set.
+--uninstall removes the application. Both work before init.
 `,
 	"help": `memcore help [<command>]
 

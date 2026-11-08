@@ -15,15 +15,17 @@ Then the install script runs `memcore ui --install`, which adds the application 
 - On macOS, it writes `memcore.app` in `~/Applications`, and registers it, so Spotlight and the Finder open it.
 - On Linux, it writes a desktop entry and an icon under `~/.local/share`, or under `XDG_DATA_HOME` when it is set.
 
-The application runs a launcher, which runs `~/.local/bin/memcore ui`. So an update of memcore updates the application too. The launcher keeps the `PATH` of the install, because an application gets no shell profile. It sets `MEMCORE_REPO` only when the install had it set. On macOS, the launcher writes its output to `~/Library/Logs/memcore.log`. When the application fails to install, the install script warns and still installs memcore. Then open the window with `memcore ui`.
+On macOS, `memcore.app` holds its own copy of memcore. So the application is the window itself, and the Dock shows memcore with its icon. The copy does not change when `~/.local/bin/memcore` changes, so an update writes the application again. The install script does it on each update. `Info.plist` keeps the `PATH` of the install, because an application gets no shell profile. It sets `MEMCORE_REPO` only when the install had it set. The application writes its errors to `~/Library/Logs/memcore.log`.
 
-You can also build memcore from source with Go 1.27. Clone the memcore repo, and run this command in it:
+On Linux, the desktop entry runs a launcher, which runs `~/.local/bin/memcore ui` with the same environment. So an update of memcore updates the application too. When the application fails to install, the install script warns and still installs memcore. Then open the window with `memcore ui`.
+
+You can also build memcore from source with Go 1.27.1. Clone the memcore repo, and run this command in it:
 
 ```
 CGO_ENABLED=0 go build -o ~/.local/bin/memcore ./cmd/memcore
 ```
 
-To update a build from source, pull the repo and build again. `memcore version` names the build that runs: the tag of a release, or `dev` for a build from source. It adds the commit of the build when the build records one.
+To update a build from source, pull the repo and build again. Then run `memcore ui --install`, so memcore.app holds the new build. `memcore version` names the build that runs: the tag of a release, or `dev` for a build from source. It adds the commit of the build when the build records one.
 
 Put `~/.local/bin` on `PATH` before you run `init`. Without memcore on `PATH`, `init` adds no hook. At run time, memcore needs only git.
 
