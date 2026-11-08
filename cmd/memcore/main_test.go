@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,5 +62,51 @@ func TestWorkingDir(t *testing.T) {
 		if got != tt.want || (err != nil) != tt.wantErr {
 			t.Errorf("workingDir(%q, %q) = %q, %v, want %q and an error: %v", tt.name, tt.args, got, err, tt.want, tt.wantErr)
 		}
+	}
+}
+
+func TestBundleArgs(t *testing.T) {
+	const bundle = "/Users/a/Applications/memcore.app/Contents/MacOS/memcore"
+	for _, tt := range []struct {
+		name, exe  string
+		args, want []string
+	}{
+		{"a bundle with no arguments", bundle, nil, []string{"ui", "--app"}},
+		{"a bundle with the -psn_ argument", bundle, []string{"-psn_0_123"}, []string{"ui", "--app"}},
+		{"a bundle with a command", bundle, []string{"version"}, nil},
+		{"an executable outside a bundle", "/Users/a/.local/bin/memcore", nil, nil},
+	} {
+		got, ok := bundleArgs(tt.exe, tt.args)
+		if ok != (tt.want != nil) || strings.Join(got, " ") != strings.Join(tt.want, " ") {
+			t.Errorf("%s: bundleArgs = %q, %v, want %q", tt.name, got, ok, tt.want)
+		}
+	}
+}
+
+// TestBundleLog runs memcore as memcore.app, where it writes its errors to ~/Library/Logs/memcore.log.
+func TestBundleLog(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("only macOS runs memcore.app")
+	}
+	bin := filepath.Join(t.TempDir(), "memcore.app", "Contents", "MacOS", "memcore")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	home := t.TempDir()
+	// An agent may not run memcore ui, so the application fails at once, and writes why.
+	cmd := exec.Command(bin)
+	cmd.Env = []string{"HOME=" + home, "CLAUDECODE=1", "PATH=" + os.Getenv("PATH")}
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("memcore.app ran as an agent:\n%s", out)
+	}
+	if len(out) != 0 {
+		t.Errorf("memcore.app wrote to its standard error, not the log:\n%s", out)
+	}
+	log, err := os.ReadFile(filepath.Join(home, "Library", "Logs", "memcore.log"))
+	if err != nil || !strings.Contains(string(log), "memcore ui:") || !strings.Contains(string(log), "CLAUDECODE") {
+		t.Errorf("memcore.log = %q, %v, want the refusal of ui", log, err)
 	}
 }

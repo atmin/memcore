@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,8 +111,15 @@ func TestUIInstall(t *testing.T) {
 						t.Errorf("Info.plist holds no %s:\n%s", want, plist)
 					}
 				}
-				if strings.Contains(plist, "LSEnvironment") {
-					t.Errorf("Info.plist sets an environment:\n%s", plist)
+				env := "<key>LSEnvironment</key>\n\t<dict>\n\t\t<key>PATH</key><string>" + html.EscapeString(os.Getenv("PATH")) + "</string>\n"
+				if tt.repo != "" {
+					env += "\t\t<key>MEMCORE_REPO</key><string>" + html.EscapeString(tt.repo) + "</string>\n"
+				}
+				if !strings.Contains(plist, env+"\t</dict>") {
+					t.Errorf("Info.plist holds no environment\n%s\nin\n%s", env, plist)
+				}
+				if got := plistID([]byte(plist)); got != appID {
+					t.Errorf("Info.plist names %q", got)
 				}
 				if icns := readT(t, filepath.Join(app, "Contents", "Resources", "memcore.icns")); !strings.HasPrefix(icns, "icns") {
 					t.Errorf("memcore.icns starts with %q", icns[:min(4, len(icns))])
@@ -139,16 +147,19 @@ func TestUIInstall(t *testing.T) {
 				}
 			}
 			if m := modeT(t, launcher); m != 0o755 {
-				t.Errorf("the launcher has mode %v", m)
+				t.Errorf("the executable of the application has mode %v", m)
+			}
+			if tt.system == "darwin" {
+				// memcore.app runs a copy of memcore, so its process is memcore inside the bundle.
+				exe, _ := appExecutable()
+				if readT(t, launcher) != readT(t, exe) {
+					t.Error("the executable of memcore.app is no copy of memcore")
+				}
+				return
 			}
 			ran := launch(t, launcher, home)
 			if want := []string{"ui", os.Getenv("PATH"), wantRepo}; strings.Join(ran, "\n") != strings.Join(want, "\n") {
 				t.Errorf("the launcher ran memcore with %q, want %q", ran, want)
-			}
-			if tt.system == "darwin" {
-				if _, err := os.Stat(filepath.Join(home, "Library", "Logs", "memcore.log")); err != nil {
-					t.Errorf("the launcher wrote no log: %v", err)
-				}
 			}
 		})
 	}
@@ -297,7 +308,7 @@ func TestDesktopExec(t *testing.T) {
 
 func TestPlistID(t *testing.T) {
 	for _, tt := range []struct{ name, plist, want string }{
-		{"the Info.plist of memcore", fmt.Sprintf(infoPlist, appID, "1.0.0"), appID},
+		{"the Info.plist of memcore", fmt.Sprintf(infoPlist, appID, "1.0.0", ""), appID},
 		{"a comment", "<plist><dict><!-- <key>CFBundleIdentifier</key><string>re.memco.memcore</string> --></dict></plist>", ""},
 		{"a nested dict", "<plist><dict><key>A</key><dict><key>CFBundleIdentifier</key><string>re.memco.memcore</string></dict></dict></plist>", ""},
 		{"a key between", "<plist><dict><key>CFBundleIdentifier</key><key>B</key><string>re.memco.memcore</string></dict></plist>", ""},

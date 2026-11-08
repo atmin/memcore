@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -123,20 +124,15 @@ func uninstallApp(env Env) error {
 	return nil
 }
 
-// launcher returns the text of the script that the application runs. log names the file of its output, or "".
-func launcher(exe, log string) string {
+// launcher returns the text of the script that the desktop entry runs on Linux.
+func launcher(exe string) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n# The launcher of the window of memcore. memcore ui --install wrote it.\n")
 	fmt.Fprintf(&b, "export PATH=%s\n", shellQuote(os.Getenv("PATH")))
 	if repo := os.Getenv("MEMCORE_REPO"); repo != "" {
 		fmt.Fprintf(&b, "export MEMCORE_REPO=%s\n", shellQuote(repo))
 	}
-	if log == "" {
-		fmt.Fprintf(&b, "exec %s ui\n", shellQuote(exe))
-		return b.String()
-	}
-	fmt.Fprintf(&b, "mkdir -p \"$HOME/%s\"\n", filepath.Dir(log))
-	fmt.Fprintf(&b, "exec %s ui >>\"$HOME/%s\" 2>&1\n", shellQuote(exe), log)
+	fmt.Fprintf(&b, "exec %s ui\n", shellQuote(exe))
 	return b.String()
 }
 
@@ -217,14 +213,46 @@ func writeBundle(app, exe string) error {
 		data []byte
 		mode os.FileMode
 	}{
-		{filepath.Join(macos, "memcore"), []byte(launcher(exe, "Library/Logs/memcore.log")), 0o755},
 		{filepath.Join(resources, "memcore.icns"), icns, 0o644},
-		{filepath.Join(app, "Contents", "Info.plist"), []byte(fmt.Sprintf(infoPlist, appID, html.EscapeString(bundleVersion()))), 0o644},
+		{filepath.Join(app, "Contents", "Info.plist"), []byte(fmt.Sprintf(infoPlist, appID, html.EscapeString(bundleVersion()), bundleEnv())), 0o644},
 	}
 	for _, f := range files {
 		if err := os.WriteFile(f.path, f.data, f.mode); err != nil {
 			return fmt.Errorf("write %s of the application: %w", filepath.Base(f.path), err)
 		}
+	}
+	// memcore.app runs a copy of memcore, so the process of the window is the application, with its name and
+	// icon in the Dock. An update of memcore writes the copy again with memcore ui --install.
+	return copyExecutable(exe, filepath.Join(macos, "memcore"))
+}
+
+// bundleEnv returns the LSEnvironment of memcore.app: the PATH of this call, because an application that the
+// Finder starts reads no shell profile, and MEMCORE_REPO only when this call has it set.
+func bundleEnv() string {
+	env := "\t\t<key>PATH</key><string>" + html.EscapeString(os.Getenv("PATH")) + "</string>\n"
+	if repo := os.Getenv("MEMCORE_REPO"); repo != "" {
+		env += "\t\t<key>MEMCORE_REPO</key><string>" + html.EscapeString(repo) + "</string>\n"
+	}
+	return env
+}
+
+// copyExecutable copies the executable unchanged, with mode 0755, so its signature stays valid.
+func copyExecutable(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return fmt.Errorf("copy memcore into the application: %w", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(to, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return fmt.Errorf("copy memcore into the application: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return fmt.Errorf("copy memcore into the application: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("copy memcore into the application: %w", err)
 	}
 	return nil
 }
@@ -237,7 +265,7 @@ func bundleVersion() string {
 	return strings.TrimPrefix(Version, "v")
 }
 
-// infoPlist is the Info.plist of memcore.app. It sets no environment: the launcher sets it.
+// infoPlist is the Info.plist of memcore.app, with the identifier, the version and the environment.
 const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -252,6 +280,9 @@ const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>CFBundleVersion</key><string>1</string>
 	<key>LSMinimumSystemVersion</key><string>12.0</string>
 	<key>NSHighResolutionCapable</key><true/>
+	<key>LSEnvironment</key>
+	<dict>
+%s	</dict>
 </dict>
 </plist>
 `
@@ -304,7 +335,7 @@ func installDesktop(env Env, h, exe string) error {
 		data []byte
 		mode os.FileMode
 	}{
-		{launch, []byte(launcher(exe, "")), 0o755},
+		{launch, []byte(launcher(exe)), 0o755},
 		{icon, png, 0o644},
 		{entry, []byte(text), 0o644},
 	}

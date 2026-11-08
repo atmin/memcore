@@ -245,3 +245,80 @@ func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
+
+func TestUIApp(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	t.Run("no server runs", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		opened := quietUI(t)
+		calls := recordStarts(t)
+		out, err := run(t, home, "", "ui", "--app")
+		if err != nil {
+			t.Fatalf("ui --app: %v\n%s", err, out)
+		}
+		// It served in the foreground: it opened the window itself, and returned after its start period.
+		if opened.Load() != 1 {
+			t.Errorf("ui --app opened %d windows, want 1", opened.Load())
+		}
+		for _, c := range *calls {
+			if c[0] == "ui" {
+				t.Errorf("ui --app started %q in the background", c)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(store.StateDir(repo), "ui.json")); !os.IsNotExist(err) {
+			t.Errorf("ui.json remains after the server stopped: %v", err)
+		}
+	})
+
+	t.Run("a server starts at the same time", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		opened := quietUI(t)
+		unlock, ok, err := store.TryLockFile(repo, "ui.lock")
+		if err != nil || !ok {
+			t.Fatalf("take ui.lock: %v, %v", ok, err)
+		}
+		defer unlock()
+		var windows atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "POST" && r.URL.Path == "/api/window" {
+				windows.Add(1)
+			}
+			w.Write([]byte("{}"))
+		}))
+		defer srv.Close()
+		u, _ := url.Parse(srv.URL)
+		port, _ := strconv.Atoi(u.Port())
+		// The other server writes ui.json once its first window opened, after ui --app lost the lock.
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			writeState(filepath.Join(store.StateDir(repo), "ui.json"), uiState{PID: 1, Port: port, Token: "secret"})
+		}()
+		out, err := run(t, home, "", "ui", "--app")
+		if err != nil || windows.Load() != 1 || opened.Load() != 0 || !strings.Contains(out, "on the running server") {
+			t.Errorf("ui --app: %v, windows %d, own windows %d, output %q, want one window on the other server", err, windows.Load(), opened.Load(), out)
+		}
+	})
+
+	t.Run("a server runs", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		opened := quietUI(t)
+		var windows atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "POST" && r.URL.Path == "/api/window" && r.Header.Get("X-Memcore-Token") == "secret" {
+				windows.Add(1)
+			}
+			w.Write([]byte("{}"))
+		}))
+		defer srv.Close()
+		u, _ := url.Parse(srv.URL)
+		port, _ := strconv.Atoi(u.Port())
+		if err := writeState(filepath.Join(store.StateDir(repo), "ui.json"), uiState{PID: 1, Port: port, Token: "secret"}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := run(t, home, "", "ui", "--app")
+		if err != nil || windows.Load() != 1 || opened.Load() != 0 || !strings.Contains(out, "on the running server") {
+			t.Errorf("ui --app: %v, windows %d, own windows %d, output %q, want one window on the running server", err, windows.Load(), opened.Load(), out)
+		}
+	})
+}

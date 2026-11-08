@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/atmin/memcore/internal/commands"
 	"github.com/atmin/memcore/internal/guards"
@@ -15,6 +17,12 @@ import (
 func init() { runtime.LockOSThread() }
 
 func main() {
+	if exe, err := os.Executable(); err == nil {
+		if args, ok := bundleArgs(exe, os.Args[1:]); ok {
+			os.Args = append(os.Args[:1], args...)
+			logToFile()
+		}
+	}
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
@@ -58,4 +66,36 @@ func usage() {
 			fmt.Fprintf(os.Stderr, "  %-18s %s\n", c.Name+" "+c.Args, c.Does)
 		}
 	}
+}
+
+// bundleArgs returns the arguments of memcore.app: ui --app, when memcore runs inside a bundle with no command,
+// or with only the -psn_ argument of an old macOS.
+func bundleArgs(exe string, args []string) ([]string, bool) {
+	if !strings.Contains(exe, ".app/Contents/MacOS/") {
+		return nil, false
+	}
+	if len(args) == 0 || (len(args) == 1 && strings.HasPrefix(args[0], "-psn_")) {
+		return []string{"ui", "--app"}, true
+	}
+	return nil, false
+}
+
+// logToFile sends standard error to ~/Library/Logs/memcore.log, because an application has no terminal.
+func logToFile() {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(h, "Library", "Logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "memcore.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	if err := redirectStderr(f); err != nil {
+		fmt.Fprintf(f, "memcore: point standard error at the log: %v\n", err)
+	}
+	os.Stderr = f
 }

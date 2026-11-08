@@ -305,6 +305,7 @@ func runUI(env Env, args []string) error {
 	flags.SetOutput(io.Discard)
 	serve := flags.Bool("serve", false, "run the server of the window")
 	nonce := flags.String("nonce", "", "the nonce of the memcore ui that starts the server")
+	app := flags.Bool("app", false, "open the window as memcore.app: serve in the foreground when no server runs")
 	install := flags.Bool("install", false, "write the application of the window")
 	uninstall := flags.Bool("uninstall", false, "remove the application of the window")
 	pos, err := parseInterleaved(flags, args)
@@ -328,7 +329,10 @@ func runUI(env Env, args []string) error {
 		return err
 	}
 	if *serve {
-		return serveUI(env, repo, *nonce)
+		if err := serveUI(env, repo, *nonce); !errors.Is(err, errServerRuns) {
+			return err
+		}
+		return nil // memcore ui opens a window on the server that runs
 	}
 	if s, ok := runningUI(repo); ok {
 		if err := s.post("/api/window"); err != nil {
@@ -336,6 +340,23 @@ func runUI(env Env, args []string) error {
 		}
 		fmt.Fprintf(env.Out, "Opened a window on the running server: %s\n", s.url())
 		return nil
+	}
+	if *app {
+		// memcore.app is the server itself, so its process owns the windows, the Dock icon and Cmd+Tab.
+		if err := serveUI(env, repo, ""); !errors.Is(err, errServerRuns) {
+			return err
+		}
+		// Another server took the lock first, so the window opens on it once it is ready.
+		for deadline := time.Now().Add(uiWait); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if s, ok := runningUI(repo); ok {
+				if err := s.post("/api/window"); err != nil {
+					return err
+				}
+				fmt.Fprintf(env.Out, "Opened a window on the running server: %s\n", s.url())
+				return nil
+			}
+		}
+		return fmt.Errorf("the server of the window did not start within %s: %s holds its errors", uiWait, tilde(filepath.Join(store.StateDir(repo), "background.log")))
 	}
 	// The nonce tells this call whether its own server won. Another memcore ui may start one at the same time,
 	// and then only one of the two servers runs.
@@ -367,13 +388,16 @@ func runUI(env Env, args []string) error {
 
 // serveUI serves the window until the last one closes. Only one server runs for a memory repo: it holds
 // ui.lock for its whole life, and another server exits at once.
+// errServerRuns says that another server of the window holds ui.lock.
+var errServerRuns = errors.New("another server of the window runs")
+
 func serveUI(env Env, repo, nonce string) error {
 	unlock, ok, err := store.TryLockFile(repo, "ui.lock")
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return nil // another server runs, and memcore ui opens a window on it
+		return errServerRuns
 	}
 	defer unlock()
 	secret := make([]byte, 32)
