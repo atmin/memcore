@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,4 +95,23 @@ func browser() string {
 		}
 	}
 	return ""
+}
+
+// OpenExternal opens a link of the page in the default browser, as a target="_blank" link does in a browser.
+// Only http, https and mailto links open, so a page never starts a local file or another scheme.
+func OpenExternal(link string) error {
+	u, err := url.Parse(link)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "mailto") {
+		return fmt.Errorf("open %q: only http, https and mailto links open outside the window", link)
+	}
+	opener := "xdg-open"
+	if goos == "darwin" {
+		opener = "open"
+	}
+	cmd := command(opener, link)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open %s with %s: %w", link, opener, err)
+	}
+	go cmd.Wait()
+	return nil
 }

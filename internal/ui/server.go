@@ -131,6 +131,8 @@ type Server struct {
 	Window func(url string) (stop func(), err error)
 	// Ready runs once the first window opened. Serve stops with its error.
 	Ready func() error
+	// Quit ends the lifetime at once when it closes, as Cmd+Q does. A nil Quit never closes.
+	Quit <-chan struct{}
 
 	port    int
 	mu      sync.Mutex
@@ -202,6 +204,8 @@ func (s *Server) wait(served chan error) error {
 		select {
 		case err := <-served:
 			return err
+		case <-s.Quit:
+			return nil
 		case <-timer.C:
 			s.mu.Lock()
 			open := s.streams

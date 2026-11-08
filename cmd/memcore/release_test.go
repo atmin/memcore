@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -63,5 +65,37 @@ func TestPagesWorkflow(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("pages.yml holds no %q", want)
 		}
+	}
+}
+
+// TestNativeBuilds builds memcore with CGO_ENABLED=0 for each target of a release. Each build holds glaze, the
+// native window, and the build with -tags nonative holds none.
+func TestNativeBuilds(t *testing.T) {
+	for _, tt := range []struct {
+		goos, goarch, tags string
+		glaze              bool
+	}{
+		{"darwin", "arm64", "", true},
+		{"darwin", "amd64", "", true},
+		{"linux", "arm64", "", true},
+		{"linux", "amd64", "", true},
+		{"linux", "amd64", "nonative", false},
+	} {
+		t.Run(tt.goos+"/"+tt.goarch+" "+tt.tags, func(t *testing.T) {
+			t.Parallel()
+			bin := filepath.Join(t.TempDir(), "memcore")
+			build := exec.Command("go", "build", "-tags", tt.tags, "-o", bin, ".")
+			build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+tt.goos, "GOARCH="+tt.goarch)
+			if out, err := build.CombinedOutput(); err != nil {
+				t.Fatalf("go build: %v\n%s", err, out)
+			}
+			out, err := exec.Command("go", "version", "-m", bin).CombinedOutput()
+			if err != nil {
+				t.Fatalf("go version -m: %v\n%s", err, out)
+			}
+			if got := strings.Contains(string(out), "github.com/crgimenes/glaze"); got != tt.glaze {
+				t.Errorf("the build holds glaze: %v, want %v\n%s", got, tt.glaze, out)
+			}
+		})
 	}
 }

@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/atmin/memcore/internal/commands"
 	"github.com/atmin/memcore/internal/guards"
 )
+
+// init locks the main goroutine to the main thread, where the native windows of memcore ui must live.
+func init() { runtime.LockOSThread() }
 
 func main() {
 	if len(os.Args) < 2 {

@@ -476,3 +476,30 @@ func TestFindAPI(t *testing.T) {
 		t.Errorf("GET /api/find?q=zzz = %s, want an empty list, not null", body)
 	}
 }
+
+func TestQuit(t *testing.T) {
+	s, _ := newServer()
+	s.Start, s.Grace = time.Minute, time.Minute
+	quit := make(chan struct{})
+	s.Quit = quit
+	var stopped atomic.Int32
+	s.Window = func(string) (func(), error) { return func() { stopped.Add(1) }, nil }
+	_, done := served(t, s)
+	select {
+	case <-done:
+		t.Fatal("Serve returned before the quit")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(quit)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Serve = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after the quit")
+	}
+	if stopped.Load() != 1 {
+		t.Errorf("the window stopped %d times, want 1", stopped.Load())
+	}
+}

@@ -22,13 +22,17 @@ import (
 func quietUI(t *testing.T) *atomic.Int32 {
 	t.Helper()
 	var opened atomic.Int32
-	g, s, w, wait := uiGrace, uiStart, uiWindow, uiWait
+	g, s, w, wait, host := uiGrace, uiStart, uiWindow, uiWait, uiHost
+	// The tests open no native window: the host passes the window of the test.
+	uiHost = func(serve func(func(string) (func(), error), <-chan struct{}) error) error {
+		return serve(func(u string) (func(), error) { return uiWindow(u) }, nil)
+	}
 	uiGrace, uiStart, uiWait = 100*time.Millisecond, 500*time.Millisecond, 5*time.Second
 	uiWindow = func(string) (func(), error) {
 		opened.Add(1)
 		return nil, nil
 	}
-	t.Cleanup(func() { uiGrace, uiStart, uiWindow, uiWait = g, s, w, wait })
+	t.Cleanup(func() { uiGrace, uiStart, uiWindow, uiWait, uiHost = g, s, w, wait, host })
 	return &opened
 }
 

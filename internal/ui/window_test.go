@@ -90,3 +90,35 @@ func TestWindowPicksBrowser(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenExternal(t *testing.T) {
+	defer func(g string, c func(string, ...string) *exec.Cmd) { goos, command = g, c }(goos, command)
+	for _, tt := range []struct {
+		goos, link, wantBin string
+	}{
+		{"darwin", "https://example.com/a", "open"},
+		{"linux", "http://example.com/a", "xdg-open"},
+		{"darwin", "mailto:a@example.com", "open"},
+		{"darwin", "file:///etc/passwd", ""},
+		{"linux", "javascript:alert(1)", ""},
+		{"darwin", "/relative", ""},
+	} {
+		goos = tt.goos
+		var bin string
+		var args []string
+		command = func(name string, a ...string) *exec.Cmd {
+			bin, args = name, a
+			return exec.Command("true")
+		}
+		err := OpenExternal(tt.link)
+		if tt.wantBin == "" {
+			if err == nil || bin != "" {
+				t.Errorf("OpenExternal(%q) ran %q, %v, want a refusal", tt.link, bin, err)
+			}
+			continue
+		}
+		if err != nil || bin != tt.wantBin || !slices.Equal(args, []string{tt.link}) {
+			t.Errorf("OpenExternal(%q) on %s ran %q %q, %v, want %s", tt.link, tt.goos, bin, args, err, tt.wantBin)
+		}
+	}
+}
