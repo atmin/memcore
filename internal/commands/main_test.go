@@ -37,12 +37,16 @@ func TestMain(m *testing.M) {
 	os.Setenv("HOME", empty)
 	// No test starts a process in the background. recordStarts records the starts of one test.
 	startBackground = func(string, ...string) error { return nil }
+	buildFixture(initFixture)
 	ran, code := runInProcs()
 	if !ran {
 		code = m.Run()
 		recordControls()
 	}
 	os.RemoveAll(empty)
+	if fixture.owner {
+		os.RemoveAll(fixture.dir)
+	}
 	os.Exit(code)
 }
 
@@ -118,10 +122,14 @@ func bareRemote(t *testing.T) string {
 	return remote
 }
 
-// newMemory sets up HOME and a memory repo with an empty bare remote, through init.
+// newMemory sets up HOME and a memory repo with an empty bare remote. It copies them from the fixture, or
+// runs init when the environment differs from the one of the fixture.
 func newMemory(t *testing.T) (home, repo, remote string) {
 	t.Helper()
 	home = newHome(t)
+	if remote = filepath.Join(t.TempDir(), "memory.git"); fromFixture(t, home, remote) {
+		return home, filepath.Join(home, "memory"), remote
+	}
 	remote = bareRemote(t)
 	if out, err := run(t, home, "", "init", remote); err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
