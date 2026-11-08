@@ -54,7 +54,9 @@
   <p>On macOS or Linux, install memcore into <code>~/.local/bin</code>, then set up a machine with your memory remote:</p>
   <pre>curl -fsSL https://memco.re/install | sh
 memcore init git@github.com:you/memory.git</pre>
-  <p>The script checks the SHA-256 of the download, and needs no <code>sudo</code>. <a href="https://github.com/atmin/memcore/blob/main/site/install">Read the script</a> before you run it. To update, run the first line again.</p>
+  <p>The script checks the SHA-256 of the download, and needs no <code>sudo</code>. It also adds memcore to your applications, as the window to review and push what your agents remember. <a href="https://github.com/atmin/memcore/blob/main/site/install">Read the script</a> before you run it. To update, run the first line again.</p>
+  <p>To uninstall memcore, run the line below. It keeps your memory repo.</p>
+  <pre>curl -fsSL https://memco.re/uninstall | sh</pre>
 
   <footer>
     <a href="https://github.com/atmin/memcore">github.com/atmin/memcore</a>

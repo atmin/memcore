@@ -11,6 +11,12 @@ memcore init git@github.com:you/memory.git
 
 The install script downloads the executable of the latest release for your system and processor into `~/.local/bin`. It supports macOS and Linux, each on arm64 and amd64. On Linux, it installs the glibc build when the system has the glibc loader, and the static build otherwise. It checks the SHA-256 of the download against `SHA256SUMS` of the release, and refuses a download that differs. It needs no `sudo`. Read it before you run it, with `curl -fsSL https://memco.re/install`. To update, run `curl -fsSL https://memco.re/install | sh` again.
 
+Then the install script runs `memcore ui --install`, which adds the application of the window:
+- On macOS, it writes `memcore.app` in `~/Applications`, and registers it, so Spotlight and the Finder open it.
+- On Linux, it writes a desktop entry and an icon under `~/.local/share`, or under `XDG_DATA_HOME` when it is set.
+
+The application runs a launcher, which runs `~/.local/bin/memcore ui`. So an update of memcore updates the application too. The launcher keeps the `PATH` of the install, because an application gets no shell profile. It sets `MEMCORE_REPO` only when the install had it set. On macOS, the launcher writes its output to `~/Library/Logs/memcore.log`. When the application fails to install, the install script warns and still installs memcore. Then open the window with `memcore ui`.
+
 You can also build memcore from source with Go 1.27. Clone the memcore repo, and run this command in it:
 
 ```
@@ -46,3 +52,20 @@ Nothing of memcore runs between sessions: there is no service and no scheduled j
 3. `memcore` answers the agent at once, without waiting for the snapshot.
 
 A snapshot also starts at the end of each session of Claude Code, through its `SessionEnd` hook.
+
+## Uninstall
+
+Uninstall memcore with one command:
+
+```
+curl -fsSL https://memco.re/uninstall | sh
+```
+
+The uninstall script runs `~/.local/bin/memcore`, and never another `memcore` on `PATH`:
+1. It runs `memcore init --undo`, which shows the diff of the settings of Claude Code and asks. Without a memory repo, `init` changed nothing to undo, so it asks nothing, unless a hook still runs memcore.
+2. It runs `memcore ui --uninstall`, which removes the application of the window.
+3. It removes `~/.local/bin/memcore`.
+
+It stops before step 3, with memcore kept, when you answer no, or when a hook in the settings still runs memcore. Without memcore, such a hook would fail in every session. Remove the hook by hand, then run the uninstall again.
+
+The uninstall script keeps the memory repo, with your memories and the transcripts. It names the folder, so you can remove it yourself. It also keeps the links of accepted scripts in `~/.local/bin`, which point into the memory repo.
