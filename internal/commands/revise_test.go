@@ -73,7 +73,7 @@ func TestRevise(t *testing.T) {
 	})
 
 	for _, tt := range []struct{ name, in, want string }{
-		{"a new name", memoryText("other-name", "Read before you commit.", "A fact."), "name"},
+		{"a new name", memoryText("other-name", "Read before you commit.", "A fact."), "memcore move"},
 		{"a dead reference", memoryText("small-commits", "Read before you commit.", "See [[no-such-memory]]."), "fault"},
 		{"a secret", memoryText("small-commits", "Read before you commit.", "Use ghp_"+strings.Repeat("a1B2", 9)+"."), "secret"},
 	} {

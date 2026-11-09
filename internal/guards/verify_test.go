@@ -150,3 +150,92 @@ func TestVerifySet(t *testing.T) {
 	check(t, "a dead link, a dead reference and a forbidden word", reports["dev/memories/c.md"].Faults,
 		[]string{"dead link", "dead reference [[z]]", "forbidden word"})
 }
+
+func TestRelink(t *testing.T) {
+	memory := func(name, body string) string {
+		return "---\nname: " + name + "\ndescription: \"Read when you test.\"\n---\n\n" + body
+	}
+	repo := t.TempDir()
+	files := map[string]string{
+		"dev/memories/old-name.md":  memory("old-name", "See [[old-name]] itself and [b](b-fact.md).\n"),
+		"dev/memories/b-fact.md":    memory("b-fact", "See [[old-name]], [[ old-name ]], [old](old-name.md#why), [old2](<old-name.md>), [x](./old-name.md?x=1), `[[old-name]]` and [[old-name-two]].\n"),
+		"dev/notes/n.md":            memory("n", "See [old](../memories/old-name.md) and [abs](/dev/memories/old-name.md).\n\n```\n[old](../memories/old-name.md)\n```\n\n[ref]: ../memories/old-name.md\n"),
+		"dev/skills/s/SKILL.md":     memory("s", "See [old](../../memories/old-name.md).\n"),
+		"dev/memories/t/README.md":  memory("t", "# memories/t in ~/dev\n\nSee [x](../old-name.md).\n"),
+		"dev/README.md":             "# ~/dev\n\n## Memories\n\n- [old-name](memories/old-name.md): Read when you test.\n",
+		"dev/notes/same.md":         memory("same", "A note.\n"),
+		"dev/memories/same.md":      memory("same-memory", "A memory.\n"),
+		"dev/memories/uses-same.md": memory("uses-same", "See [[same]] and [the note](../notes/same.md).\n"),
+		"dev/memories/untouched.md": memory("untouched", "See [b](b-fact.md).\n"),
+	}
+	for p, c := range files {
+		writeT(t, repo, p, c)
+	}
+
+	t.Run("a memory", func(t *testing.T) {
+		got, err := Relink(repo, "dev/memories/old-name.md", "dev/memories/new-name.md", "old-name", "new-name", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{
+			"dev/memories/old-name.md": memory("old-name", "See [[new-name]] itself and [b](b-fact.md).\n"),
+			"dev/memories/b-fact.md":   memory("b-fact", "See [[new-name]], [[new-name]], [old](new-name.md#why), [old2](<new-name.md>), [x](new-name.md?x=1), `[[old-name]]` and [[old-name-two]].\n"),
+			"dev/notes/n.md":           memory("n", "See [old](../memories/new-name.md) and [abs](/dev/memories/new-name.md).\n\n```\n[old](../memories/old-name.md)\n```\n\n[ref]: ../memories/new-name.md\n"),
+			"dev/skills/s/SKILL.md":    memory("s", "See [old](../../memories/new-name.md).\n"),
+			"dev/memories/t/README.md": memory("t", "# memories/t in ~/dev\n\nSee [x](../new-name.md).\n"),
+		}
+		if len(got) != len(want) {
+			t.Errorf("Relink changed %d documents, want %d: %v", len(got), len(want), keys(got))
+		}
+		for p, w := range want {
+			if string(got[p]) != w {
+				t.Errorf("%s =\n%s\nwant\n%s", p, got[p], w)
+			}
+		}
+	})
+
+	t.Run("a note keeps the [[name]] of a memory", func(t *testing.T) {
+		got, err := Relink(repo, "dev/notes/same.md", "dev/notes/other.md", "same", "other", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w := memory("uses-same", "See [[same]] and [the note](../notes/other.md).\n"); string(got["dev/memories/uses-same.md"]) != w || len(got) != 1 {
+			t.Errorf("Relink = %v, want only uses-same with\n%s", got, w)
+		}
+	})
+}
+
+func keys(m map[string][]byte) []string {
+	var ks []string
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+func TestFaultsWith(t *testing.T) {
+	repo := t.TempDir()
+	writeT(t, repo, "dev/memories/a.md", "---\nname: a\ndescription: \"Read when you test.\"\n---\n\nA.\n")
+	writeT(t, repo, "dev/notes/n.md", "---\nname: n\ndescription: \"Read when you test.\"\n---\n\nSee [a](../memories/a.md) and [[a]].\n")
+
+	faults, err := FaultsWith(repo, map[string][]byte{"dev/memories/b.md": []byte("---\nname: b\ndescription: \"Read when you test.\"\n---\n\nB.\n")}, []string{"dev/memories/a.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults", faults, []string{`dev/notes/n.md:6: dead link to "../memories/a.md"`, `dev/notes/n.md:6: dead reference [[a]]`})
+
+	faults, err = FaultsWith(repo, map[string][]byte{
+		"dev/memories/b.md": []byte("---\nname: b\ndescription: \"Read when you test.\"\n---\n\nB.\n"),
+		"dev/notes/n.md":    []byte("---\nname: n\ndescription: \"Read when you test.\"\n---\n\nSee [b](../memories/b.md) and [[b]].\n"),
+	}, []string{"dev/memories/a.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults", faults, nil)
+
+	faults, err = FaultsWith(repo, map[string][]byte{"dev/notes/new.md": []byte("See [[nobody]].\n")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults", faults, []string{`dev/notes/new.md:1: dead reference [[nobody]]`})
+}

@@ -384,6 +384,20 @@ func TestReview(t *testing.T) {
 			want:  []review{{}, {created: 2, createdFixups: 1, pushed: 2, accepted: 2, mistakes: 1}},
 		},
 		{
+			name: "a move counts as a queue commit, created, pushed and dropped",
+			events: []Event{
+				{Time: ago(3 * day), Command: "move", Paths: []string{a, "m/memories/c.md"}, Outcome: "ok", Made: []string{"m1"}},
+				{Time: ago(2 * day), Command: "move", Paths: []string{b, "m/memories/d.md"}, Outcome: "ok", Made: []string{"m2"}},
+				{Time: ago(2 * day), Command: "push", Outcome: "ok", Pushed: []string{"m1"}},
+				{Time: ago(1 * day), Command: "drop", Outcome: "ok", Dropped: []string{"m2"}},
+			},
+			facts: with(map[string]fact{
+				"m1": factOf("move: "+a+" to m/memories/c.md", "D "+a, "A m/memories/c.md"),
+				"m2": factOf("move: "+b+" to m/memories/d.md", "D "+b, "A m/memories/d.md"),
+			}),
+			want: []review{{created: 2, pushed: 1, dropped: 1, accepted: 1}},
+		},
+		{
 			name: "a revised plan is no mistake, and a forgotten memory is one",
 			events: []Event{
 				{Time: ago(5 * day), Command: "push", Outcome: "ok", Pushed: []string{"d1", "r1"}},

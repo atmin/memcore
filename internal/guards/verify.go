@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path"
@@ -85,16 +86,31 @@ func newVerifier(repo string) (*verifier, error) {
 // with everything in it. Only a removed memory file takes its name out of the [[name]] targets.
 // A command compares the faults with and without a removal, so only the faults that the removal adds stop it.
 func Faults(repo string, removed []string) ([]Finding, error) {
+	return FaultsWith(repo, nil, removed)
+}
+
+// FaultsWith returns the faults of every markdown document in the repo except the indexes, as if the writes
+// were made and the removed paths were gone. A write replaces a document on disk, or adds one. A command
+// compares the faults before and after a change, so only the faults that the change adds stop it.
+func FaultsWith(repo string, writes map[string][]byte, removed []string) ([]Finding, error) {
 	v, err := newVerifier(repo)
 	if err != nil {
 		return nil, err
 	}
 	v.gone = removed
+	for p := range writes {
+		v.pending = append(v.pending, path.Clean(p))
+	}
 	for name := range v.names {
 		for _, g := range removed {
 			if store.IsMemory(g) && path.Base(g) == name+".md" {
 				delete(v.names, name)
 			}
+		}
+	}
+	for p := range writes {
+		if store.IsMemory(path.Clean(p)) {
+			v.names[strings.TrimSuffix(path.Base(p), ".md")] = true
 		}
 	}
 	var faults []Finding
@@ -116,6 +132,9 @@ func Faults(repo string, removed []string) ([]Finding, error) {
 		if v.isGone(rel) || isIndex(rel) {
 			return nil
 		}
+		if _, ok := writes[rel]; ok {
+			return nil // checked below, with its new content
+		}
 		content, err := os.ReadFile(f)
 		if err != nil {
 			return err
@@ -129,6 +148,18 @@ func Faults(repo string, removed []string) ([]Finding, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("check the documents: %w", err)
+	}
+	written := slices.Sorted(maps.Keys(writes))
+	for _, k := range written {
+		p := path.Clean(k)
+		if !strings.HasSuffix(p, ".md") || v.isGone(p) || isIndex(p) {
+			continue
+		}
+		r, err := v.check(p, writes[k])
+		if err != nil {
+			return nil, err
+		}
+		faults = append(faults, r.Faults...)
 	}
 	return faults, nil
 }

@@ -61,7 +61,7 @@ func runRevise(env Env, args []string) error {
 		}
 		env.event().input(m.Name, m.Description, m.Type)
 		if want := strings.TrimSuffix(path.Base(rel), ".md"); m.Name != want {
-			return inputErrf("the name of %s is %s: a new name is memcore forget, then memcore remember", rel, want)
+			return inputErrf("the name of %s is %s: a new name is memcore move", rel, want)
 		}
 		old, err := os.Open(full)
 		if err != nil {

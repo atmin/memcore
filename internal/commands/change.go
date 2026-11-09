@@ -144,8 +144,17 @@ func apply(repo string, c change) (string, error) {
 		// A removal can leave a topic folder with nothing but its index. That folder goes, deepest first,
 		// so its parent index drops it. A draft never prunes, so a new topic folder stays.
 		goneTopic := map[string]bool{}
-		if len(c.removes) > 0 {
-			for _, tf := range topics {
+		var emptied []string // only the topic folders of a removal can empty
+		for _, r := range c.removes {
+			for _, tf := range store.Topics(r) {
+				if !slices.Contains(emptied, tf) {
+					emptied = append(emptied, tf)
+				}
+			}
+		}
+		deepestFirst(emptied)
+		{
+			for _, tf := range emptied {
 				full := filepath.Join(repo, filepath.FromSlash(tf))
 				if _, err := os.Stat(full); err != nil {
 					continue

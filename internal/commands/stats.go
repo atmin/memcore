@@ -36,7 +36,7 @@ const (
 )
 
 // queueSubjects start the subjects of the commits that agents add to the review queue.
-var queueSubjects = []string{"remember:", "revise:", "forget:", "draft:"}
+var queueSubjects = []string{"remember:", "revise:", "forget:", "draft:", "move:"}
 
 // fixupSubject starts the subject of a fixup, which push folds into the commit that it names.
 const fixupSubject = "fixup! "
@@ -377,7 +377,7 @@ func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]
 				t.forgotten++
 			}
 		}
-		if slices.Contains([]string{"remember", "revise", "forget", "draft"}, e.Command) {
+		if slices.Contains([]string{"remember", "revise", "forget", "draft", "move"}, e.Command) {
 			for _, sha := range e.Made {
 				w.review.created++
 				if f, ok := lookup(sha); ok && strings.HasPrefix(f.subject, fixupSubject) {

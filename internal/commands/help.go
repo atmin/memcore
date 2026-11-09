@@ -62,7 +62,7 @@ Replaces one document with the whole new version on standard input, and records 
 Name a memory by its name, and any other document by its path, as orient lists it.
 
 For a memory, the input has the frontmatter of memcore remember, with the same name: a new
-name is memcore forget, then memcore remember. memcore keeps the sessions and adds this one.
+name is memcore move. memcore keeps the sessions and adds this one.
 A plan, a note or a skill keeps its frontmatter, and a script keeps its mode.
 
 When the last change of the document is not pushed yet, the revision folds into that change
@@ -90,6 +90,16 @@ the removal folds into the commit that added it at the next push, so neither rem
 For example:
 
   memcore forget tests-before-code --reason "The plan template now says it."
+`,
+	"move": `memcore move <path or name> <new name> --reason <text>
+
+Renames a memory, a note or a plan in its folder, and records the reason. Name a memory by
+its name, and any other document by its path, as orient lists it. The same commit sets the
+name in the frontmatter, and rewrites every link to the document. For a memory, it rewrites
+every [[name]] too. move refuses a name that another memory holds, a path that exists, and a
+move that adds a fault. For example:
+
+  memcore move reference-stedo-app stedo-app --reason "The name states the topic."
 `,
 	"draft": `memcore draft <kind> [<name>] [--description <text>] [--at <dir>] [--topic <topic>] [--exec]
 
