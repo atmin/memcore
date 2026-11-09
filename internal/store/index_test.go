@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -174,16 +175,23 @@ func TestLines(t *testing.T) {
 	writeT(t, repo, "bad/memories/b.md", "no frontmatter\n", 0o644)
 	writeT(t, repo, "bad/notes/c.md", "---\nname: c\n---\n", 0o644)
 	writeT(t, repo, "bad/bin/run", "#!/bin/sh\necho run\n", 0o755)
+	writeT(t, repo, "bad/memories/t/README.md", "No frontmatter.\n", 0o644)
+	writeT(t, repo, "bad/memories/t/e.md", doc("Read when you test e."), 0o644)
+	writeT(t, repo, "bad/memories/no-index/f.md", doc("Read when you test f."), 0o644)
 	ix, err = Lines(repo, "bad")
 	if err != nil {
 		t.Fatalf("a level with bad documents: %v", err)
 	}
+	if got := ix.Of(KindMemories); len(got) != 2 {
+		t.Errorf("memories = %+v, want b and the topic folder t, and no line for a folder without an index", got)
+	}
 	for _, want := range []Line{
 		{KindMemories, "b", "bad/memories/b.md", "No description. Run memcore verify bad/memories/b.md."},
+		{KindMemories, "t/", "bad/memories/t/README.md", "No description. Run memcore verify bad/memories/t/README.md."},
 		{KindNotes, "c", "bad/notes/c.md", "No description. Run memcore verify bad/notes/c.md."},
 		{KindScripts, "run", "bad/bin/run", "No comment line says when to run it."},
 	} {
-		if got := ix.Of(want.Kind); len(got) != 1 || got[0] != want {
+		if got := ix.Of(want.Kind); !slices.Contains(got, want) || (want.Kind != KindMemories && len(got) != 1) {
 			t.Errorf("%s = %+v, want %+v", want.Kind, got, want)
 		}
 	}
@@ -213,6 +221,121 @@ func TestFolder(t *testing.T) {
 	for _, folder := range []string{"bin", "Notes", ".git", "+foo", "dev/+app", "dev/memories"} {
 		if got, ok := LevelOf(folder); ok {
 			t.Errorf("LevelOf(%q) = %q, true; want no level", folder, got)
+		}
+	}
+}
+
+func topicDoc(name, description string) string {
+	return "---\nname: " + name + "\ndescription: \"" + description + "\"\n---\n\nAn old body.\n"
+}
+
+func TestTopicIndex(t *testing.T) {
+	repo := t.TempDir()
+	writeT(t, repo, "dev/memories/a.md", doc("Read when you test a."), 0o644)
+	writeT(t, repo, "dev/memories/stedo/README.md", topicDoc("stedo", "Read when you query Stedo."), 0o644)
+	writeT(t, repo, "dev/memories/stedo/b.md", doc("Read when you test b."), 0o644)
+	writeT(t, repo, "dev/memories/stedo/cost/README.md", topicDoc("cost", "Read when you measure a query."), 0o644)
+	writeT(t, repo, "dev/memories/stedo/cost/c.md", doc("Read when you test c."), 0o644)
+	writeT(t, repo, "dev/memories/loose/d.md", doc("Read when you test d."), 0o644)
+	writeT(t, repo, "dev/notes/incidents/README.md", topicDoc("incidents", "Read when you look into an incident."), 0o644)
+	writeT(t, repo, "dev/notes/incidents/n.md", doc("Read when you test n."), 0o644)
+	writeT(t, repo, "memories/root/README.md", "No frontmatter.\n", 0o644)
+
+	t.Run("the level index lists each topic folder with an index", func(t *testing.T) {
+		ix, err := Lines(repo, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "# ~/dev\n\n## Memories\n\n" +
+			"- [a](memories/a.md): Read when you test a.\n" +
+			"- [stedo/](memories/stedo/README.md): Read when you query Stedo.\n" +
+			"\n## Notes\n\n" +
+			"- [incidents/](notes/incidents/README.md): Read when you look into an incident.\n"
+		if got := Render(ix); got != want {
+			t.Errorf("index =\n%s\nwant\n%s", got, want)
+		}
+	})
+
+	tests := []struct {
+		folder string
+		want   string
+	}{
+		{"dev/memories/stedo", "---\nname: stedo\ndescription: Read when you query Stedo.\n---\n\n# memories/stedo in ~/dev\n\n## Topics\n\n" +
+			"- [cost/](cost/README.md): Read when you measure a query.\n" +
+			"\n## Memories\n\n- [b](b.md): Read when you test b.\n"},
+		{"dev/memories/stedo/cost", "---\nname: cost\ndescription: Read when you measure a query.\n---\n\n# memories/stedo/cost in ~/dev\n\n## Memories\n\n" +
+			"- [c](c.md): Read when you test c.\n"},
+		{"dev/notes/incidents", "---\nname: incidents\ndescription: Read when you look into an incident.\n---\n\n# notes/incidents in ~/dev\n\n## Notes\n\n" +
+			"- [n](n.md): Read when you test n.\n"},
+		{"memories/root", "# memories/root in ~\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.folder, func(t *testing.T) {
+			if err := WriteTopicIndex(repo, tt.folder); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(tt.folder), "README.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("topic index =\n%s\nwant\n%s", got, tt.want)
+			}
+			ix, err := TopicIndex(repo, tt.folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if render, err := RenderTopic(repo, ix); err != nil || render != tt.want {
+				t.Errorf("RenderTopic = %q, %v; want the written index", render, err)
+			}
+		})
+	}
+
+	t.Run("documents sort by name", func(t *testing.T) {
+		writeT(t, repo, "dev/memories/order/README.md", topicDoc("order", "Read when you test the order."), 0o644)
+		writeT(t, repo, "dev/memories/order/a-b.md", doc("Read when you test a-b."), 0o644)
+		writeT(t, repo, "dev/memories/order/a.md", doc("Read when you test a."), 0o644)
+		ix, err := TopicIndex(repo, "dev/memories/order")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ix.Lines) != 2 || ix.Lines[0].Name != "a" || ix.Lines[1].Name != "a-b" {
+			t.Errorf("lines = %+v, want a before a-b", ix.Lines)
+		}
+	})
+
+	t.Run("a malformed frontmatter stops the write", func(t *testing.T) {
+		bad := "---\nname: bad\ndescription: [unclosed\n---\n\nBody.\n"
+		writeT(t, repo, "dev/memories/bad/README.md", bad, 0o644)
+		if err := WriteTopicIndex(repo, "dev/memories/bad"); err == nil {
+			t.Error("no error, want one for a malformed frontmatter")
+		}
+		if got, _ := os.ReadFile(filepath.Join(repo, "dev", "memories", "bad", "README.md")); string(got) != bad {
+			t.Errorf("index = %q, want it unchanged", got)
+		}
+	})
+
+	for _, folder := range []string{"dev/memories", "dev", "dev/plans/x", "dev/memories/none"} {
+		if err := WriteTopicIndex(repo, folder); err == nil {
+			t.Errorf("WriteTopicIndex(%q): no error, want one for a folder that is no topic folder", folder)
+		}
+	}
+
+	for _, tt := range []struct {
+		path string
+		want []string
+	}{
+		{"dev/memories/a.md", nil},
+		{"dev/memories/stedo/b.md", []string{"dev/memories/stedo"}},
+		{"dev/memories/stedo/cost/c.md", []string{"dev/memories/stedo/cost", "dev/memories/stedo"}},
+		{"dev/memories/stedo/README.md", []string{"dev/memories/stedo"}},
+		{"dev/notes/incidents/n.md", []string{"dev/notes/incidents"}},
+		{"dev/plans/p.md", nil},
+		{"dev/skills/x/memories/y/z.md", nil},
+		{"dev/README.md", nil},
+	} {
+		if got := Topics(tt.path); !slices.Equal(got, tt.want) {
+			t.Errorf("Topics(%q) = %q, want %q", tt.path, got, tt.want)
 		}
 	}
 }

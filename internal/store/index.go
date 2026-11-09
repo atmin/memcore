@@ -23,6 +23,7 @@ const (
 	KindPlans       = "plans"
 	KindNotes       = "notes"
 	KindLevels      = "levels"
+	KindTopics      = "topics" // the topic folders inside a topic folder
 )
 
 // Kinds are the kinds of index lines, in the order of a generated index.
@@ -88,6 +89,7 @@ var headings = map[string]string{
 	KindPlans:       "Plans",
 	KindNotes:       "Notes",
 	KindLevels:      "Levels",
+	KindTopics:      "Topics",
 }
 
 // Line is one line of an index.
@@ -98,9 +100,11 @@ type Line struct {
 	Text string // when to read the document
 }
 
-// Index holds the lines of one level, in the order of Kinds and then by name.
+// Index holds the lines of one level, in the order of Kinds and then by name. The index of a topic folder
+// also names the folder, and lists its topic folders first.
 type Index struct {
 	Level string
+	Topic string // the path of the topic folder in the repo, or "" for the index of a level
 	Lines []Line
 }
 
@@ -146,6 +150,16 @@ func Lines(repo, level string) (Index, error) {
 				d = noDescription(rel(p))
 			}
 			add(k.kind, strings.TrimSuffix(n, ".md"), p, d)
+		}
+		if k.kind == KindPlans {
+			continue
+		}
+		topics, err := topicLines(dir, folder, k.folder)
+		if err != nil {
+			return ix, err
+		}
+		for _, l := range topics {
+			add(k.kind, l.Name, l.Path, l.Text)
 		}
 	}
 
@@ -219,6 +233,146 @@ func Lines(repo, level string) (Index, error) {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return ix, nil
+}
+
+// topicLines returns one line for each topic folder directly inside the folder sub of dir: a subfolder with a
+// README.md. Each path is relative to dir, and each text is the description of the README.md. prefix is the
+// path of dir in the repo.
+func topicLines(dir, prefix, sub string) ([]Line, error) {
+	names, err := entries(dir, sub, true)
+	if err != nil {
+		return nil, err
+	}
+	var lines []Line
+	for _, n := range names {
+		p := path.Join(sub, n, "README.md")
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err != nil {
+			continue // a folder without an index is no topic folder
+		}
+		d, err := description(filepath.Join(dir, filepath.FromSlash(p)))
+		if err != nil {
+			return nil, fmt.Errorf("index %s: %w", p, err)
+		}
+		if d == "" {
+			d = noDescription(path.Join(prefix, p))
+		}
+		lines = append(lines, Line{Name: n + "/", Path: p, Text: d})
+	}
+	return lines, nil
+}
+
+// TopicIndex returns the lines of a topic folder, named by its path in the repo. Its topic folders come first,
+// then its documents, each by name.
+func TopicIndex(repo, folder string) (Index, error) {
+	level, kind, _, ok := kindOf(folder + "/README.md")
+	if !ok || !IsTopicIndex(folder+"/README.md") {
+		return Index{}, fmt.Errorf("%s is no topic folder", folder)
+	}
+	ix := Index{Level: level, Topic: folder}
+	dir := filepath.Join(repo, filepath.FromSlash(folder))
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		return ix, fmt.Errorf("%s is no topic folder: it has no README.md", folder)
+	}
+	rel := func(p string) string { return path.Join(folder, p) }
+	topics, err := topicLines(dir, folder, ".")
+	if err != nil {
+		return ix, err
+	}
+	for _, l := range topics {
+		ix.Lines = append(ix.Lines, Line{Kind: KindTopics, Name: l.Name, Path: rel(l.Path), Text: l.Text})
+	}
+	names, err := entries(dir, ".", false)
+	if err != nil {
+		return ix, err
+	}
+	for _, n := range names {
+		if !strings.HasSuffix(n, ".md") || n == "README.md" {
+			continue
+		}
+		d, err := description(filepath.Join(dir, n))
+		if err != nil {
+			return ix, fmt.Errorf("index %s: %w", rel(n), err)
+		}
+		if d == "" {
+			d = noDescription(rel(n))
+		}
+		ix.Lines = append(ix.Lines, Line{Kind: kind, Name: strings.TrimSuffix(n, ".md"), Path: rel(n), Text: d})
+	}
+	slices.SortStableFunc(ix.Lines, func(a, b Line) int {
+		if a.Kind != b.Kind {
+			if a.Kind == KindTopics {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return ix, nil
+}
+
+// RenderTopic returns the index of a topic folder as the text of its README.md. It keeps the frontmatter of
+// the README.md on disk, in its canonical form, and generates the body.
+func RenderTopic(repo string, ix Index) (string, error) {
+	var b strings.Builder
+	have, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(ix.Topic), "README.md"))
+	if err != nil {
+		return "", fmt.Errorf("read the index of %s: %w", ix.Topic, err)
+	}
+	if HasFrontmatter(string(have)) {
+		fm, _, err := ParseFrontmatter(strings.NewReader(string(have)))
+		if err != nil {
+			return "", fmt.Errorf("read the frontmatter of the index of %s: %w", ix.Topic, err)
+		}
+		b.Write(fm.Bytes())
+		b.WriteString("\n")
+	}
+	title := "~"
+	if ix.Level != "" {
+		title += "/" + ix.Level
+	}
+	fmt.Fprintf(&b, "# %s in %s\n", strings.TrimPrefix(ix.Topic, Folder(ix.Level)+"/"), title)
+	for _, kind := range append([]string{KindTopics}, Kinds...) {
+		lines := ix.Of(kind)
+		if len(lines) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n## %s\n\n", headings[kind])
+		for _, l := range lines {
+			link := strings.TrimPrefix(l.Path, ix.Topic+"/")
+			fmt.Fprintf(&b, "- [%s](%s): %s\n", labelEscaper.Replace(l.Name), (&url.URL{Path: link}).EscapedPath(), l.Text)
+		}
+	}
+	return b.String(), nil
+}
+
+// WriteTopicIndex writes the index of a topic folder, named by its path in the repo, as its README.md.
+func WriteTopicIndex(repo, folder string) error {
+	ix, err := TopicIndex(repo, folder)
+	if err != nil {
+		return err
+	}
+	text, err := RenderTopic(repo, ix)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(folder), "README.md"), []byte(text), 0o644); err != nil {
+		return fmt.Errorf("write the index of %s: %w", folder, err)
+	}
+	return nil
+}
+
+// Topics returns the topic folders on the path of a document, deepest first. The index of a topic folder
+// lies in its own folder.
+func Topics(p string) []string {
+	_, kind, rest, ok := kindOf(p)
+	if !ok || (kind != "memories" && kind != "notes") || len(rest) < 2 {
+		return nil
+	}
+	var topics []string
+	for d := path.Dir(p); len(rest) >= 2; d, rest = path.Dir(d), rest[1:] {
+		topics = append(topics, d)
+	}
+	return topics
 }
 
 // entries lists the names in a folder of a level: directories when dirs is true, files otherwise.
