@@ -24,6 +24,7 @@
   const main = document.getElementById("main");
   const notices = document.getElementById("notices");
   const pushButton = document.getElementById("push");
+  const reviewCount = document.getElementById("review-count");
   // queue is the queue that the window shows. head is the newest tip of main that the event stream sent.
   const state = { queue: null, head: "", selected: 0, collapsed: new Set(), tree: null, reviewTree: null };
 
@@ -521,29 +522,75 @@
     </div>`;
   }
 
-  // Entry shows a commit of the queue, with its files. "Seen" is a mark of this browser only.
+  // lineCounts counts the added and the removed lines of the files of an entry, from their patches.
+  function lineCounts(files) {
+    let add = 0;
+    let del = 0;
+    for (const f of files) {
+      for (const line of hunkLines(f.patch || "")) {
+        if (line.startsWith("+")) add++;
+        else if (line.startsWith("-")) del++;
+      }
+    }
+    return { add, del };
+  }
+
+  // Stat shows the added and the removed lines, and five blocks that split the change between them.
+  function Stat({ add, del }) {
+    const total = add + del;
+    if (!total) return null;
+    const colored = Math.min(5, total);
+    const green = Math.round((colored * add) / total);
+    const blocks = [0, 1, 2, 3, 4].map((i) => (i < green ? "add" : i < colored ? "del" : ""));
+    return html`<span class="stat" title=${`${plural(add, "line")} added, ${plural(del, "line")} removed`}>
+      <span class="plus">+${add}</span> <span class="minus">-${del}</span>
+      <span class="blocks" aria-hidden="true">${blocks.map((b) => html`<i class=${b}></i>`)}</span>
+    </span>`;
+  }
+
+  // toggleFold folds an entry, or unfolds it, or switches it when fold is undefined. The caller renders Review.
+  function toggleFold(entry, fold) {
+    const key = seenKey(entry);
+    if (fold === undefined) fold = !state.collapsed.has(key);
+    if (fold) state.collapsed.add(key);
+    else state.collapsed.delete(key);
+  }
+
+  // Entry shows a commit of the queue as a section that folds, with its files. "Seen" is a mark of this browser
+  // only, and it folds the entry.
   function Entry({ entry, index, selected, collapsed, touches }) {
     const [seen, setSeenState] = useState(() => isSeen(entry));
+    const counts = useMemo(() => lineCounts(entry.files), [entry]);
     const meta = [];
     if (entry.body) meta.push(entry.body);
     if (entry.fixups.length) meta.push(`${plural(entry.fixups.length, "fixup")} fold${entry.fixups.length === 1 ? "s" : ""} in.`);
     const cls = ["entry", selected && "selected", seen && "seen", collapsed && "collapsed", touches && "touches"].filter(Boolean).join(" ");
+    // Each handler changes state only. The click of the entry then selects it, and renders Review.
     return html`<section class=${cls} data-index=${index} tabindex="-1" onClick=${() => select(index, false)}>
       <div class="entry-head">
+        <button type="button" class="fold" aria-expanded=${!collapsed} aria-label=${collapsed ? "Unfold the commit" : "Fold the commit"}
+          onClick=${() => toggleFold(entry)}></button>
         <span class="sha">${entry.commit ? short(entry.commit) : "new"}</span>
         ${isCode(entry) ? html`<span class="tag code">Code</span>` : null}
         <span class="subject">${entry.subject}</span>
         <span class="grow"></span>
-        <label class="muted"><input type="checkbox" aria-label="Seen" checked=${seen}
+        <${Stat} add=${counts.add} del=${counts.del} />
+        <label class="seen-box"><input type="checkbox" checked=${seen}
           onClick=${(e) => {
             // click, not change: the click of the entry re-renders Review at once, before change fires
-            setSeen(entry, e.currentTarget.checked);
-            setSeenState(e.currentTarget.checked);
+            const on = e.currentTarget.checked;
+            setSeen(entry, on);
+            setSeenState(on);
+            toggleFold(entry, on);
           }} /> Seen</label>
         ${entry.commit ? html`<button type="button" onClick=${() => askDrop(entry)}>Drop</button>` : null}
       </div>
-      ${meta.length ? html`<div class="entry-meta">${meta.join("\n")}</div>` : null}
-      ${entry.files.map((f) => html`<${FileDiff} key=${f.path} file=${f} />`)}
+      ${collapsed
+        ? null
+        : html`<div class="entry-body">
+            ${meta.length ? html`<div class="entry-meta">${meta.join("\n")}</div>` : null}
+            ${entry.files.map((f) => html`<${FileDiff} key=${f.path} file=${f} />`)}
+          </div>`}
     </section>`;
   }
 
@@ -664,7 +711,7 @@
         setTouched(d.path);
         setJump((n) => n + 1);
         const first = entries.findIndex((e) => e.files.some((f) => f.path === d.path));
-        state.collapsed.delete(seenKey(entries[first])); // a collapsed entry hides the file
+        toggleFold(entries[first], false); // a folded entry hides the file
         select(first, false);
         return;
       }
@@ -731,7 +778,8 @@
     state.queue = q;
     state.reviewTree = tree;
     state.selected = 0;
-    state.collapsed = new Set();
+    // A seen entry starts folded.
+    state.collapsed = new Set((q.entries || []).filter(isSeen).map(seenKey));
     renderReview();
     clearNotices("queue");
     // a commit landed while the queue or the tree loaded
@@ -748,6 +796,8 @@
     );
     pushButton.hidden = !entries.length;
     pushButton.textContent = `Push ${plural(entries.length, "commit")}`;
+    reviewCount.hidden = !entries.length;
+    reviewCount.textContent = entries.length;
   }
 
   function select(i, scroll) {
@@ -1002,8 +1052,7 @@
     if (e.key === "j") select(state.selected + 1, true);
     else if (e.key === "k") select(state.selected - 1, true);
     else if (e.key === "Enter" && entry) {
-      const key = seenKey(entry);
-      if (!state.collapsed.delete(key)) state.collapsed.add(key);
+      toggleFold(entry);
       renderReview();
     }
     else if (e.key === "d" && entry && entry.commit) askDrop(entry);

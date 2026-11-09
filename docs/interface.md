@@ -37,7 +37,7 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 **The icon.** `internal/ui/static/icon.svg` is the one source of the icon: a 16 x 16 pixel wordmark, MEM above CORE. It has black letters on white in light mode, and white letters on black in dark mode. The window, its favicon and memco.re use the file itself. The application icon draws its pixels as whole pixels: full bleed at 16 and 32 px, and inset on a white tile with round corners from 64 px.
 
 The window has three views:
-- **Review** lists the queue as `inbox` does. Entries that change a skill or a script come first. A push confirms in a dialog, and runs `push --expect`, so it pushes only the queue that the window shows. A drop confirms in a dialog, and records your reason.
+- **Review** lists the queue as `inbox` does. Entries that change a skill or a script come first. Each entry is a section that folds, with its arrow or with Enter. Its head counts the added and the removed lines. "Seen" folds the entry, and a seen entry starts folded. A push confirms in a dialog, and runs `push --expect`, so it pushes only the queue that the window shows. A drop confirms in a dialog, and records your reason.
 - **Browse** shows each level, its index and its documents. Mermaid blocks render as diagrams, with pele.
 - **Search** finds text in every document, with `git grep`. It keeps no index on disk.
 

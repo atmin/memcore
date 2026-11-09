@@ -71,13 +71,13 @@ func TestIndexLoadsVendor(t *testing.T) {
 }
 
 // TestIndexBrandIcon checks that the bar shows the 16 x 16 icon at 32 px, so each pixel of the icon is two
-// pixels of the screen.
+// pixels of the screen. The icon is the only content of its link, so its alt text names memcore.
 func TestIndexBrandIcon(t *testing.T) {
 	data, err := static.ReadFile("static/index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `<img src="/static/icon.svg" alt="" width="32" height="32">`; !strings.Contains(string(data), want) {
+	if want := `<img src="/static/icon.svg" alt="memcore" width="32" height="32">`; !strings.Contains(string(data), want) {
 		t.Errorf("index.html has no %s", want)
 	}
 }
