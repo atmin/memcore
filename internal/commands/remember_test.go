@@ -439,3 +439,58 @@ func TestRememberTopics(t *testing.T) {
 		}
 	})
 }
+
+func TestRememberTopicFlag(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	for _, args := range [][]string{
+		{"memories/stedo", "--description", "Read when you query Stedo."},
+		{"memories/stedo/cost", "--description", "Read when you measure a query."},
+	} {
+		if out, err := run(t, dev, "", append([]string{"draft", "topic"}, args...)...); err != nil {
+			t.Fatalf("draft topic: %v\n%s", err, out)
+		}
+	}
+
+	t.Run("into a nested topic folder", func(t *testing.T) {
+		if out, err := run(t, dev, memoryText("slow-scan", "Read when a scan of Stedo is slow.", "A fact."), "remember", "--topic", "stedo/cost"); err != nil {
+			t.Fatalf("remember: %v\n%s", err, out)
+		}
+		if got := head(t, repo); got != "remember: dev/memories/stedo/cost/slow-scan.md" {
+			t.Errorf("subject = %q", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "stedo", "cost", "README.md")); !strings.Contains(got, "- [slow-scan](slow-scan.md): Read when a scan of Stedo is slow.\n") {
+			t.Errorf("topic index =\n%s\nwant the memory", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); strings.Contains(got, "slow-scan") {
+			t.Errorf("dev/README.md =\n%s\nwant no line of the memory", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("a name that a file system without case maps to the index", func(t *testing.T) {
+		index := filepath.Join(repo, "dev", "memories", "stedo", "README.md")
+		before := readT(t, index)
+		_, ignoresCase := os.Stat(filepath.Join(repo, "dev", "memories", "stedo", "readme.md"))
+		_, err := run(t, dev, memoryText("readme", "Read when you test a name.", "A fact."), "remember", "--topic", "stedo")
+		if ignoresCase == nil && (err == nil || !strings.Contains(err.Error(), "a file exists")) {
+			t.Errorf("error = %v, want a refusal of the taken path", err)
+		}
+		if got := readT(t, index); !strings.HasPrefix(got, before[:strings.Index(before, "# ")]) {
+			t.Errorf("topic index =\n%s\nwant its frontmatter as it was", got)
+		}
+	})
+
+	t.Run("into a missing topic folder refuses", func(t *testing.T) {
+		before := gitT(t, repo, "rev-parse", "HEAD")
+		_, err := run(t, dev, memoryText("lost-fact", "Read when you lose a fact.", "A fact."), "remember", "--topic", "none")
+		if err == nil || !strings.Contains(err.Error(), "memcore draft topic memories/none") {
+			t.Errorf("error = %v, want one that names the draft of the topic", err)
+		}
+		if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+			t.Error("the refused remember made a commit")
+		}
+		clean(t, repo)
+	})
+}

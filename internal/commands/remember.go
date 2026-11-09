@@ -25,11 +25,12 @@ func runRemember(env Env, args []string) error {
 	flags.SetOutput(io.Discard)
 	isNew := flags.Bool("new", false, "write the memory even when near-duplicates exist")
 	at := flags.String("at", "", "place the memory at the level of this directory, on the path to home")
+	topic := flags.String("topic", "", "place the memory in this topic folder of the memories folder")
 	if err := flags.Parse(args); err != nil {
 		return usageErr(err.Error())
 	}
 	if flags.NArg() != 0 {
-		return usageErr("usage: memcore remember [--new] [--at <dir>] < memory.md")
+		return usageErr("usage: memcore remember [--new] [--at <dir>] [--topic <topic>] < memory.md")
 	}
 	repo, err := memoryRepo()
 	if err != nil {
@@ -59,7 +60,12 @@ func runRemember(env Env, args []string) error {
 	if err != nil {
 		return fmt.Errorf("place the memory: %w", err)
 	}
-	rel := path.Join(store.Folder(level), "memories", m.Name+".md")
+	if *topic != "" {
+		if err := topicPath(*topic); err != nil {
+			return err
+		}
+	}
+	rel := path.Join(store.Folder(level), "memories", *topic, m.Name+".md")
 
 	unlock, err := lockWrite(repo)
 	if err != nil {
@@ -67,12 +73,21 @@ func runRemember(env Env, args []string) error {
 	}
 	defer unlock()
 
+	if *topic != "" {
+		if err := needTopic(repo, level, "memories", *topic); err != nil {
+			return err
+		}
+	}
 	taken, err := findMemory(repo, m.Name)
 	if err != nil {
 		return err
 	}
 	if taken != "" {
 		return inputErrf("the name %s is taken by %s: choose another name", m.Name, taken)
+	}
+	// A file system that ignores case serves README.md for readme.md, so the path itself must be free.
+	if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(rel))); err == nil {
+		return inputErrf("a file exists at %s: choose another name", rel)
 	}
 	if !*isNew {
 		// The working directory sees every level on its path. So near-duplicates come from there, even when

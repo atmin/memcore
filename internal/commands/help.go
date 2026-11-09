@@ -23,11 +23,11 @@ A skill prints as the person accepted it. For example:
 
   memcore show dev/memories/tests-before-code.md
 `,
-	"remember": `memcore remember [--new] [--at <dir>] < memory.md
+	"remember": `memcore remember [--new] [--at <dir>] [--topic <topic>] < memory.md
 
 Reads one memory from standard input: a frontmatter between two --- lines, then the body.
 
-  name         the topic, in lower case with hyphens, unique in the memory repo
+  name         the subject, in lower case with hyphens, unique in the memory repo
   description  one line that says when to read the memory, such as "Read before you ..."
   type         user, feedback, project or reference
   sessions     leave it out: memcore fills it from the session of the agent
@@ -37,8 +37,9 @@ Link another memory with [[name]].
 
 memcore places the memory at the level of the working directory. --at places it at the
 level of a directory on the path up to home: --at ~ for a fact about the person, in every
-project. When memories on the path share most words of the description, memcore lists
-them and writes nothing, unless --new.
+project. --topic places it in a topic folder of the memories folder, as --topic stedo/cost,
+and memcore draft topic starts that folder. When memories on the path share most words of
+the description, memcore lists them and writes nothing, unless --new.
 
 Example:
 
@@ -90,13 +91,16 @@ For example:
 
   memcore forget tests-before-code --reason "The plan template now says it."
 `,
-	"draft": `memcore draft <kind> [<topic>] [--description <text>] [--at <dir>] [--exec]
+	"draft": `memcore draft <kind> [<name>] [--description <text>] [--at <dir>] [--topic <topic>] [--exec]
 
 Starts a document from its template at the level of the working directory, or of --at,
 and commits it. Then memcore revise fills it. The kinds:
 
-  plan <topic>         plans/<topic>.md, from the plan template; needs --description
-  note <topic>         notes/<topic>.md, a dated investigation; needs --description
+  plan <name>          plans/<name>.md, from the plan template; needs --description
+  note <name>          notes/<name>.md, a dated investigation; needs --description;
+                       --topic places it in a topic folder, as notes/<topic>/<name>.md
+  topic <kind>/<topic> the README.md of a topic folder in memories or notes, as
+                       memories/stedo; needs --description, which says when to read it
   script <name>        bin/<name>, executable; --description is its comment line
   helper <name>        bin/<name>, a file beside the scripts, not executable
   skill <name>         skills/<name>/SKILL.md; needs --description
@@ -104,8 +108,9 @@ and commits it. Then memcore revise fills it. The kinds:
   conventions          conventions.md, the rules of the repo
   glossary             glossary.md, the terms of the level
 
-A topic is lower case with hyphens. A script name is unique in the memory repo, and no
-command on PATH may hold it. A description says when to read, or when to run. For example:
+A name is lower case with hyphens. A script name is unique in the memory repo, and no
+command on PATH may hold it. A topic folder groups the memories or notes of one topic, and
+memcore writes its index below the frontmatter. A nested topic needs its parent first. A description says when to read, or when to run. For example:
 
   memcore draft note slow-search --description "Read when search is slow."
 `,

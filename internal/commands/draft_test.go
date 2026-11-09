@@ -148,3 +148,79 @@ func TestDraft(t *testing.T) {
 		}
 	})
 }
+
+func TestDraftTopics(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+
+	t.Run("a topic folder of memories", func(t *testing.T) {
+		if out, err := run(t, dev, "", "draft", "topic", "memories/stedo", "--description", "Read when you query Stedo."); err != nil {
+			t.Fatalf("draft: %v\n%s", err, out)
+		}
+		if got := head(t, repo); got != "draft: dev/memories/stedo/README.md" {
+			t.Errorf("subject = %q", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "stedo", "README.md")); got != "---\nname: stedo\ndescription: Read when you query Stedo.\n---\n\n# memories/stedo in ~/dev\n" {
+			t.Errorf("topic index = %q", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); !strings.Contains(got, "- [stedo/](memories/stedo/README.md): Read when you query Stedo.\n") {
+			t.Errorf("dev/README.md =\n%s\nwant the line of the topic folder", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("a nested topic folder", func(t *testing.T) {
+		if out, err := run(t, dev, "", "draft", "topic", "memories/stedo/cost", "--description", "Read when you measure a query."); err != nil {
+			t.Fatalf("draft: %v\n%s", err, out)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "stedo", "README.md")); !strings.Contains(got, "## Topics\n\n- [cost/](cost/README.md): Read when you measure a query.\n") {
+			t.Errorf("parent topic index =\n%s\nwant the nested topic", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("a note in a topic folder of notes", func(t *testing.T) {
+		if out, err := run(t, dev, "", "draft", "topic", "notes/incidents", "--description", "Read when you look into an incident."); err != nil {
+			t.Fatalf("draft topic: %v\n%s", err, out)
+		}
+		if out, err := run(t, dev, "", "draft", "note", "slow-search", "--topic", "incidents", "--description", "Read when search is slow."); err != nil {
+			t.Fatalf("draft note: %v\n%s", err, out)
+		}
+		if got := head(t, repo); got != "draft: dev/notes/incidents/slow-search.md" {
+			t.Errorf("subject = %q", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "notes", "incidents", "README.md")); !strings.Contains(got, "- [slow-search](slow-search.md): Read when search is slow.\n") {
+			t.Errorf("topic index =\n%s\nwant the note", got)
+		}
+		clean(t, repo)
+	})
+
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"a plan folder", []string{"topic", "plans/x", "--description", "Read when you test."}, "memories or notes"},
+		{"no topic", []string{"topic", "memories", "--description", "Read when you test."}, "memories or notes"},
+		{"a missing parent", []string{"topic", "memories/none/child", "--description", "Read when you test."}, "memcore draft topic memories/none"},
+		{"a bad name", []string{"topic", "memories/Bad_Name", "--description", "Read when you test."}, "lower case"},
+		{"a reserved name", []string{"topic", "memories/bin", "--description", "Read when you test."}, "reserved"},
+		{"no description", []string{"topic", "memories/other"}, "--description"},
+		{"an existing topic", []string{"topic", "memories/stedo", "--description", "Read when you test."}, "exists"},
+		{"a note in a missing topic", []string{"note", "x", "--topic", "none", "--description", "Read when you test."}, "memcore draft topic notes/none"},
+		{"a plan in a topic", []string{"plan", "x", "--topic", "incidents", "--description", "Read when you test."}, "--topic"},
+	} {
+		t.Run(tt.name+" refuses", func(t *testing.T) {
+			before := gitT(t, repo, "rev-parse", "HEAD")
+			_, err := run(t, dev, "", append([]string{"draft"}, tt.args...)...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want one that holds %q", err, tt.want)
+			}
+			if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+				t.Error("the refused draft made a commit")
+			}
+			clean(t, repo)
+		})
+	}
+}

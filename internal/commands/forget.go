@@ -42,6 +42,15 @@ func runForget(env Env, args []string) error {
 		return err
 	}
 	env.event().Paths, env.event().Reason = []string{target}, *reason
+	if store.IsTopicIndex(target) {
+		empty, err := topicEmpty(repo, path.Dir(target))
+		if err != nil {
+			return err
+		}
+		if !empty {
+			return inputErrf("%s holds documents, so forget removed nothing: move or forget them first, and the folder goes with the last one", path.Dir(target))
+		}
+	}
 
 	before, err := guards.Faults(repo, nil)
 	if err != nil {

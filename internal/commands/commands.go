@@ -36,10 +36,10 @@ func Table() []Command {
 	return []Command{
 		{Name: "orient", Does: "Shows these commands, the voice and the indexes from the working directory up to the root.", Run: runOrient},
 		{Name: "show", Args: "<path>", Does: "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.", Run: runShow},
-		{Name: "remember", Args: "[--new] [--at <dir>]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
+		{Name: "remember", Args: "[--new] [--at <dir>] [--topic <topic>]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
 		{Name: "revise", Args: "<path or name> --reason <text>", Does: "Replaces a document with the one on standard input, checks it, and commits it with the reason.", Run: runRevise},
 		{Name: "forget", Args: "<path or name> --reason <text>", Does: "Removes a document, or the folder of a skill, and commits the removal with the reason.", Run: runForget},
-		{Name: "draft", Args: "<kind> [<topic>]", Does: "Starts a plan, a note, a script, a helper, a skill, a conventions file or a glossary from its template, and commits it.", Run: runDraft},
+		{Name: "draft", Args: "<kind> [<name>]", Does: "Starts a plan, a note, a script, a helper, a skill, a topic folder, a conventions file or a glossary from its template, and commits it.", Run: runDraft},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits as the fold at push leaves them.", Run: runInbox},

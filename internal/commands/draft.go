@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,16 +33,17 @@ func runDraft(env Env, args []string) error {
 	description := flags.String("description", "", "the line that the index shows")
 	at := flags.String("at", "", "start the document at the level of this directory, on the path to home")
 	executable := flags.Bool("exec", false, "make a file inside a skill executable")
+	topic := flags.String("topic", "", "start a note in this topic folder of the notes folder")
 	pos, err := parseInterleaved(flags, args)
 	if err != nil {
 		return usageErr(err.Error())
 	}
 	if len(pos) < 1 || len(pos) > 2 {
-		return usageErr("usage: memcore draft <kind> [<topic>] [--description <text>] [--at <dir>]")
+		return usageErr("usage: memcore draft <kind> [<name>] [--description <text>] [--at <dir>] [--topic <topic>]")
 	}
-	kind, topic := pos[0], ""
+	kind, name := pos[0], ""
 	if len(pos) == 2 {
-		topic = pos[1]
+		name = pos[1]
 	}
 	repo, err := openRepo()
 	if err != nil {
@@ -56,9 +58,18 @@ func runDraft(env Env, args []string) error {
 		return err
 	}
 	folder := store.Folder(level)
-	d, err := template(kind, topic, strings.TrimSpace(*description), level, *executable)
+	d, err := template(kind, name, strings.TrimSpace(*description), level, *executable)
 	if err != nil {
 		return err
+	}
+	if *topic != "" {
+		if kind != "note" {
+			return usageErr("--topic places only a note: memcore remember --topic places a memory")
+		}
+		if err := topicPath(*topic); err != nil {
+			return err
+		}
+		d.path = path.Join("notes", *topic, name+".md")
 	}
 	rel := path.Join(folder, d.path)
 
@@ -73,13 +84,26 @@ func runDraft(env Env, args []string) error {
 	if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(rel))); err == nil {
 		return inputErrf("%s exists: memcore revise changes it", rel)
 	}
+	if *topic != "" {
+		if err := needTopic(repo, level, "notes", *topic); err != nil {
+			return err
+		}
+	}
+	if kind == "topic" {
+		if parent := path.Dir(name); strings.Contains(parent, "/") {
+			kindFolder, sub, _ := strings.Cut(parent, "/")
+			if err := needTopic(repo, level, kindFolder, sub); err != nil {
+				return err
+			}
+		}
+	}
 	if d.inSkill != "" {
 		if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(path.Join(folder, "skills", d.inSkill, "SKILL.md")))); err != nil {
 			return inputErrf("no skill %s at %s: memcore draft skill %s starts it", d.inSkill, title(level), d.inSkill)
 		}
 	}
 	if kind == "script" {
-		if err := freeScriptName(repo, topic); err != nil {
+		if err := freeScriptName(repo, name); err != nil {
 			return err
 		}
 	}
@@ -115,50 +139,50 @@ type draft struct {
 }
 
 // template returns the draft of a kind, from its template.
-func template(kind, topic, description, level string, executable bool) (draft, error) {
-	needsTopic := map[string]bool{"plan": true, "note": true, "script": true, "helper": true, "skill": true}
-	needsDescription := map[string]bool{"plan": true, "note": true, "script": true}
+func template(kind, name, description, level string, executable bool) (draft, error) {
+	needsName := map[string]bool{"plan": true, "note": true, "script": true, "helper": true, "skill": true, "topic": true}
+	needsDescription := map[string]bool{"plan": true, "note": true, "script": true, "topic": true}
 	switch {
-	case needsTopic[kind] && topic == "":
-		return draft{}, usageErr(fmt.Sprintf("usage: memcore draft %s <topic>", kind))
-	case !needsTopic[kind] && topic != "":
-		return draft{}, usageErr(fmt.Sprintf("usage: memcore draft %s, with no topic", kind))
-	case (needsDescription[kind] || (kind == "skill" && !strings.Contains(topic, "/"))) && description == "":
+	case needsName[kind] && name == "":
+		return draft{}, usageErr(fmt.Sprintf("usage: memcore draft %s <name>", kind))
+	case !needsName[kind] && name != "":
+		return draft{}, usageErr(fmt.Sprintf("usage: memcore draft %s, with no name", kind))
+	case (needsDescription[kind] || (kind == "skill" && !strings.Contains(name, "/"))) && description == "":
 		return draft{}, usageErr(fmt.Sprintf("memcore draft %s needs --description, the line that the index shows", kind))
 	case strings.ContainsAny(description, "\r\n"):
 		return draft{}, inputErrf("the description is one line, with no line break")
 	}
 	front := func() string {
-		fm := store.Frontmatter{Keys: []string{"name", "description"}, Values: map[string]string{"name": topic, "description": description}}
+		fm := store.Frontmatter{Keys: []string{"name", "description"}, Values: map[string]string{"name": name, "description": description}}
 		return string(fm.Bytes())
 	}
 	switch kind {
 	case "plan":
-		if !docNameRE.MatchString(topic) {
-			return draft{}, inputErrf("the topic %s is not lower case with hyphens", topic)
+		if !docNameRE.MatchString(name) {
+			return draft{}, inputErrf("the name %s is not lower case with hyphens", name)
 		}
 		body, err := planTemplate()
 		if err != nil {
 			return draft{}, err
 		}
-		return draft{path: "plans/" + topic + ".md", content: front() + body, mode: 0o644}, nil
+		return draft{path: "plans/" + name + ".md", content: front() + body, mode: 0o644}, nil
 	case "note":
-		if !docNameRE.MatchString(topic) {
-			return draft{}, inputErrf("the topic %s is not lower case with hyphens", topic)
+		if !docNameRE.MatchString(name) {
+			return draft{}, inputErrf("the name %s is not lower case with hyphens", name)
 		}
-		content := fmt.Sprintf("%s\n# %s\n\nFindings as of %s.\n", front(), heading(topic), time.Now().Format("2006-01-02"))
-		return draft{path: "notes/" + topic + ".md", content: content, mode: 0o644}, nil
+		content := fmt.Sprintf("%s\n# %s\n\nFindings as of %s.\n", front(), heading(name), time.Now().Format("2006-01-02"))
+		return draft{path: "notes/" + name + ".md", content: content, mode: 0o644}, nil
 	case "script", "helper":
-		if !binNameRE.MatchString(topic) {
-			return draft{}, inputErrf("the name %s is not lower case letters, digits, dots, underscores and hyphens", topic)
+		if !binNameRE.MatchString(name) {
+			return draft{}, inputErrf("the name %s is not lower case letters, digits, dots, underscores and hyphens", name)
 		}
 		if kind == "helper" {
-			return draft{path: "bin/" + topic, mode: 0o644}, nil
+			return draft{path: "bin/" + name, mode: 0o644}, nil
 		}
-		content := fmt.Sprintf("#!/bin/sh\n# %s\n# Usage: %s\nset -eu\n", description, topic)
-		return draft{path: "bin/" + topic, content: content, mode: 0o755}, nil
+		content := fmt.Sprintf("#!/bin/sh\n# %s\n# Usage: %s\nset -eu\n", description, name)
+		return draft{path: "bin/" + name, content: content, mode: 0o755}, nil
 	case "skill":
-		if name, file, ok := strings.Cut(topic, "/"); ok {
+		if name, file, ok := strings.Cut(name, "/"); ok {
 			if !docNameRE.MatchString(name) {
 				return draft{}, inputErrf("the skill name %s is not lower case with hyphens", name)
 			}
@@ -173,17 +197,53 @@ func template(kind, topic, description, level string, executable bool) (draft, e
 			}
 			return draft{path: "skills/" + name + "/" + file, mode: mode, inSkill: name}, nil
 		}
-		if !docNameRE.MatchString(topic) {
-			return draft{}, inputErrf("the name %s is not lower case with hyphens", topic)
+		if !docNameRE.MatchString(name) {
+			return draft{}, inputErrf("the name %s is not lower case with hyphens", name)
 		}
-		return draft{path: "skills/" + topic + "/SKILL.md", content: fmt.Sprintf("%s\n# %s\n", front(), heading(topic)), mode: 0o644}, nil
+		return draft{path: "skills/" + name + "/SKILL.md", content: fmt.Sprintf("%s\n# %s\n", front(), heading(name)), mode: 0o644}, nil
+	case "topic":
+		kindFolder, sub, _ := strings.Cut(name, "/")
+		if (kindFolder != "memories" && kindFolder != "notes") || sub == "" {
+			return draft{}, inputErrf("a topic folder sits in memories or notes, as memories/<topic>: %s does not", name)
+		}
+		if err := topicPath(sub); err != nil {
+			return draft{}, err
+		}
+		fm := store.Frontmatter{Keys: []string{"name", "description"}, Values: map[string]string{"name": path.Base(name), "description": description}}
+		return draft{path: name + "/README.md", content: string(fm.Bytes()), mode: 0o644}, nil
 	case "conventions":
 		return draft{path: "conventions.md", content: fmt.Sprintf("# Conventions of %s\n", title(level)), mode: 0o644}, nil
 	case "glossary":
 		content := fmt.Sprintf("# Glossary of %s\n\nThe documents at this level use each term below with one meaning only.\n", title(level))
 		return draft{path: "glossary.md", content: content, mode: 0o644}, nil
 	}
-	return draft{}, usageErr(fmt.Sprintf("no kind %q: the kinds are plan, note, script, helper, skill, conventions and glossary", kind))
+	return draft{}, usageErr(fmt.Sprintf("no kind %q: the kinds are plan, note, script, helper, skill, topic, conventions and glossary", kind))
+}
+
+// topicPath checks the path of a topic folder inside its kind folder, as stedo/cost: each part is lower case
+// with hyphens, and no part is a reserved name of a level.
+func topicPath(topic string) error {
+	for _, part := range strings.Split(topic, "/") {
+		if !docNameRE.MatchString(part) {
+			return inputErrf("the topic %s is not lower case with hyphens, as stedo/cost", topic)
+		}
+		if slices.ContainsFunc(store.Reserved, func(r string) bool { return strings.EqualFold(r, part) }) {
+			return inputErrf("the topic %s uses the reserved name %s: choose another name", topic, part)
+		}
+	}
+	return nil
+}
+
+// needTopic refuses a topic folder that does not exist, and names the draft that starts it.
+func needTopic(repo, level, kindFolder, topic string) error {
+	index := path.Join(store.Folder(level), kindFolder, topic, "README.md")
+	if err := noSymlink(repo, index); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(index))); err != nil {
+		return inputErrf("no topic folder %s/%s at %s: memcore draft topic %s/%s starts it", kindFolder, topic, title(level), kindFolder, topic)
+	}
+	return nil
 }
 
 // planTemplate returns the body of the plan template that memcore ships, after its frontmatter.
@@ -206,9 +266,9 @@ func planTemplate() (string, error) {
 	return "\n" + body, nil
 }
 
-// heading turns a topic into a title, as slow-search into Slow search.
-func heading(topic string) string {
-	words := strings.ReplaceAll(topic, "-", " ")
+// heading turns a name into a title, as slow-search into Slow search.
+func heading(name string) string {
+	words := strings.ReplaceAll(name, "-", " ")
 	return strings.ToUpper(words[:1]) + words[1:]
 }
 

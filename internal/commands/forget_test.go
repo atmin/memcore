@@ -312,3 +312,43 @@ func TestForgetTopics(t *testing.T) {
 		clean(t, repo)
 	})
 }
+
+func TestForgetTopicIndex(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	remember(t, dev, "kept-fact", "Read when you test a kept fact.")
+	for _, topic := range []string{"memories/empty", "memories/full"} {
+		if out, err := run(t, dev, "", "draft", "topic", topic, "--description", "Read when you test a topic."); err != nil {
+			t.Fatalf("draft topic: %v\n%s", err, out)
+		}
+	}
+	if out, err := run(t, dev, memoryText("inside", "Read before you deploy inside a container.", "A fact."), "remember", "--topic", "full"); err != nil {
+		t.Fatalf("remember: %v\n%s", err, out)
+	}
+
+	t.Run("an empty topic folder goes", func(t *testing.T) {
+		if out, err := run(t, dev, "", "forget", "dev/memories/empty/README.md", "--reason", "Not needed."); err != nil {
+			t.Fatalf("forget: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "empty")); err == nil {
+			t.Error("the topic folder is still there")
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); strings.Contains(got, "empty/") {
+			t.Errorf("dev/README.md =\n%s\nwant no empty topic", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("a topic folder with a document refuses", func(t *testing.T) {
+		before := gitT(t, repo, "rev-parse", "HEAD")
+		_, err := run(t, dev, "", "forget", "dev/memories/full/README.md", "--reason", "Not needed.")
+		if err == nil || !strings.Contains(err.Error(), "holds documents") {
+			t.Errorf("error = %v, want a refusal that says the folder holds documents", err)
+		}
+		if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+			t.Error("the refused forget made a commit")
+		}
+		clean(t, repo)
+	})
+}
