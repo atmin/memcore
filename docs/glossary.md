@@ -12,7 +12,8 @@ The docs use each term below with one meaning only.
 - **kind**: the type of a document. The name of its folder or file gives the kind.
 - **memory**: a document that holds one current fact.
 - **script**: an executable file in a `bin/` folder. `push` links it onto your `PATH`.
-- **index**: the `README.md` of a level, with one line per document or child level.
+- **index**: the `README.md` of a level or of a topic folder. It has one line per document, topic folder or child level.
+- **topic folder**: a folder inside the `memories/` or `notes/` folder of a level. It groups the documents of one topic, and its index has a frontmatter that says when to read it.
 - **session**: one run of an agent, from its start to its exit.
 - **transcript**: the record of one session.
 - **snapshot**: a commit of new transcripts to the transcripts branch.

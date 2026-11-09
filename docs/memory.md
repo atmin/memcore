@@ -1,6 +1,6 @@
 # A memory
 
-A memory is one file that holds one fact. It lives at `memories/<name>.md` at its level. Its frontmatter has four keys:
+A memory is one file that holds one fact. It lives at `memories/<name>.md` at its level, or in a topic folder inside `memories/` (see [Layout](layout.md)). Its frontmatter has four keys:
 - `name`: the topic, in lower case with hyphens. A name is unique in the memory repo, so a `[[name]]` link is never ambiguous.
 - `description`: one line of 25 words at most that says when to read the memory. It is the memory's line in the index. memcore writes it in double quotes, so a colon inside it stays one value for any YAML reader.
 - `type`: `user`, `feedback`, `project` or `reference`.
