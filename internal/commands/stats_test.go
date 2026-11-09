@@ -887,3 +887,71 @@ func TestMeasureEndToEnd(t *testing.T) {
 		t.Errorf("inbox:\n%s\nwant it to start with:\n%s", out, wantSummary)
 	}
 }
+
+func TestMeasureFollowsMoves(t *testing.T) {
+	a, b, c := "m/memories/a.md", "m/memories/b.md", "m/memories/t/c.md"
+	events := []Event{
+		{Time: ago(3 * day), Session: "s1", Command: "show", Paths: []string{a}, Outcome: "ok"},
+		{Time: ago(2 * day), Command: "move", Paths: []string{a, b}, Outcome: "ok", Made: []string{"m1"}},
+		{Time: ago(day), Session: "s1", Command: "hook", Hook: "tool", Paths: []string{b}, Outcome: "ok"},
+		{Time: ago(day / 2), Command: "move", Paths: []string{b, c}, Outcome: "ok", Made: []string{"m2"}},
+		{Time: ago(day / 4), Session: "s1", Command: "show", Paths: []string{c}, Outcome: "ok"},
+		{Time: ago(day / 4), Command: "remember", Paths: []string{a}, Outcome: "ok", Made: []string{"r1"}},
+		{Time: ago(day / 8), Session: "s1", Command: "show", Paths: []string{a}, Outcome: "ok"},
+		{Time: ago(day / 8), Command: "move", Paths: []string{"m/memories/x.md", "m/memories/y.md"}, Outcome: "error", Error: "a fault"},
+	}
+	got := measure(events, nil, statsNow)
+	if want := []ranked{{3, c}, {1, a}}; len(got) != 1 || !reflect.DeepEqual(got[0].top, want) {
+		t.Errorf("most read = %+v, want %+v", got, want)
+	}
+
+	p, q := "m/memories/p.md", "m/memories/q.md"
+	dropped := []Event{
+		{Time: ago(4 * day), Session: "s1", Command: "show", Paths: []string{p}, Outcome: "ok"},
+		{Time: ago(3 * day), Command: "move", Paths: []string{p, q}, Outcome: "ok", Made: []string{"d1"}},
+		{Time: ago(2 * day), Session: "s1", Command: "hook", Hook: "tool", Paths: []string{q}, Outcome: "ok"},
+		{Time: ago(day), Command: "drop", Outcome: "ok", Dropped: []string{"d1"}},
+		{Time: ago(day / 2), Session: "s1", Command: "show", Paths: []string{p}, Outcome: "ok"},
+	}
+	got = measure(dropped, nil, statsNow)
+	if want := []ranked{{3, p}}; len(got) != 1 || !reflect.DeepEqual(got[0].top, want) {
+		t.Errorf("most read after a dropped move = %+v, want %+v", got[0].top, want)
+	}
+
+	repo := t.TempDir()
+	gitT(t, repo, "init", "-q", "-b", "main")
+	commitAt := func(when time.Time, subject string) {
+		t.Helper()
+		t.Setenv("GIT_AUTHOR_DATE", when.Format(time.RFC3339))
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", subject)
+	}
+	writeT(t, repo, "n/memories/round.md", "A fact that moves away and back again, with enough text.\n")
+	writeT(t, repo, "n/memories/reused.md", "A fact whose old path a new fact takes, with enough text.\n")
+	writeT(t, repo, "n/memories/x.md", "A fact.\n")
+	writeT(t, repo, "n/memories/y.md", "Another fact.\n")
+	commitAt(statsNow.Add(-40*day), "init: two memories")
+	mkdirT(t, filepath.Join(repo, "n", "memories", "t"))
+	gitT(t, repo, "mv", "n/memories/x.md", "n/memories/t/x.md")
+	gitT(t, repo, "mv", "n/memories/y.md", "n/memories/z.md")
+	commitAt(statsNow.Add(-5*day), "move: two memories")
+	gitT(t, repo, "mv", "n/memories/round.md", "n/memories/away.md")
+	gitT(t, repo, "mv", "n/memories/reused.md", "n/memories/kept.md")
+	commitAt(statsNow.Add(-4*day), "move: away")
+	gitT(t, repo, "mv", "n/memories/away.md", "n/memories/round.md")
+	writeT(t, repo, "n/memories/reused.md", "A new fact at an old path.\n")
+	commitAt(statsNow.Add(-3*day), "move: back")
+	moved := []Event{
+		{Time: ago(31 * day), Command: "show", Paths: []string{"n/memories/y.md"}, Outcome: "ok"},
+		{Time: ago(10 * day), Session: "s1", Command: "show", Paths: []string{"n/memories/x.md"}, Outcome: "ok"},
+		{Time: ago(5 * day), Command: "move", Paths: []string{"n/memories/x.md", "n/memories/t/x.md"}, Outcome: "ok", Made: []string{"m1"}},
+		{Time: ago(5 * day), Command: "move", Paths: []string{"n/memories/y.md", "n/memories/z.md"}, Outcome: "ok", Made: []string{"m2"}},
+	}
+	unreadPaths, err := unread(repo, moved, statsNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"n/memories/kept.md", "n/memories/round.md", "n/memories/z.md"}; !reflect.DeepEqual(unreadPaths, want) {
+		t.Errorf("unread = %q, want %q: a read before a move counts, and a move keeps the age", unreadPaths, want)
+	}
+}

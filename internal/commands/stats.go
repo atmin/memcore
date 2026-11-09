@@ -300,16 +300,12 @@ func measure(events []Event, facts map[string]fact, now time.Time) []week {
 	}
 	// The order of time decides the last print of orient, and what follows a push. Parallel calls append out of
 	// that order. The log keeps whole seconds, so lines of one second keep the order of the file.
-	lines := make([]logLine, len(events))
-	for i, e := range events {
-		lines[i] = logLine{Event: e, at: eventTime(e)}
-	}
-	sort.SliceStable(lines, func(a, b int) bool { return lines[a].at.Before(lines[b].at) })
+	lines := ordered(events)
+	follow := follower(lines, now)
 	// A revise or a forget of a memory after its push makes a mistake, even in a later week.
 	changed := map[string][]logLine{}
 	in := make([][]logLine, len(weeks))
 	for i := range lines {
-		lines[i].place = i
 		l := lines[i]
 		d := now.Sub(l.at)
 		if d < 0 {
@@ -323,9 +319,70 @@ func measure(events []Event, facts map[string]fact, now time.Time) []week {
 		}
 	}
 	for k := range weeks {
-		weeks[k].add(in[k], facts, changed)
+		weeks[k].add(in[k], facts, changed, follow)
 	}
 	return weeks
+}
+
+// ordered returns the lines of the log in the order of time, each with its place in that order.
+func ordered(events []Event) []logLine {
+	lines := make([]logLine, len(events))
+	for i, e := range events {
+		lines[i] = logLine{Event: e, at: eventTime(e)}
+	}
+	sort.SliceStable(lines, func(a, b int) bool { return lines[a].at.Before(lines[b].at) })
+	for i := range lines {
+		lines[i].place = i
+	}
+	return lines
+}
+
+// movesIn returns the committed moves of the log up to now, in the order of time.
+func movesIn(lines []logLine, now time.Time) []logLine {
+	var moves []logLine
+	for _, l := range lines {
+		if l.Command == "move" && l.Outcome == "ok" && len(l.Made) > 0 && len(l.Paths) == 2 && !l.at.After(now) {
+			moves = append(moves, l)
+		}
+	}
+	return moves
+}
+
+// rename carries a read of the path from to the path to, when the read lies between two places of the log.
+type rename struct {
+	from, to      string
+	after, before int
+}
+
+// follower returns the path that a document read at a place of the log has now. Each later move of its path
+// carries the read along. A dropped move undoes itself: the reads of its new path, between the move and the
+// drop, go back to the old path.
+func follower(lines []logLine, now time.Time) func(p string, place int) string {
+	dropped := map[string]int{}
+	for _, l := range lines {
+		if l.Command == "drop" && l.Outcome == "ok" && !l.at.After(now) {
+			for _, sha := range l.Dropped {
+				dropped[sha] = l.place
+			}
+		}
+	}
+	var renames []rename
+	for _, m := range movesIn(lines, now) {
+		if d, ok := dropped[m.Made[0]]; ok {
+			renames = append(renames, rename{from: m.Paths[1], to: m.Paths[0], after: m.place, before: d})
+		} else {
+			renames = append(renames, rename{from: m.Paths[0], to: m.Paths[1], after: -1, before: m.place})
+		}
+	}
+	slices.SortStableFunc(renames, func(a, b rename) int { return a.before - b.before })
+	return func(p string, place int) string {
+		for _, r := range renames {
+			if place > r.after && place < r.before && p == r.from {
+				p = r.to
+			}
+		}
+		return p
+	}
 }
 
 // logLine is a line of the use log with its time, and its place in the order of time.
@@ -337,7 +394,7 @@ type logLine struct {
 
 // add counts the lines of a week, oldest first. changed holds the committed revise and forget lines of each
 // path. It covers the whole log up to the call.
-func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]logLine) {
+func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]logLine, follow func(string, int) string) {
 	lacked := map[string]bool{}
 	lookup := func(sha string) (fact, bool) {
 		f, ok := facts[sha]
@@ -407,7 +464,7 @@ func (w *week) add(lines []logLine, facts map[string]fact, changed map[string][]
 				if e.Hook == "tool" {
 					w.around++
 				}
-				if store.IsMemory(p) {
+				if p := follow(p, l.place); store.IsMemory(p) {
 					reads[p]++
 				}
 			}
@@ -557,11 +614,13 @@ func writeUnread(b *strings.Builder, repo string, events []Event, now time.Time)
 // or without one.
 func unread(repo string, events []Event, now time.Time) ([]string, error) {
 	since := now.Add(-unreadWindow)
+	lines := ordered(events)
+	follow := follower(lines, now)
 	read := map[string]bool{}
-	for _, e := range events {
-		if t := eventTime(e); t.After(since) && !t.After(now) {
-			for _, p := range readsOf(e) {
-				read[p] = true
+	for _, l := range lines {
+		if l.at.After(since) && !l.at.After(now) {
+			for _, p := range readsOf(l.Event) {
+				read[follow(p, l.place)] = true
 			}
 		}
 	}
@@ -583,10 +642,12 @@ func unread(repo string, events []Event, now time.Time) ([]string, error) {
 	return paths, nil
 }
 
-// additions returns the author date of the newest commit on HEAD that adds each path. The format starts with a NUL,
-// so the empty field before each date tells it from a path.
+// additions returns the age of each path on HEAD: the author date of the commit that added its document. A
+// rename keeps the date of the document, as git detects the rename, so a move keeps the age of a memory. A
+// path that a later commit adds again starts a new age. The format starts with a NUL, so the empty field
+// before each date tells it from a status.
 func additions(repo string) (map[string]time.Time, error) {
-	out, err := store.Git(repo, "log", "-z", "--no-renames", "--diff-filter=A", "--name-only", "--format=%x00%at", "HEAD")
+	out, err := store.Git(repo, "log", "-z", "--reverse", "-M", "--diff-filter=AR", "--name-status", "--format=%x00%at", "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("read the additions of the memories: %w", err)
 	}
@@ -594,6 +655,7 @@ func additions(repo string) (map[string]time.Time, error) {
 	var at time.Time
 	parts := strings.Split(out, "\x00")
 	for i := 0; i < len(parts); i++ {
+		status := strings.TrimPrefix(parts[i], "\n") // a line break ends the date
 		switch {
 		case parts[i] == "" && i+1 < len(parts) && parts[i+1] != "":
 			i++
@@ -602,12 +664,17 @@ func additions(repo string) (map[string]time.Time, error) {
 				return nil, fmt.Errorf("read the additions of the memories: git log printed %q", parts[i])
 			}
 			at = time.Unix(sec, 0)
-			if i+1 < len(parts) {
-				parts[i+1] = strings.TrimPrefix(parts[i+1], "\n") // a line break ends the date
-			}
-		case parts[i] != "":
-			if _, ok := added[parts[i]]; !ok { // git log prints the newest commit first
-				added[parts[i]] = at
+		case status == "A" && i+1 < len(parts):
+			i++
+			added[parts[i]] = at
+		case strings.HasPrefix(status, "R") && i+2 < len(parts):
+			from, to := parts[i+1], parts[i+2]
+			i += 2
+			if was, ok := added[from]; ok {
+				added[to] = was
+				delete(added, from)
+			} else {
+				added[to] = at
 			}
 		}
 	}
