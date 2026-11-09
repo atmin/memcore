@@ -231,13 +231,14 @@ func wouldPrune(repo string, files, prune []string) ([]string, error) {
 			return nil, fmt.Errorf("check whether %s empties: %w", d, err)
 		}
 		_, isLevel := store.LevelOf(d)
+		isTopic := store.IsTopicIndex(path.Join(d, "README.md"))
 		empty := true
 		for _, e := range entries {
 			p := path.Join(d, e.Name())
 			switch {
 			case slices.Contains(files, p), slices.Contains(emptied, p):
-			case isLevel && e.Name() == "README.md":
-			case e.IsDir() && !holdsAny(repo, p, files) && (isLevel || inside(d, prune)):
+			case (isLevel || isTopic) && e.Name() == "README.md":
+			case e.IsDir() && !holdsAny(repo, p, files) && (isLevel || isTopic || inside(d, prune)):
 			default:
 				empty = false
 			}

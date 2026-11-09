@@ -494,3 +494,48 @@ func TestShow(t *testing.T) {
 		}
 	})
 }
+
+func TestOrientTopics(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	pushedByHand(t, home, repo, map[string]string{
+		"dev/memories/flat.md":              memoryText("flat", "Read when you test a flat fact.", "A fact."),
+		"dev/memories/stedo/README.md":      topicReadme("stedo", "Read when you query Stedo."),
+		"dev/memories/stedo/a-fact.md":      memoryText("a-fact", "Read when you test fact a.", "A fact."),
+		"dev/memories/stedo/cost/README.md": topicReadme("cost", "Read when you measure a query."),
+		"dev/memories/stedo/cost/b-fact.md": memoryText("b-fact", "Read when you test fact b.", "A fact."),
+		"dev/notes/incidents/README.md":     topicReadme("incidents", "Read when you look into an incident."),
+		"dev/notes/incidents/one.md":        "---\nname: one\ndescription: \"Read when you test.\"\n---\n",
+		"dev/notes/incidents/two.md":        "---\nname: two\ndescription: \"Read when you test.\"\n---\n",
+		"dev/notes/top.md":                  "---\nname: top\ndescription: \"Read when you test.\"\n---\n",
+	})
+	out, err := run(t, dev, "", "orient")
+	if err != nil {
+		t.Fatalf("orient: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"- dev/memories/flat.md: Read when you test a flat fact.\n",
+		"- dev/memories/stedo/README.md: Read when you query Stedo.\n",
+		"3 notes: memcore show dev/README.md lists them.\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not hold %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"a-fact", "cost/README.md", "incidents"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("output holds %q, want only the line of the topic folder:\n%s", unwanted, out)
+		}
+	}
+	o, err := orientation(repo, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, lines := o.full(); lines["~/dev"] != 2 {
+		t.Errorf("~/dev has %d lines in orient, want 2: a memory and a topic folder", lines["~/dev"])
+	}
+	if out, _ := run(t, home, "", "inbox"); strings.Contains(out, "README.md") {
+		t.Errorf("inbox = %q, want no stale index", out)
+	}
+}

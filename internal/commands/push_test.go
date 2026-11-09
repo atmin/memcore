@@ -207,6 +207,80 @@ func foldCases() []foldCase {
 	)
 	return []foldCase{
 		{
+			name: "a fixup moved past a later change of one topic index",
+			queue: func(t *testing.T, home, repo, remote string) func(*testing.T, string) {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				pushedByHand(t, home, repo, map[string]string{
+					"dev/memories/t/README.md": topicReadme("t", "Read when you test a topic."),
+					"dev/memories/t/a-fact.md": memoryText("a-fact", "Read when you test fact a.", "A fact."),
+					"dev/memories/t/b-fact.md": memoryText("b-fact", "Read when you test fact b.", "A fact."),
+				})
+				reviseT(t, dev, memoryText("a-fact", "Read when you test fact a, sharper.", "A fact."), "a-fact", "Sharper.")
+				reviseT(t, dev, memoryText("b-fact", "Read when you test fact b, sharper.", "A fact."), "b-fact", "Sharper.")
+				reviseT(t, dev, memoryText("a-fact", "Read when you test fact a, sharpest.", "A fact."), "a-fact", "Sharpest.")
+				return func(t *testing.T, out string) {
+					if got := subjects(t, remote); !strings.HasPrefix(got, "revise: dev/memories/t/b-fact.md\nrevise: dev/memories/t/a-fact.md\n") {
+						t.Errorf("remote history = %q", got)
+					}
+					ix, err := store.TopicIndex(repo, "dev/memories/t")
+					if err != nil {
+						t.Fatal(err)
+					}
+					want, err := store.RenderTopic(repo, ix)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := gitT(t, remote, "show", "main:dev/memories/t/README.md"); got != want || !strings.Contains(got, "sharpest") || !strings.Contains(got, "b, sharper") {
+						t.Errorf("remote topic index =\n%s\nwant\n%s", got, want)
+					}
+					clean(t, repo)
+				}
+			},
+		},
+		{
+			name: "a revision and its reversal cancel across a topic index",
+			queue: func(t *testing.T, home, repo, remote string) func(*testing.T, string) {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				pushedByHand(t, home, repo, map[string]string{
+					"dev/memories/t/README.md": topicReadme("t", "Read when you test a topic."),
+					"dev/memories/t/a-fact.md": memoryText("a-fact", "Read when you test fact a.", "A fact."),
+					"dev/memories/t/b-fact.md": memoryText("b-fact", "Read when you test fact b.", "A fact."),
+				})
+				reviseT(t, dev, memoryText("a-fact", "Read when you test fact a, changed.", "A fact."), "a-fact", "Changed.")
+				reviseT(t, dev, memoryText("b-fact", "Read when you test fact b, sharper.", "A fact."), "b-fact", "Sharper.")
+				reviseT(t, dev, memoryText("a-fact", "Read when you test fact a.", "A fact."), "a-fact", "Back.")
+				return func(t *testing.T, out string) {
+					if got := subjects(t, remote); !strings.HasPrefix(got, "revise: dev/memories/t/b-fact.md\n") || strings.Contains(got, "a-fact") {
+						t.Errorf("remote history = %q, want the revision of b only", got)
+					}
+					clean(t, repo)
+				}
+			},
+		},
+		{
+			name: "a fixup that empties a topic folder",
+			queue: func(t *testing.T, home, repo, remote string) func(*testing.T, string) {
+				dev := mkdirT(t, filepath.Join(home, "dev"))
+				pushedByHand(t, home, repo, map[string]string{
+					"dev/memories/t/README.md": topicReadme("t", "Read when you test a topic."),
+					"dev/memories/kept.md":     memoryText("kept", "Read when you test a kept fact.", "A fact."),
+				})
+				commitByHand(t, repo, map[string]string{"dev/memories/t/a-fact.md": memoryText("a-fact", "Read when you test fact a.", "A fact.")})
+				if out, err := run(t, dev, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+					t.Fatalf("forget: %v\n%s", err, out)
+				}
+				return func(t *testing.T, out string) {
+					if _, err := store.Git(remote, "cat-file", "-e", "main:dev/memories/t/README.md"); err == nil {
+						t.Error("the remote still has the topic index")
+					}
+					if got := gitT(t, remote, "show", "main:dev/README.md"); strings.Contains(got, "t/") {
+						t.Errorf("remote index =\n%s\nwant no topic folder", got)
+					}
+					clean(t, repo)
+				}
+			},
+		},
+		{
 			name: "a revision folds into its remember",
 			queue: func(t *testing.T, home, repo, remote string) func(*testing.T, string) {
 				dev := mkdirT(t, filepath.Join(home, "dev"))
@@ -1027,5 +1101,44 @@ func TestPushExpect(t *testing.T) {
 				t.Errorf("push asked %q before it refused", asked)
 			}
 		})
+	}
+}
+
+func TestStaleIndexTopics(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	pushedByHand(t, home, repo, map[string]string{
+		"dev/memories/stedo/README.md": topicReadme("stedo", "Read when you query Stedo."),
+		"dev/memories/stedo/a-fact.md": memoryText("a-fact", "Read when you test fact a.", "A fact."),
+	})
+	writeT(t, repo, "dev/memories/stedo/README.md", topicReadme("stedo", "Read when you query Stedo.")+"\nAn edit by hand.\n")
+	writeT(t, repo, "dev/memories/stedo/b-fact.md", memoryText("b-fact", "Read when you test fact b.", "A fact."))
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: a topic by hand")
+
+	out, err := run(t, home, "", "inbox")
+	if err != nil {
+		t.Fatalf("inbox: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "dev/memories/stedo/README.md") {
+		t.Errorf("inbox = %q, want the stale topic index", out)
+	}
+	pushYes(t, home)
+	if got := subjects(t, remote); !strings.Contains(got, "index: dev/memories/stedo/README.md") {
+		t.Errorf("remote history = %q, want the index commit of the topic", got)
+	}
+	ix, err := store.TopicIndex(repo, "dev/memories/stedo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := store.RenderTopic(repo, ix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitT(t, remote, "show", "main:dev/memories/stedo/README.md"); got != want || !strings.Contains(got, "b-fact") || strings.Contains(got, "by hand") {
+		t.Errorf("remote topic index =\n%s\nwant\n%s", got, want)
+	}
+	if out, _ := run(t, home, "", "inbox"); strings.Contains(out, "README.md") {
+		t.Errorf("inbox after the push = %q, want no stale index", out)
 	}
 }

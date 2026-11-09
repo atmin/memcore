@@ -145,6 +145,12 @@ func cancels(repo string, ch *chain) (bool, error) {
 		}
 	}
 	for p := range docs {
+		if store.IsTopicIndex(p) {
+			if !sameTopicIndex(repo, parent, last, p) {
+				return false, nil
+			}
+			continue
+		}
 		before := objectAt(repo, parent, p)
 		after := objectAt(repo, last, p)
 		if before != after {
@@ -152,6 +158,30 @@ func cancels(repo string, ch *chain) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// sameTopicIndex reports whether a topic index has the same existence, mode and frontmatter at two commits.
+// Its body is generated from the other documents, so a change of the body alone counts as no change.
+func sameTopicIndex(repo, a, b, p string) bool {
+	entryA, entryB := objectAt(repo, a, p), objectAt(repo, b, p)
+	if entryA == "" || entryB == "" {
+		return entryA == entryB
+	}
+	if strings.Fields(entryA)[0] != strings.Fields(entryB)[0] {
+		return false
+	}
+	front := func(rev string) string {
+		text, err := store.Git(repo, "--literal-pathspecs", "show", rev+":"+p)
+		if err != nil || !store.HasFrontmatter(text) {
+			return text
+		}
+		fm, _, err := store.ParseFrontmatter(strings.NewReader(text))
+		if err != nil {
+			return text
+		}
+		return string(fm.Bytes())
+	}
+	return front(a) == front(b)
 }
 
 // objectAt returns the tree entry of a path at a commit, with its mode and its object. It returns "" when

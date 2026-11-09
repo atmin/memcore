@@ -401,3 +401,41 @@ func TestRememberAt(t *testing.T) {
 		})
 	}
 }
+
+func TestRememberTopics(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	files := map[string]string{
+		"dev/memories/stedo/README.md": topicReadme("stedo", "Read when you query Stedo."),
+		"dev/memories/stedo/bags.md":   memoryText("bags", "Read when you query the cell bags of Stedo.", "A fact."),
+		"dev/memories/stedo/totes.md":  memoryText("totes", "Read when you query the totes of Stedo.", "A fact."),
+		"dev/memories/stedo/labels.md": memoryText("labels", "Read when you print the labels of Stedo.", "A fact."),
+	}
+	for i := range 38 {
+		name := fmt.Sprintf("flat-%02d", i)
+		files["dev/memories/"+name+".md"] = memoryText(name, fmt.Sprintf("Read when you test flat fact number %d.", i), "A fact.")
+	}
+	pushedByHand(t, home, repo, files)
+
+	t.Run("a near-duplicate inside a topic folder", func(t *testing.T) {
+		before := gitT(t, repo, "rev-parse", "HEAD")
+		out, err := run(t, dev, memoryText("bags-again", "Read when you query the cell bags of Stedo again.", "A fact."), "remember")
+		if err == nil || !strings.Contains(out, "- dev/memories/stedo/bags.md: Read when you query the cell bags of Stedo.") {
+			t.Errorf("remember: %v\n%s\nwant the near-duplicate in the topic folder", err, out)
+		}
+		if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+			t.Error("remember wrote a near-duplicate")
+		}
+	})
+
+	t.Run("the budget counts a topic folder once", func(t *testing.T) {
+		out, err := run(t, dev, memoryText("one-more", "Read when you deploy on a Friday.", "A fact."), "remember")
+		if err != nil {
+			t.Fatalf("remember: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "over the budget") {
+			t.Errorf("output = %q, want no budget warning for 40 lines", out)
+		}
+	})
+}

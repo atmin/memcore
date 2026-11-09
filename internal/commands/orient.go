@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -114,7 +116,14 @@ func orientation(repo, dir string) (orientText, error) {
 				part.short = append(part.short, fmt.Sprintf("- %s%s", line.Path, label))
 			}
 		}
-		plans, notes := len(ix.Of(store.KindPlans)), len(ix.Of(store.KindNotes))
+		plans, err := countDocs(repo, l, "plans")
+		if err != nil {
+			return orientText{}, err
+		}
+		notes, err := countDocs(repo, l, "notes")
+		if err != nil {
+			return orientText{}, err
+		}
 		if counts := countLine(plans, notes); counts != "" {
 			part.count = fmt.Sprintf("%s: memcore show %s lists them.", counts, path.Join(store.Folder(l), "README.md"))
 		}
@@ -300,6 +309,32 @@ func section(doc, heading string) string {
 		rest = rest[:end+3]
 	}
 	return strings.TrimSpace(rest)
+}
+
+// countDocs counts the markdown documents in a kind folder of a level, inside its topic folders too. The index
+// of a topic folder is no document.
+func countDocs(repo, level, kind string) (int, error) {
+	root := filepath.Join(repo, filepath.FromSlash(store.Folder(level)), kind)
+	n := 0
+	err := filepath.WalkDir(root, func(f string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fs.SkipAll
+		}
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && strings.HasPrefix(d.Name(), ".") && f != root {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") && !strings.HasPrefix(d.Name(), ".") && (d.Name() != "README.md" || filepath.Dir(f) == root) {
+			n++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count the %s of %s: %w", kind, title(level), err)
+	}
+	return n, nil
 }
 
 // countLine says how many plans and notes a level holds, or "" when it holds none.

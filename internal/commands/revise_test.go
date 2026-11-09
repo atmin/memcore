@@ -52,9 +52,9 @@ func TestRevise(t *testing.T) {
 	})
 
 	t.Run("by name, a memory in a topic folder", func(t *testing.T) {
-		commitByHand(t, repo, map[string]string{"dev/memories/stedo/nested-fact.md": memoryText("nested-fact", "Read when you test a nested fact.", "A nested fact.")})
+		commitByHand(t, repo, map[string]string{"dev/memories/stedo/nested-fact.md": memoryText("nested-fact", "Read before you query a nested store.", "A nested fact.")})
 		gitT(t, repo, "push", "-q", "origin", "main")
-		in := memoryText("nested-fact", "Read when you test a nested fact.", "A nested fact, revised.")
+		in := memoryText("nested-fact", "Read before you query a nested store.", "A nested fact, revised.")
 		if out, err := run(t, dev, in, "revise", "nested-fact", "--reason", "Nested."); err != nil {
 			t.Fatalf("revise: %v\n%s", err, out)
 		}

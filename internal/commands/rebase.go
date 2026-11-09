@@ -58,13 +58,37 @@ func rebaseEditor(repo, editor string, args ...string) error {
 			_, err = store.Git(repo, "-c", "core.editor=true", "-c", "rebase.rescheduleFailedExec=false", "rebase", "--continue")
 			continue
 		}
-		var levels []string
+		var levels, topics []string
 		for _, p := range paths {
+			if store.IsTopicIndex(p) {
+				fm, ok := sameFrontmatter(repo, p)
+				if !ok {
+					return abort(repo, &conflictError{paths: paths})
+				}
+				if err := noSymlink(repo, p); err != nil {
+					return abort(repo, err)
+				}
+				if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(p)), fm, 0o644); err != nil {
+					return abort(repo, fmt.Errorf("write the frontmatter of %s: %w", p, err))
+				}
+				topics = append(topics, path.Dir(p))
+				continue
+			}
 			level, ok := indexLevel(p)
 			if !ok {
 				return abort(repo, &conflictError{paths: paths})
 			}
 			levels = append(levels, level)
+		}
+		deepestFirst(topics)
+		for _, tf := range topics {
+			index := path.Join(tf, "README.md")
+			if err := store.WriteTopicIndex(repo, tf); err != nil {
+				return abort(repo, err)
+			}
+			if _, err := store.Git(repo, "--literal-pathspecs", "add", "--", index); err != nil {
+				return abort(repo, fmt.Errorf("stage the index %s: %w", index, err))
+			}
 		}
 		// The ancestors of a conflicting index list its level, and a merge may have dropped that line.
 		var all []string
@@ -104,6 +128,47 @@ func indexLevel(p string) (string, bool) {
 	return store.LevelOf(folder)
 }
 
+// sameFrontmatter merges the frontmatter of a conflicting topic index. The body is generated, so only the
+// frontmatter can conflict. When the sides agree, or only one side changed it from the base, it returns the
+// merged frontmatter. It returns false when a side lacks the file, or both sides changed it differently.
+func sameFrontmatter(repo, p string) ([]byte, bool) {
+	read := func(stage string) ([]byte, bool) {
+		text, err := store.Git(repo, "--literal-pathspecs", "show", stage+p)
+		if err != nil {
+			return nil, false
+		}
+		if !store.HasFrontmatter(text) {
+			return []byte{}, true
+		}
+		parsed, _, err := store.ParseFrontmatter(strings.NewReader(text))
+		if err != nil {
+			return nil, false
+		}
+		return parsed.Bytes(), true
+	}
+	ours, ok := read(":2:")
+	if !ok {
+		return nil, false
+	}
+	theirs, ok := read(":3:")
+	if !ok {
+		return nil, false
+	}
+	if string(ours) == string(theirs) {
+		return ours, true
+	}
+	base, ok := read(":1:")
+	switch {
+	case !ok:
+		return nil, false
+	case string(base) == string(ours):
+		return theirs, true
+	case string(base) == string(theirs):
+		return ours, true
+	}
+	return nil, false
+}
+
 // abort aborts the rebase in progress and returns err. When the abort fails, it returns that failure, with the
 // message of err but not err itself. So no caller reports the queue as it was.
 func abort(repo string, err error) error {
@@ -131,7 +196,21 @@ func settle(repo string) error {
 		if err != nil {
 			return err
 		}
+		topics, err := topicFolders(repo)
+		if err != nil {
+			return err
+		}
 		var indexes []string
+		for _, tf := range topics {
+			index := path.Join(tf, "README.md")
+			if err := noSymlink(repo, index); err != nil {
+				return err
+			}
+			if err := store.WriteTopicIndex(repo, tf); err != nil {
+				return err
+			}
+			indexes = append(indexes, index)
+		}
 		for _, l := range levels {
 			index := path.Join(store.Folder(l), "README.md")
 			if err := noSymlink(repo, index); err != nil {

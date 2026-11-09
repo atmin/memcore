@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,6 +226,88 @@ func TestForget(t *testing.T) {
 		}
 		if strings.Contains(readT(t, filepath.Join(repo, "README.md")), "[work]") {
 			t.Error("the root index still lists work")
+		}
+		clean(t, repo)
+	})
+}
+
+// topicReadme returns the index of a topic folder as a person starts it: a frontmatter, and no body.
+func topicReadme(name, description string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: %q\n---\n", name, description)
+}
+
+// pushedByHand commits files by hand and pushes them, so push writes their indexes.
+func pushedByHand(t *testing.T, home, repo string, files map[string]string) {
+	t.Helper()
+	commitByHand(t, repo, files)
+	pushYes(t, home)
+	clean(t, repo)
+}
+
+func TestForgetTopics(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	t.Run("the last document prunes its topic folder and each emptied parent", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		pushedByHand(t, home, repo, map[string]string{
+			"dev/memories/stedo/README.md":      topicReadme("stedo", "Read when you query Stedo."),
+			"dev/memories/stedo/cost/README.md": topicReadme("cost", "Read when you measure a query."),
+			"dev/memories/stedo/cost/only.md":   memoryText("only", "Read when you test the only fact.", "A fact."),
+			"dev/memories/kept.md":              memoryText("kept", "Read when you test a kept fact.", "A fact."),
+		})
+		if out, err := run(t, dev, "", "forget", "only", "--reason", "Gone."); err != nil {
+			t.Fatalf("forget: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "stedo")); err == nil {
+			t.Error("dev/memories/stedo is still there")
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); strings.Contains(got, "stedo") {
+			t.Errorf("dev/README.md =\n%s\nwant no topic folder", got)
+		}
+		if got := gitT(t, repo, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(got, "dev/memories/stedo/README.md") || !strings.Contains(got, "dev/memories/stedo/cost/README.md") {
+			t.Errorf("the commit changes\n%s\nwant both topic indexes", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("a topic folder with another document stays", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		pushedByHand(t, home, repo, map[string]string{
+			"dev/memories/stedo/README.md": topicReadme("stedo", "Read when you query Stedo."),
+			"dev/memories/stedo/a-fact.md": memoryText("a-fact", "Read when you test fact a.", "A fact."),
+			"dev/memories/stedo/b-fact.md": memoryText("b-fact", "Read when you test fact b.", "A fact."),
+		})
+		if out, err := run(t, dev, "", "forget", "a-fact", "--reason", "Gone."); err != nil {
+			t.Fatalf("forget: %v\n%s", err, out)
+		}
+		got := readT(t, filepath.Join(repo, "dev", "memories", "stedo", "README.md"))
+		if strings.Contains(got, "a-fact") || !strings.Contains(got, "- [b-fact](b-fact.md): Read when you test fact b.\n") {
+			t.Errorf("topic index =\n%s\nwant only b-fact", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("a prune that leaves a dead link refuses", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		pushedByHand(t, home, repo, map[string]string{
+			"dev/memories/stedo/README.md": topicReadme("stedo", "Read when you query Stedo."),
+			"dev/memories/stedo/x-fact.md": memoryText("x-fact", "Read when you test fact x.", "A fact."),
+			"dev/notes/link.md":            "---\nname: link\ndescription: \"Read when you test.\"\n---\n\nSee [Stedo](../memories/stedo/README.md).\n",
+		})
+		mkdirT(t, filepath.Join(repo, "dev", "memories", "stedo", "empty"))
+		before := gitT(t, repo, "rev-parse", "HEAD")
+		_, err := run(t, dev, "", "forget", "x-fact", "--reason", "Gone.")
+		if err == nil || !strings.Contains(err.Error(), "dev/notes/link.md") {
+			t.Errorf("error = %v, want a refusal that names dev/notes/link.md", err)
+		}
+		if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+			t.Error("the refused forget made a commit")
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "stedo", "x-fact.md")); err != nil {
+			t.Errorf("the memory is gone: %v", err)
 		}
 		clean(t, repo)
 	})

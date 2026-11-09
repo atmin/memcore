@@ -56,7 +56,23 @@ func apply(repo string, c change) (string, error) {
 	}
 	docs = append(docs, c.removes...)
 	paths := slices.Clone(docs)
-	var levels []string
+	var levels, topics []string
+	for _, d := range docs {
+		for _, tf := range store.Topics(d) {
+			index := path.Join(tf, "README.md")
+			if slices.Contains(topics, tf) {
+				continue
+			}
+			if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(index))); err != nil && !slices.Contains(docs, index) {
+				continue // a folder without an index is no topic folder
+			}
+			topics = append(topics, tf)
+			if !slices.Contains(paths, index) {
+				paths = append(paths, index)
+			}
+		}
+	}
+	deepestFirst(topics)
 	for _, d := range docs {
 		level, ok := docLevel(d)
 		if !ok {
@@ -122,6 +138,38 @@ func apply(repo string, c change) (string, error) {
 		}
 		for _, p := range c.prune {
 			if err := pruneEmpty(filepath.Join(repo, filepath.FromSlash(p))); err != nil {
+				return err
+			}
+		}
+		// A removal can leave a topic folder with nothing but its index. That folder goes, deepest first,
+		// so its parent index drops it. A draft never prunes, so a new topic folder stays.
+		goneTopic := map[string]bool{}
+		if len(c.removes) > 0 {
+			for _, tf := range topics {
+				full := filepath.Join(repo, filepath.FromSlash(tf))
+				if _, err := os.Stat(full); err != nil {
+					continue
+				}
+				empty, err := topicEmpty(repo, tf)
+				if err != nil {
+					return err
+				}
+				if empty {
+					if err := os.RemoveAll(full); err != nil {
+						return fmt.Errorf("remove the empty topic folder %s: %w", tf, err)
+					}
+					goneTopic[tf] = true
+				}
+			}
+		}
+		for _, tf := range topics {
+			if goneTopic[tf] {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(tf), "README.md")); err != nil {
+				continue // a folder without an index is no topic folder
+			}
+			if err := store.WriteTopicIndex(repo, tf); err != nil {
 				return err
 			}
 		}

@@ -215,3 +215,88 @@ func TestRewrittenRemote(t *testing.T) {
 		t.Errorf("the dropped accepted commit %s is gone after gc: %v", lost, err)
 	}
 }
+
+// topicByHand writes a file into a topic folder of repo, writes the indexes on its path, and commits.
+func topicByHand(t *testing.T, repo, file, content, message string) {
+	t.Helper()
+	writeT(t, repo, file, content)
+	if err := store.WriteTopicIndex(repo, "dev/memories/t"); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []string{"dev", ""} {
+		if err := store.WriteIndex(repo, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", message)
+}
+
+func TestFetchTopics(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	setup := func(t *testing.T) (repo, other string) {
+		home, repo, remote := newMemory(t)
+		pushedByHand(t, home, repo, map[string]string{
+			"dev/memories/t/README.md": topicReadme("t", "Read when you test a topic."),
+			"dev/memories/t/a-fact.md": memoryText("a-fact", "Read when you test fact a.", "A fact."),
+		})
+		return repo, secondClone(t, remote)
+	}
+
+	t.Run("both sides add a memory to one topic folder", func(t *testing.T) {
+		repo, other := setup(t)
+		topicByHand(t, other, "dev/memories/t/elsewhere.md", memoryText("elsewhere", "Read when you work elsewhere.", "A fact."), "test: elsewhere")
+		gitT(t, other, "push", "-q", "origin", "main")
+		topicByHand(t, repo, "dev/memories/t/here.md", memoryText("here", "Read when you work here.", "A fact."), "test: here")
+
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		ix, err := store.TopicIndex(repo, "dev/memories/t")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := store.RenderTopic(repo, ix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "t", "README.md")); got != want || !strings.Contains(got, "elsewhere") || !strings.Contains(got, "here.md") {
+			t.Errorf("topic index =\n%s\nwant both memories, as generated", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("one side changes the description, and both add a memory", func(t *testing.T) {
+		repo, other := setup(t)
+		writeT(t, other, "dev/memories/t/README.md", topicReadme("t", "Read when you test a topic elsewhere."))
+		topicByHand(t, other, "dev/memories/t/there.md", memoryText("there", "Read when you work there.", "A fact."), "test: elsewhere")
+		gitT(t, other, "push", "-q", "origin", "main")
+		topicByHand(t, repo, "dev/memories/t/here.md", memoryText("here", "Read when you work here.", "A fact."), "test: here")
+
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		got := readT(t, filepath.Join(repo, "dev", "memories", "t", "README.md"))
+		if !strings.Contains(got, "test a topic elsewhere") || !strings.Contains(got, "here.md") || !strings.Contains(got, "there.md") {
+			t.Errorf("topic index =\n%s\nwant the new description and both memories", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("both sides change the description of a topic folder", func(t *testing.T) {
+		repo, other := setup(t)
+		topicByHand(t, other, "dev/memories/t/README.md", topicReadme("t", "Read when you test a topic elsewhere."), "test: elsewhere")
+		gitT(t, other, "push", "-q", "origin", "main")
+		topicByHand(t, repo, "dev/memories/t/README.md", topicReadme("t", "Read when you test a topic here."), "test: here")
+		before := gitT(t, repo, "rev-parse", "HEAD")
+
+		err := Fetch(repo)
+		if err == nil || !strings.Contains(err.Error(), "dev/memories/t/README.md") {
+			t.Fatalf("error = %v, want a conflict that names the topic index", err)
+		}
+		if got := gitT(t, repo, "rev-parse", "HEAD"); got != before {
+			t.Errorf("HEAD = %s, want it back at %s", got, before)
+		}
+		clean(t, repo)
+	})
+}

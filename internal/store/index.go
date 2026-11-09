@@ -361,6 +361,48 @@ func WriteTopicIndex(repo, folder string) error {
 	return nil
 }
 
+// Memories returns one line for each memory of a level, inside its topic folders too, sorted by path.
+func Memories(repo, level string) ([]Line, error) {
+	folder := path.Join(Folder(level), "memories")
+	root := filepath.Join(repo, filepath.FromSlash(folder))
+	var lines []Line
+	err := filepath.WalkDir(root, func(f string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fs.SkipAll
+		}
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && f != root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(repo, f)
+		if err != nil {
+			return err
+		}
+		p := filepath.ToSlash(rel)
+		if !IsMemory(p) {
+			return nil
+		}
+		text, err := description(f)
+		if err != nil {
+			return fmt.Errorf("index %s: %w", p, err)
+		}
+		if text == "" {
+			text = noDescription(p)
+		}
+		lines = append(lines, Line{Kind: KindMemories, Name: strings.TrimSuffix(path.Base(p), ".md"), Path: p, Text: text})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list the memories of %q: %w", level, err)
+	}
+	return lines, nil
+}
+
 // Topics returns the topic folders on the path of a document, deepest first. The index of a topic folder
 // lies in its own folder.
 func Topics(p string) []string {

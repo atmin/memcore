@@ -210,11 +210,11 @@ func nearDuplicates(repo, level, description string) ([]store.Line, error) {
 	}
 	var dups []store.Line
 	for _, l := range store.Path(level) {
-		ix, err := store.Lines(repo, l)
+		memories, err := store.Memories(repo, l)
 		if err != nil {
 			return nil, err
 		}
-		for _, line := range ix.Of(store.KindMemories) {
+		for _, line := range memories {
 			have := words(line.Text)
 			shared := 0
 			for w := range want {
