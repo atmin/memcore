@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/atmin/memcore/internal/guards"
@@ -48,7 +49,7 @@ func runMove(env Env, args []string) error {
 	memory := store.IsMemory(from)
 	oldName := strings.TrimSuffix(path.Base(from), ".md")
 
-	to, err := moveTarget(from, pos[1])
+	to, err := moveTarget(repo, from, pos[1])
 	if err != nil {
 		return err
 	}
@@ -117,13 +118,15 @@ func runMove(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A fault keeps its identity across the move: its document, its line, and for a dead link the path that
+	// the link resolves to. So a dead link that the move only rewrites counts as the same fault.
+	had := map[string]bool{}
+	for _, f := range before {
+		had[faultKey(f, from, to)] = true
+	}
 	var added []guards.Finding
 	for _, f := range after {
-		was := f
-		if was.Path == to {
-			was.Path = from
-		}
-		if !slices.Contains(before, was) {
+		if !had[faultKey(f, from, to)] {
 			added = append(added, f)
 		}
 	}
@@ -152,13 +155,66 @@ func runMove(env Env, args []string) error {
 	return nil
 }
 
-// moveTarget returns the new path of a document from the second argument of move. An argument without a /
-// is a new name in the same folder.
-func moveTarget(from, arg string) (string, error) {
-	if strings.Contains(arg, "/") {
-		return "", inputErrf("move takes a new name without a /, as new-name")
+// faultKey names a fault apart from where the move puts its document. A fault of the moved document counts
+// at from. A dead link counts by the path that it resolves to, from the folder of its document.
+func faultKey(f guards.Finding, from, to string) string {
+	doc := f.Path
+	if doc == to {
+		doc = from
 	}
-	return path.Join(path.Dir(from), strings.TrimSuffix(arg, ".md")+".md"), nil
+	msg := f.Message
+	if target, ok := strings.CutPrefix(msg, "dead link to "); ok {
+		if t, err := strconv.Unquote(target); err == nil {
+			if i := strings.IndexAny(t, "#?"); i >= 0 {
+				t = t[:i]
+			}
+			if !strings.HasPrefix(t, "/") {
+				t = path.Join(path.Dir(f.Path), t)
+			}
+			msg = "dead link to " + path.Clean(strings.TrimPrefix(t, "/"))
+		}
+	}
+	return fmt.Sprintf("%s:%d: %s", doc, f.Line, msg)
+}
+
+// moveTarget returns the new path of a document from the second argument of move. An argument without a /
+// is a new name in the same folder. A path that ends in / names a folder, and keeps the name. A path that ends
+// in .md names the new path. The folder is the kind folder of the level of from, or a topic folder in it.
+func moveTarget(repo, from, arg string) (string, error) {
+	if !strings.Contains(arg, "/") {
+		return path.Join(path.Dir(from), strings.TrimSuffix(arg, ".md")+".md"), nil
+	}
+	var to string
+	switch {
+	case strings.HasSuffix(arg, "/"):
+		to = path.Join(path.Clean(arg), path.Base(from))
+	case strings.HasSuffix(arg, ".md"):
+		to = path.Clean(arg)
+	default:
+		return "", inputErrf("%s ends in neither / nor .md: a folder ends in /, and a new path in .md", arg)
+	}
+	if path.IsAbs(to) || to == ".." || strings.HasPrefix(to, "../") {
+		return "", inputErrf("%s is not a path in the memory repo", arg)
+	}
+	fromLevel, _ := docLevel(from)
+	toLevel, ok := docLevel(to)
+	if !ok || toLevel != fromLevel {
+		return "", inputErrf("%s is not at the level of %s: move stays in one level", arg, from)
+	}
+	kind := docKind(from)
+	if docKind(to) != kind {
+		return "", inputErrf("%s is not in the %s folder of %s: move keeps the kind of a document", arg, kind, title(fromLevel))
+	}
+	dir := path.Dir(to)
+	if top := path.Join(store.Folder(fromLevel), kind); dir != top {
+		if kind == "plans" {
+			return "", inputErrf("%s is a folder inside plans: a plan has no topic folder", dir)
+		}
+		if err := needTopic(repo, fromLevel, kind, strings.TrimPrefix(dir, top+"/")); err != nil {
+			return "", err
+		}
+	}
+	return to, nil
 }
 
 // renamed sets the name in the frontmatter of a document. It replaces only the name line, so every other line

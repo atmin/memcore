@@ -66,6 +66,10 @@ func relink(p, text, from, to, oldName, newName string, memory bool) (string, bo
 		raw := masked[l.target[0]:l.target[1]]
 		if t, ok := retarget(p, raw, from, to); ok {
 			edits = append(edits, edit{l.target[0], l.target[1], t})
+		} else if p == from && path.Dir(from) != path.Dir(to) {
+			if t, ok := rebase(raw, path.Dir(from), path.Dir(to)); ok {
+				edits = append(edits, edit{l.target[0], l.target[1], t})
+			}
 		}
 	}
 	if memory && oldName != newName {
@@ -85,23 +89,48 @@ func relink(p, text, from, to, oldName, newName string, memory bool) (string, bo
 	return text, true
 }
 
-// retarget returns the new target of a link in the document at p, when the link points to from. It keeps the
-// angle brackets, the anchor and the query of the target, and an absolute target stays absolute.
-func retarget(p, raw, from, to string) (string, bool) {
-	t := raw
-	open, close := "", ""
+// rebase returns a relative link target that resolved from the folder from, rewritten to resolve to the same
+// path from the folder to. It leaves absolute targets, anchors and links with a scheme as they are.
+func rebase(raw, from, to string) (string, bool) {
+	open, close, t, suffix, ok := splitTarget(raw)
+	if !ok || strings.HasPrefix(t, "/") {
+		return "", false
+	}
+	r, err := filepath.Rel(filepath.FromSlash(to), filepath.FromSlash(path.Join(from, t)))
+	if err != nil {
+		return "", false
+	}
+	return open + (&url.URL{Path: filepath.ToSlash(r)}).EscapedPath() + suffix + close, true
+}
+
+// splitTarget splits a link target into its angle brackets, its unescaped path and its anchor or query. It
+// reports false for an empty target, an anchor alone, and a target with a scheme.
+func splitTarget(raw string) (open, close, t, suffix string, ok bool) {
+	t = raw
 	if strings.HasPrefix(t, "<") && strings.HasSuffix(t, ">") {
 		open, close, t = "<", ">", t[1:len(t)-1]
 	}
 	if t == "" || strings.HasPrefix(t, "#") || schemeRE.MatchString(t) {
-		return "", false
+		return "", "", "", "", false
 	}
-	suffix := ""
 	if i := strings.IndexAny(t, "#?"); i >= 0 {
 		t, suffix = t[:i], t[i:]
 	}
 	if u, err := url.PathUnescape(t); err == nil {
 		t = u
+	}
+	if t == "" {
+		return "", "", "", "", false // a query alone points to the document itself
+	}
+	return open, close, t, suffix, true
+}
+
+// retarget returns the new target of a link in the document at p, when the link points to from. It keeps the
+// angle brackets, the anchor and the query of the target, and an absolute target stays absolute.
+func retarget(p, raw, from, to string) (string, bool) {
+	open, close, t, suffix, ok := splitTarget(raw)
+	if !ok {
+		return "", false
 	}
 	var target string
 	if strings.HasPrefix(t, "/") {

@@ -15,21 +15,30 @@ func TestMove(t *testing.T) {
 		return "---\nname: " + name + "\ndescription: \"Read when you test " + name + ".\"\n---\n\n" + body
 	}
 	pushedByHand(t, home, repo, map[string]string{
-		"dev/memories/old-fact.md":     memoryText("old-fact", "Read when you test the old fact.", "See [[old-fact]] itself."),
-		"dev/memories/linking-fact.md": memoryText("linking-fact", "Read before you follow a link.", "See [[old-fact]]."),
-		"dev/memories/same.md":         memoryText("same", "Read before you test a shared name.", "A fact."),
-		"dev/memories/uses-same.md":    memoryText("uses-same", "Read before you use a shared name.", "See [[same]] and [the note](../notes/same.md)."),
-		"dev/memories/t/README.md":     topicReadme("t", "Read when you test a topic."),
-		"dev/memories/t/in-topic.md":   memoryText("in-topic", "Read before you go into a topic.", "See [the old fact](../old-fact.md)."),
-		"dev/notes/same.md":            note("same", "A note.\n"),
-		"dev/notes/linking.md":         note("linking", "See [the old fact](../memories/old-fact.md).\n"),
-		"dev/plans/p.md":               note("p", "A plan.\n"),
-		"dev/skills/s/SKILL.md":        note("s", "See [the old fact](../../memories/old-fact.md).\n"),
-		"dev/bin/run-x":                "#!/bin/sh\n# Run when you test.\n",
-		"dev/glossary.md":              "# Glossary\n\n- **fact**: a thing that holds. Not: forbidden-fact.\n",
-		"dev/notes/flow.md":            "---\nname: flow\ndescription: 'Read when you test a flow list.'\ntags: [a, b]\n---\n\nSee [a gone page](../plans/gone.md).\n",
-		"dev/memories/empty/README.md": topicReadme("empty", "Read when you build [the plan](../../plans/p.md)."),
-		"dev/memories/empty-link.md":   memoryText("empty-link", "Read before you link an empty topic.", "See [the empty topic](empty/README.md)."),
+		"dev/memories/old-fact.md":           memoryText("old-fact", "Read when you test the old fact.", "See [[old-fact]] itself."),
+		"dev/memories/linking-fact.md":       memoryText("linking-fact", "Read before you follow a link.", "See [[old-fact]]."),
+		"dev/memories/same.md":               memoryText("same", "Read before you test a shared name.", "A fact."),
+		"dev/memories/uses-same.md":          memoryText("uses-same", "Read before you use a shared name.", "See [[same]] and [the note](../notes/same.md)."),
+		"dev/memories/t/README.md":           topicReadme("t", "Read when you test a topic."),
+		"dev/memories/t/in-topic.md":         memoryText("in-topic", "Read before you go into a topic.", "See [the old fact](../old-fact.md)."),
+		"dev/notes/same.md":                  note("same", "A note.\n"),
+		"dev/notes/linking.md":               note("linking", "See [the old fact](../memories/old-fact.md).\n"),
+		"dev/plans/p.md":                     note("p", "A plan.\n"),
+		"dev/skills/s/SKILL.md":              note("s", "See [the old fact](../../memories/old-fact.md).\n"),
+		"dev/bin/run-x":                      "#!/bin/sh\n# Run when you test.\n",
+		"dev/glossary.md":                    "# Glossary\n\n- **fact**: a thing that holds. Not: forbidden-fact.\n",
+		"dev/notes/flow.md":                  "---\nname: flow\ndescription: 'Read when you test a flow list.'\ntags: [a, b]\n---\n\nSee [a gone page](../plans/gone.md).\n",
+		"dev/memories/empty/README.md":       topicReadme("empty", "Read when you build [the plan](../../plans/p.md)."),
+		"dev/memories/dead-fact.md":          memoryText("dead-fact", "Read before you follow a dead link.", "See [a gone page](../plans/gone.md)."),
+		"dev/memories/rel-fact.md":           memoryText("rel-fact", "Read before you follow a relative link.", "See [the note](../notes/linking.md)."),
+		"dev/memories/solo/README.md":        topicReadme("solo", "Read when you test a lone topic."),
+		"dev/memories/solo/solo-fact.md":     memoryText("solo-fact", "Read before you stand alone.", "A fact."),
+		"dev/memories/t2/README.md":          topicReadme("t2", "Read when you test a second topic."),
+		"dev/memories/linked/README.md":      topicReadme("linked", "Read when you test a linked topic."),
+		"dev/memories/linked/linked-fact.md": memoryText("linked-fact", "Read before you link a topic.", "A fact."),
+		"dev/notes/to-topic.md":              note("to-topic", "See [the topic](../memories/linked/README.md).\n"),
+		"dev/app/memories/app-fact.md":       memoryText("app-fact", "Read when you build the app.", "A fact."),
+		"dev/memories/empty-link.md":         memoryText("empty-link", "Read before you link an empty topic.", "See [the empty topic](empty/README.md)."),
 	})
 
 	t.Run("a memory, and every link to it", func(t *testing.T) {
@@ -98,11 +107,73 @@ func TestMove(t *testing.T) {
 		clean(t, repo)
 	})
 
+	t.Run("into a topic folder, with the links inside it", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "rel-fact", "dev/memories/t/", "--reason", "It belongs to t."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if got := head(t, repo); got != "move: dev/memories/rel-fact.md to dev/memories/t/rel-fact.md" {
+			t.Errorf("subject = %q", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "t", "rel-fact.md")); !strings.Contains(got, "See [the note](../../notes/linking.md).") {
+			t.Errorf("the moved memory =\n%s\nwant its link from the new folder", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "t", "README.md")); !strings.Contains(got, "- [rel-fact](rel-fact.md):") {
+			t.Errorf("topic index =\n%s\nwant rel-fact", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); strings.Contains(got, "rel-fact") {
+			t.Errorf("dev/README.md =\n%s\nwant no rel-fact", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("an old dead link moves with its document", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "dead-fact", "dev/memories/t2/", "--reason", "It belongs to t2."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "t2", "dead-fact.md")); !strings.Contains(got, "[a gone page](../../plans/gone.md)") {
+			t.Errorf("the moved memory =\n%s\nwant its dead link from the new folder", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("out of a topic folder, which goes", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "solo-fact", "dev/memories/", "--reason", "No topic needed."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "memories", "solo")); err == nil {
+			t.Error("the empty topic folder is still there")
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); strings.Contains(got, "solo/") || !strings.Contains(got, "- [solo-fact](memories/solo-fact.md):") {
+			t.Errorf("dev/README.md =\n%s\nwant solo-fact and no topic", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("between topic folders, with a new name", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "in-topic", "dev/memories/t2/topic-fact.md", "--reason", "It belongs to t2."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		got := readT(t, filepath.Join(repo, "dev", "memories", "t2", "topic-fact.md"))
+		if !strings.Contains(got, "name: topic-fact\n") || !strings.Contains(got, "[the old fact](../new-fact.md)") {
+			t.Errorf("the moved memory =\n%s\nwant its new name and its link", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "t", "README.md")); strings.Contains(got, "in-topic") {
+			t.Errorf("topic index of t =\n%s\nwant no in-topic", got)
+		}
+		clean(t, repo)
+	})
+
 	for _, tt := range []struct {
 		name string
 		args []string
 		want string
 	}{
+		{"a missing topic folder", []string{"new-fact", "dev/memories/none/"}, "memcore draft topic memories/none"},
+		{"another level", []string{"new-fact", "dev/app/memories/"}, "level"},
+		{"the root level", []string{"new-fact", "memories/"}, "level"},
+		{"another kind", []string{"new-fact", "dev/notes/"}, "kind"},
+		{"a path without / or .md", []string{"new-fact", "dev/memories/t"}, "neither / nor .md"},
+		{"a prune that leaves a dead link", []string{"linked-fact", "dev/memories/"}, "fault"},
 		{"a skill", []string{"dev/skills/s/SKILL.md", "x"}, "a memory, a note or a plan"},
 		{"a script", []string{"dev/bin/run-x", "x"}, "a memory, a note or a plan"},
 		{"a topic index", []string{"dev/memories/t/README.md", "x"}, "a memory, a note or a plan"},

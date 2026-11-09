@@ -194,6 +194,30 @@ func TestRelink(t *testing.T) {
 		}
 	})
 
+	t.Run("into a topic folder, with the links inside it", func(t *testing.T) {
+		repo := t.TempDir()
+		writeT(t, repo, "dev/memories/m.md", memory("m", "[a](a.md) [n](../notes/n.md#x) [abs](/dev/notes/n.md) [web](https://x.y) [top](#top) [self](m.md) [q](?view=1) `[c](a.md)`\n"))
+		writeT(t, repo, "dev/memories/a.md", memory("a", "[m](m.md)\n"))
+		writeT(t, repo, "dev/notes/n.md", memory("n", "[m](../memories/m.md)\n"))
+		got, err := Relink(repo, "dev/memories/m.md", "dev/memories/t/m.md", "m", "m", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{
+			"dev/memories/m.md": memory("m", "[a](../a.md) [n](../../notes/n.md#x) [abs](/dev/notes/n.md) [web](https://x.y) [top](#top) [self](m.md) [q](?view=1) `[c](a.md)`\n"),
+			"dev/memories/a.md": memory("a", "[m](t/m.md)\n"),
+			"dev/notes/n.md":    memory("n", "[m](../memories/t/m.md)\n"),
+		}
+		if len(got) != len(want) {
+			t.Errorf("Relink changed %v, want %d documents", keys(got), len(want))
+		}
+		for p, w := range want {
+			if string(got[p]) != w {
+				t.Errorf("%s =\n%s\nwant\n%s", p, got[p], w)
+			}
+		}
+	})
+
 	t.Run("a note keeps the [[name]] of a memory", func(t *testing.T) {
 		got, err := Relink(repo, "dev/notes/same.md", "dev/notes/other.md", "same", "other", false)
 		if err != nil {
