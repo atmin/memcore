@@ -109,6 +109,25 @@ func TestVerify(t *testing.T) {
 	if _, err := Verify(repo, "docs/none.md"); err == nil {
 		t.Error("absent path: no error")
 	}
+
+	// A memory in a topic folder is a memory, so a [[name]] to it holds.
+	writeT(t, repo, "dev/memories/stedo/nested-fact.md", "---\nname: nested-fact\ndescription: \"Read when you test.\"\n---\n\nSee [[nested-fact]] and [[other-fact]].\n")
+	writeT(t, repo, "dev/memories/other-fact.md", "---\nname: other-fact\ndescription: \"Read when you test.\"\n---\n\nSee [[nested-fact]].\n")
+	writeT(t, repo, "dev/notes/n.md", "---\nname: n\ndescription: \"Read when you test.\"\n---\n\nSee [[nested-fact]] and [[gone-fact]].\n")
+	r, err = Verify(repo, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults", r.Faults, []string{`dev/notes/n.md:6: dead reference [[gone-fact]]`})
+	check(t, "warnings", r.Warnings, nil)
+
+	// A note in a topic folder needs a description, as any note does.
+	writeT(t, repo, "dev/notes/incidents/bare.md", "No frontmatter.\n")
+	r, err = Verify(repo, "dev/notes/incidents/bare.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "warnings", r.Warnings, []string{"dev/notes/incidents/bare.md:1: the document has no frontmatter"})
 }
 
 func TestVerifySet(t *testing.T) {

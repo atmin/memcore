@@ -54,7 +54,7 @@ func runRevise(env Env, args []string) error {
 	content := input
 	var warnings []string
 	switch {
-	case docKind(rel) == "memories" && path.Base(path.Dir(rel)) == "memories" && strings.HasSuffix(rel, ".md"):
+	case store.IsMemory(rel):
 		m, err := store.ParseMemory(strings.NewReader(string(input)))
 		if err != nil {
 			return err

@@ -93,3 +93,39 @@ func TestPath(t *testing.T) {
 		}
 	}
 }
+
+func TestIsMemory(t *testing.T) {
+	tests := []struct {
+		path       string
+		memory     bool
+		topicIndex bool
+	}{
+		{"memories/me.md", true, false},
+		{"dev/memories/a.md", true, false},
+		{"+bin/memories/a.md", true, false},
+		{"dev/memories/stedo/a.md", true, false},
+		{"dev/memories/stedo/cost/a.md", true, false},
+		{"dev/memories/stedo/README.md", false, true},
+		{"dev/memories/stedo/cost/README.md", false, true},
+		{"dev/notes/incidents/README.md", false, true},
+		{"dev/notes/incidents/a.md", false, false},
+		{"dev/memories/README.md", false, false},
+		{"dev/README.md", false, false},
+		{"dev/memories/a.txt", false, false},
+		{"dev/notes/a.md", false, false},
+		{"dev/plans/x/README.md", false, false},
+		{"dev/skills/x/README.md", false, false},
+		{"dev/skills/x/memories/a.md", false, false},
+		{"dev/skills/x/memories/sub/a.md", false, false},
+		{"dev/skills/x/memories/sub/README.md", false, false},
+		{"bin/memories/a.md", false, false},
+	}
+	for _, tt := range tests {
+		if got := IsMemory(tt.path); got != tt.memory {
+			t.Errorf("IsMemory(%q) = %v, want %v", tt.path, got, tt.memory)
+		}
+		if got := IsTopicIndex(tt.path); got != tt.topicIndex {
+			t.Errorf("IsTopicIndex(%q) = %v, want %v", tt.path, got, tt.topicIndex)
+		}
+	}
+}

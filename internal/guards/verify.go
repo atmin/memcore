@@ -67,7 +67,7 @@ func newVerifier(repo string) (*verifier, error) {
 		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		if !d.IsDir() && strings.HasSuffix(p, ".md") && filepath.Base(filepath.Dir(p)) == "memories" {
+		if !d.IsDir() && strings.HasSuffix(p, ".md") {
 			if rel, err := filepath.Rel(repo, p); err == nil && store.IsMemory(filepath.ToSlash(rel)) {
 				v.names[strings.TrimSuffix(d.Name(), ".md")] = true
 			}
@@ -92,7 +92,7 @@ func Faults(repo string, removed []string) ([]Finding, error) {
 	v.gone = removed
 	for name := range v.names {
 		for _, g := range removed {
-			if path.Base(path.Dir(g)) == "memories" && path.Base(g) == name+".md" {
+			if store.IsMemory(g) && path.Base(g) == name+".md" {
 				delete(v.names, name)
 			}
 		}
@@ -245,7 +245,7 @@ func (v *verifier) check(p string, content []byte) (Report, error) {
 		}
 	}
 	own := ""
-	if path.Base(path.Dir(p)) == "memories" {
+	if store.IsMemory(p) {
 		own = strings.TrimSuffix(path.Base(p), ".md")
 	}
 	for _, m := range wikiRE.FindAllStringSubmatchIndex(masked, -1) {
@@ -276,7 +276,7 @@ func (v *verifier) check(p string, content []byte) (Report, error) {
 	}
 
 	// An indexed document needs a description, because its index line is the description.
-	indexed := path.Base(p) == "SKILL.md" || slices.Contains([]string{"memories", "plans", "notes"}, path.Base(path.Dir(p)))
+	indexed := path.Base(p) == "SKILL.md" || store.IsMemory(p) || store.IsTopicIndex(p) || slices.Contains([]string{"plans", "notes"}, store.Kind(p))
 	if !strings.HasPrefix(text, "---") {
 		if indexed {
 			r.Warnings = append(r.Warnings, Finding{p, 1, "the document has no frontmatter: add one with a description, so the index says when to read it"})
@@ -529,11 +529,14 @@ func maskCode(s string) string {
 	return string(b)
 }
 
-// isIndex reports whether a path is the generated index of a level, which a write regenerates.
-// A README.md inside a skill is a document.
+// isIndex reports whether a path is the generated index of a level or of a topic folder, which a write
+// regenerates. A README.md inside a skill is a document.
 func isIndex(p string) bool {
 	if path.Base(p) != "README.md" {
 		return false
+	}
+	if store.IsTopicIndex(p) {
+		return true
 	}
 	folder := path.Dir(p)
 	if folder == "." {

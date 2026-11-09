@@ -183,7 +183,7 @@ func findMemory(repo, name string) (string, error) {
 		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		if !d.IsDir() && d.Name() == name+".md" && filepath.Base(filepath.Dir(p)) == "memories" {
+		if !d.IsDir() && d.Name() == name+".md" {
 			rel, err := filepath.Rel(repo, p)
 			if err != nil {
 				return err

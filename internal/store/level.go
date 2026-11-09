@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -73,16 +74,41 @@ func Path(level string) []string {
 	return append(levels, "")
 }
 
-// IsMemory reports whether a path is a memory: a markdown file in the memories folder of a level.
-// A file under the memories folder of a skill is part of the skill.
+// kindOf splits a path into its level, its kind folder and the parts after the kind folder. The kind
+// folder is the first part that names a kind, after a valid level. A file inside a skill has the kind skills.
+func kindOf(p string) (level, kind string, rest []string, ok bool) {
+	parts := strings.Split(p, "/")
+	for i, part := range parts[:len(parts)-1] {
+		if !slices.Contains([]string{"memories", "skills", "bin", "plans", "notes"}, part) {
+			continue
+		}
+		level, ok := LevelOf(strings.Join(parts[:i], "/"))
+		if !ok {
+			return "", "", nil, false
+		}
+		return level, part, parts[i+1:], true
+	}
+	return "", "", nil, false
+}
+
+// Kind returns the kind folder of a document: memories, skills, bin, plans or notes. It returns "" for a
+// path in no kind folder of a level, such as an index, a conventions file or a glossary.
+func Kind(p string) string {
+	_, kind, _, _ := kindOf(p)
+	return kind
+}
+
+// IsMemory reports whether a path is a memory: a markdown file in the memories folder of a level, at any
+// depth of topic folders. The README.md of a topic folder is its index, and a file inside a skill is part of
+// the skill.
 func IsMemory(p string) bool {
-	if path.Base(path.Dir(p)) != "memories" || path.Ext(p) != ".md" {
-		return false
-	}
-	folder := path.Dir(path.Dir(p))
-	if folder == "." {
-		folder = ""
-	}
-	_, ok := LevelOf(folder)
-	return ok
+	_, kind, rest, ok := kindOf(p)
+	return ok && kind == "memories" && path.Ext(p) == ".md" && path.Base(p) != "README.md" && len(rest) > 0
+}
+
+// IsTopicIndex reports whether a path is the index of a topic folder: the README.md of a folder inside the
+// memories or notes folder of a level.
+func IsTopicIndex(p string) bool {
+	_, kind, rest, ok := kindOf(p)
+	return ok && (kind == "memories" || kind == "notes") && len(rest) >= 2 && path.Base(p) == "README.md"
 }

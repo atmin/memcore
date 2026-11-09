@@ -51,6 +51,27 @@ func TestRevise(t *testing.T) {
 		}
 	})
 
+	t.Run("by name, a memory in a topic folder", func(t *testing.T) {
+		commitByHand(t, repo, map[string]string{"dev/memories/stedo/nested-fact.md": memoryText("nested-fact", "Read when you test a nested fact.", "A nested fact.")})
+		gitT(t, repo, "push", "-q", "origin", "main")
+		in := memoryText("nested-fact", "Read when you test a nested fact.", "A nested fact, revised.")
+		if out, err := run(t, dev, in, "revise", "nested-fact", "--reason", "Nested."); err != nil {
+			t.Fatalf("revise: %v\n%s", err, out)
+		}
+		if got := message(t, repo); got != "revise: dev/memories/stedo/nested-fact.md\n\nNested.\n\n" {
+			t.Errorf("message = %q", got)
+		}
+		got := readT(t, filepath.Join(repo, "dev", "memories", "stedo", "nested-fact.md"))
+		if !strings.Contains(got, "  - claude:second-session\n") || !strings.Contains(got, "revised.\n") {
+			t.Errorf("memory =\n%s\nwant the session and the new body", got)
+		}
+		_, err := run(t, dev, memoryText("renamed-fact", "Read when you test.", "A fact."), "revise", "nested-fact", "--reason", "A new name.")
+		if err == nil || !strings.Contains(err.Error(), "name") {
+			t.Errorf("revise with a new name: %v, want a refusal about the name", err)
+		}
+		clean(t, repo)
+	})
+
 	for _, tt := range []struct{ name, in, want string }{
 		{"a new name", memoryText("other-name", "Read before you commit.", "A fact."), "name"},
 		{"a dead reference", memoryText("small-commits", "Read before you commit.", "See [[no-such-memory]]."), "fault"},
