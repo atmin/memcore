@@ -53,7 +53,7 @@ The root is a level like any other, so nothing sits there loose. The folder give
 - Its `README.md` is its index. You or an agent write its frontmatter, with a `name` and a `description`. memcore writes the list below the frontmatter.
 - A topic folder name is lower case with hyphens, and no reserved name of a level.
 
-`draft topic memories/payments --description <text>` starts a topic folder. `remember --topic` and `draft note --topic` write into one, and `move` files a document into or out of one. The last document out takes the folder with it, and `forget` removes the index of an empty one. memcore never picks a topic: an agent or a skill picks it.
+`draft topic memories/payments --description <text>` starts a topic folder. `remember --topic` and `draft note --topic` write into one, and `move` files a document into or out of one. `move` also carries a document to another level. The last document out takes the folder with it, and `forget` removes the index of an empty one. memcore never picks a topic: an agent or a skill picks it.
 
 **Scripts.** An agent writes one-off scripts wherever it works. A script enters `bin/` only when it recurs: you ask for it. `draft script <name>` starts it from the template, and `revise` fills it. The template starts with a shebang, then one comment line that says when to run the script, then its usage. That comment line is the script's index line.
 

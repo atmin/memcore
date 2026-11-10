@@ -104,7 +104,7 @@ orient lists it. The second argument is one of these:
 The same commit sets the name in the frontmatter, and rewrites every link to the document
 and the relative links inside it. For a memory, it rewrites every [[name]] too. A topic
 folder or a level that the move leaves empty goes. move refuses a name that another memory
-holds, a path that exists, a folder that does not exist, and a move that adds a fault.
+holds, a path that exists, a topic folder that does not exist, and a move that adds a fault.
 
 move carries a document whole, with its sessions. A promotion rewrites a lesson without the
 names of its projects, so it is a new memory: memcore remember --at. For example:

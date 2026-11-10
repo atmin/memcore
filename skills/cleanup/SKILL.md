@@ -19,15 +19,8 @@ Collect these numbers:
 1. The lines that the level costs in `orient`, against its budget of 40: `memcore orient | grep -c '^- <level>/'`.
 2. The faults, and the descriptions that name no moment to read: `memcore verify <level>`.
 3. The size of each document: `(cd <memory repo> && find <level>/memories <level>/notes -name '*.md' ! -name README.md | xargs wc -c)`.
-4. The reads of each document, with the command below.
+4. The reads of each document, which follow moves: `memcore stats <level>`.
 5. The body of each document whose name and description leave its topic unclear: `memcore show <path>`.
-
-This command counts the reads of each document, and it needs `jq`:
-
-    (cd <memory repo> && jq -r 'select((.command=="show" and .outcome=="ok") or (.command=="hook" and .hook=="tool")) | .paths[]?' \
-      "$(git rev-parse --git-dir)/memcore/log.jsonl" | grep -E '^<level>/(memories|notes|plans)/' | sort | uniq -c | sort -rn)
-
-This count keeps the reads of a moved document under its old path. `memcore stats` follows moves, but it names only the five most-read memories. So add the reads of an old path to the document by hand.
 
 Give the person the numbers of the survey in a few lines. Then look for the faults below.
 
@@ -60,13 +53,13 @@ A topic folder of memories costs one line in `orient`, and a memory outside it c
 
 ### Levels
 
-A fact about a whole parent level belongs there, such as a tool that every repo under it uses. Move it up now: a document that spans repos goes to the level of their common parent.
+A fact about a whole parent level belongs there, such as a tool that every repo under it uses. Move it up now: a document that spans repos goes to the level of their common parent. `memcore move <name> <parent level>/memories/ --reason <text>` carries it whole, with its sessions and the links to it.
 
 Promotion is different. A fact moves up one level only when it appears in two or more sibling levels. The lesson moves up, with the project names removed. The specific fact stays where it is. Placement is low by default: too low costs one repeated instruction, and too high costs every context.
 
-`move` never crosses levels. So write the fact or the lesson with `memcore remember --at <directory>`, under a name that no memory holds yet. The copy keeps its own name until it goes. When `remember` lists one of the copies as a near duplicate, write the memory again with `--new`. Then revise each copy down to its specific fact, or forget a copy with nothing specific left.
+A promoted lesson is a new memory, so `move` cannot carry it. Write it with `memcore remember --at <directory>`, under a name that no memory holds yet. Each copy keeps its own name until it goes. When `remember` lists one of the copies as a near duplicate, write the lesson again with `--new`. Then revise each copy down to its specific fact, or forget a copy with nothing specific left.
 
-A refused `remember` writes nothing. So check with `memcore show` that the new memory exists before you forget its copy. `remember` also refuses a link to a memory that does not exist yet. Write two memories that link each other in three steps:
+A refused `remember` writes nothing. So check with `memcore show` that the lesson exists before you forget a copy. `remember` also refuses a link to a memory that does not exist yet. Write two memories that link each other in three steps:
 1. Write the first memory without the link.
 2. Write the second memory, with its link to the first.
 3. Revise the first memory to add its link to the second.
@@ -74,7 +67,7 @@ A refused `remember` writes nothing. So check with `memcore show` that the new m
 ### Stale documents and state
 
 - A dead reference shows up in `verify`. Check the reference against the project, then fix or forget the document.
-- `verify` misses a plain-text name of a gone memory. So search the bodies for old names too, such as a `project-` prefix from an import of auto-memory.
+- `verify` warns on a plain-text name of a memory that moved or went. A name from an import that never was a memory escapes it. So search the bodies for such names too, such as a `project-` prefix from an import of auto-memory.
 - Ticket, incident or project state goes into a note or a plan, never into a memory.
 - Age alone never makes a document stale. When the evidence is unclear, ask the person.
 
@@ -104,7 +97,7 @@ Apply the approved changes in this order, so each command sees the final names:
 1. Start a topic folder with `memcore draft topic <kind>/<topic> --description <text> --at <directory>`, where `<kind>` is `memories` or `notes`. Then move its documents into it at once.
 2. Rename or move each document with `memcore move <name or path> <new name, folder or path> --reason <text>`. A move to `<level>/memories/<topic>/<new name>.md` renames the document and files it in one commit.
 3. Rewrite a description or a stale body. Print the document with `memcore show <path>`, then pipe the whole new version to `memcore revise <name or path> --reason <text>`.
-4. Write each memory that changes level, then revise or forget its copies. `forget` refuses while a document links to the one it removes, so revise that document first.
+4. Move each placed memory to its level with `memcore move`. Write each promoted lesson, then revise or forget its copies. `forget` refuses while a document links to the one it removes, so revise that document first.
 5. Run the survey again, and compare it with the first one.
 
 Turn a memory into a note with three commands:
