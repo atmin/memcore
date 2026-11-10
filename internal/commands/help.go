@@ -93,21 +93,25 @@ For example:
 `,
 	"move": `memcore move <path or name> <new name or path> --reason <text>
 
-Renames a memory, a note or a plan, or moves it to a topic folder, and records the reason.
-Name a memory by its name, and any other document by its path, as orient lists it. The
-second argument is one of these:
+Renames a memory, a note or a plan, or moves it to a topic folder or another level, and
+records the reason. Name a memory by its name, and any other document by its path, as
+orient lists it. The second argument is one of these:
 
   <name>                a new name in the same folder
-  <folder>/             a folder of the same kind and level, which keeps the name
+  <folder>/             a folder of the same kind at any level, which keeps the name
   <folder>/<name>.md    a new path, with a new name
 
 The same commit sets the name in the frontmatter, and rewrites every link to the document
 and the relative links inside it. For a memory, it rewrites every [[name]] too. A topic
-folder that the move leaves empty goes. move refuses a name that another memory holds, a
-path that exists, a folder that does not exist, and a move that adds a fault. For example:
+folder or a level that the move leaves empty goes. move refuses a name that another memory
+holds, a path that exists, a folder that does not exist, and a move that adds a fault.
 
-  memcore move reference-stedo-app stedo-app --reason "The name states the topic."
-  memcore move stedo-app ebag/Odin/memories/stedo/ --reason "It belongs to Stedo."
+move carries a document whole, with its sessions. A promotion rewrites a lesson without the
+names of its projects, so it is a new memory: memcore remember --at. For example:
+
+  memcore move reference-payments payments-api --reason "The name states the topic."
+  memcore move payments-api work/shop/memories/payments/ --reason "It belongs to payments."
+  memcore move payments-api work/memories/ --reason "It holds for every repo under work."
 `,
 	"draft": `memcore draft <kind> [<name>] [--description <text>] [--at <dir>] [--topic <topic>] [--exec]
 

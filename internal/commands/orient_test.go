@@ -233,7 +233,7 @@ func TestOrientExact(t *testing.T) {
   memcore remember [--new] [--at <dir>] [--topic <topic>] Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.
   memcore revise <path or name> --reason <text> Replaces a document with the one on standard input, checks it, and commits it with the reason.
   memcore forget <path or name> --reason <text> Removes a document, or the folder of a skill, and commits the removal with the reason.
-  memcore move <path or name> <new name or path> --reason <text> Renames a memory, a note or a plan, or moves it to a topic folder, and rewrites every link to it in the same commit.
+  memcore move <path or name> <new name or path> --reason <text> Renames a memory, a note or a plan, or moves it to a topic folder or another level, and rewrites every link to it in the same commit.
   memcore draft <kind> [<name>] Starts a plan, a note, a script, a helper, a skill, a topic folder, a conventions file or a glossary from its template, and commits it.
   memcore verify <path>        Checks a document, or every document under a path, for dead references and forbidden words.
   memcore snapshot [--from <dir>] Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.
@@ -282,7 +282,7 @@ The indexes, from the working directory to the root. Each line says when to read
 		t.Errorf("output =\n%s\nwant\n%s", out, want)
 	}
 	e := last(t, repo)
-	wantWords := map[string]int{"header": 503, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantWords := map[string]int{"header": 506, "~/dev/app": 34, "~/dev": 30, "~": 7}
 	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
 	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
 		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)

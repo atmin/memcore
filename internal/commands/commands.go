@@ -39,7 +39,7 @@ func Table() []Command {
 		{Name: "remember", Args: "[--new] [--at <dir>] [--topic <topic>]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
 		{Name: "revise", Args: "<path or name> --reason <text>", Does: "Replaces a document with the one on standard input, checks it, and commits it with the reason.", Run: runRevise},
 		{Name: "forget", Args: "<path or name> --reason <text>", Does: "Removes a document, or the folder of a skill, and commits the removal with the reason.", Run: runForget},
-		{Name: "move", Args: "<path or name> <new name or path> --reason <text>", Does: "Renames a memory, a note or a plan, or moves it to a topic folder, and rewrites every link to it in the same commit.", Run: runMove},
+		{Name: "move", Args: "<path or name> <new name or path> --reason <text>", Does: "Renames a memory, a note or a plan, or moves it to a topic folder or another level, and rewrites every link to it in the same commit.", Run: runMove},
 		{Name: "draft", Args: "<kind> [<name>]", Does: "Starts a plan, a note, a script, a helper, a skill, a topic folder, a conventions file or a glossary from its template, and commits it.", Run: runDraft},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},

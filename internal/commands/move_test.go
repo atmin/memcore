@@ -39,6 +39,13 @@ func TestMove(t *testing.T) {
 		"dev/notes/to-topic.md":              note("to-topic", "See [the topic](../memories/linked/README.md).\n"),
 		"dev/app/memories/app-fact.md":       memoryText("app-fact", "Read when you build the app.", "A fact."),
 		"dev/memories/empty-link.md":         memoryText("empty-link", "Read before you link an empty topic.", "See [the empty topic](empty/README.md)."),
+		"dev/app/memories/up-fact.md":        "---\nname: up-fact\ndescription: \"Read before you move a fact up.\"\ntype: reference\nsessions:\n  - claude:up-session\n---\n\nSee [the app fact](app-fact.md).\n",
+		"dev/memories/links-up.md":           memoryText("links-up", "Read before you follow a fact up.", "See [[up-fact]] and [it](../app/memories/up-fact.md)."),
+		"dev/lone/memories/lone-fact.md":     memoryText("lone-fact", "Read when you test a lone level.", "A fact."),
+		"dev/memories/down-fact.md":          memoryText("down-fact", "Read when you test a move down.", "A fact."),
+		"dev/memories/root-fact.md":          memoryText("root-fact", "Read when you test a move to the root.", "A fact."),
+		"dev/two/memories/two-fact.md":       memoryText("two-fact", "Read when you test an emptied kind folder.", "A fact."),
+		"dev/two/notes/two-note.md":          note("two-note", "See [the memories](../memories/).\n"),
 	})
 
 	t.Run("a memory, and every link to it", func(t *testing.T) {
@@ -163,15 +170,74 @@ func TestMove(t *testing.T) {
 		clean(t, repo)
 	})
 
+	t.Run("to the parent level, with its sessions and the links to it", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "up-fact", "dev/memories/", "--reason", "It holds for all of dev."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if got := head(t, repo); got != "move: dev/app/memories/up-fact.md to dev/memories/up-fact.md" {
+			t.Errorf("subject = %q", got)
+		}
+		for p, want := range map[string]string{
+			"dev/memories/up-fact.md":  "sessions:\n  - claude:up-session\n",
+			"dev/memories/links-up.md": "See [[up-fact]] and [it](up-fact.md).",
+			"dev/README.md":            "- [up-fact](memories/up-fact.md):",
+		} {
+			if got := readT(t, filepath.Join(repo, filepath.FromSlash(p))); !strings.Contains(got, want) {
+				t.Errorf("%s =\n%s\nwant it to hold %q", p, got, want)
+			}
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "memories", "up-fact.md")); !strings.Contains(got, "[the app fact](../app/memories/app-fact.md)") {
+			t.Errorf("the moved memory =\n%s\nwant its link from the new level", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "app", "README.md")); strings.Contains(got, "up-fact") || !strings.Contains(got, "app-fact") {
+			t.Errorf("dev/app/README.md =\n%s\nwant app-fact and no up-fact", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("the last document of a child level, which goes", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "lone-fact", "dev/memories/", "--reason", "It holds for all of dev."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "lone")); err == nil {
+			t.Error("the empty level is still there")
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); strings.Contains(got, "lone/") || !strings.Contains(got, "- [lone-fact](memories/lone-fact.md):") {
+			t.Errorf("dev/README.md =\n%s\nwant lone-fact and no level lone", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("another level", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "down-fact", "dev/app/memories/", "--reason", "It holds only for the app."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "app", "README.md")); !strings.Contains(got, "- [down-fact](memories/down-fact.md):") {
+			t.Errorf("dev/app/README.md =\n%s\nwant down-fact", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("the root level", func(t *testing.T) {
+		if out, err := run(t, dev, "", "move", "root-fact", "memories/", "--reason", "It holds everywhere."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		if got := readT(t, filepath.Join(repo, "README.md")); !strings.Contains(got, "- [root-fact](memories/root-fact.md):") {
+			t.Errorf("README.md =\n%s\nwant root-fact", got)
+		}
+		clean(t, repo)
+	})
+
 	for _, tt := range []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"a missing topic folder", []string{"new-fact", "dev/memories/none/"}, "memcore draft topic memories/none"},
-		{"another level", []string{"new-fact", "dev/app/memories/"}, "level"},
-		{"the root level", []string{"new-fact", "memories/"}, "level"},
+		{"a missing topic folder at another level", []string{"new-fact", "dev/app/memories/none/"}, "memcore draft topic memories/none"},
 		{"another kind", []string{"new-fact", "dev/notes/"}, "kind"},
+		{"another kind at another level", []string{"new-fact", "dev/app/notes/"}, "kind"},
+		{"an emptied kind folder that a link names", []string{"two-fact", "dev/memories/"}, "fault"},
 		{"a path without / or .md", []string{"new-fact", "dev/memories/t"}, "neither / nor .md"},
 		{"a prune that leaves a dead link", []string{"linked-fact", "dev/memories/"}, "fault"},
 		{"a skill", []string{"dev/skills/s/SKILL.md", "x"}, "a memory, a note or a plan"},

@@ -102,17 +102,17 @@ func runMove(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	// The removal of from can empty its topic folders, and apply prunes them. Their indexes count as removed.
+	// The removal of from can empty folders: a topic folder, a kind folder or a level. apply prunes them, so
+	// they count as removed, unless they hold the target.
 	emptied, err := wouldPrune(repo, []string{from}, nil)
 	if err != nil {
 		return err
 	}
 	removed := []string{from}
 	for _, d := range emptied {
-		if !store.IsTopicIndex(path.Join(d, "README.md")) || strings.HasPrefix(to, d+"/") {
-			continue
+		if !strings.HasPrefix(to, d+"/") {
+			removed = append(removed, d)
 		}
-		removed = append(removed, d)
 	}
 	after, err := guards.FaultsWith(repo, writes, removed)
 	if err != nil {
@@ -179,7 +179,7 @@ func faultKey(f guards.Finding, from, to string) string {
 
 // moveTarget returns the new path of a document from the second argument of move. An argument without a /
 // is a new name in the same folder. A path that ends in / names a folder, and keeps the name. A path that ends
-// in .md names the new path. The folder is the kind folder of the level of from, or a topic folder in it.
+// in .md names the new path. The folder is the kind folder of from at any level, or a topic folder in it.
 func moveTarget(repo, from, arg string) (string, error) {
 	if !strings.Contains(arg, "/") {
 		return path.Join(path.Dir(from), strings.TrimSuffix(arg, ".md")+".md"), nil
@@ -196,21 +196,20 @@ func moveTarget(repo, from, arg string) (string, error) {
 	if path.IsAbs(to) || to == ".." || strings.HasPrefix(to, "../") {
 		return "", inputErrf("%s is not a path in the memory repo", arg)
 	}
-	fromLevel, _ := docLevel(from)
 	toLevel, ok := docLevel(to)
-	if !ok || toLevel != fromLevel {
-		return "", inputErrf("%s is not at the level of %s: move stays in one level", arg, from)
+	if !ok {
+		return "", inputErrf("%s is at no level: name a kind folder, as dev/memories/", arg)
 	}
 	kind := docKind(from)
 	if docKind(to) != kind {
-		return "", inputErrf("%s is not in the %s folder of %s: move keeps the kind of a document", arg, kind, title(fromLevel))
+		return "", inputErrf("%s is not in the %s folder of %s: move keeps the kind of a document", arg, kind, title(toLevel))
 	}
 	dir := path.Dir(to)
-	if top := path.Join(store.Folder(fromLevel), kind); dir != top {
+	if top := path.Join(store.Folder(toLevel), kind); dir != top {
 		if kind == "plans" {
 			return "", inputErrf("%s is a folder inside plans: a plan has no topic folder", dir)
 		}
-		if err := needTopic(repo, fromLevel, kind, strings.TrimPrefix(dir, top+"/")); err != nil {
+		if err := needTopic(repo, toLevel, kind, strings.TrimPrefix(dir, top+"/")); err != nil {
 			return "", err
 		}
 	}
