@@ -135,7 +135,8 @@ memcore writes its index below the frontmatter. A nested topic needs its parent 
 	"verify": `memcore verify <path>
 
 Checks a document, or every document under a path, for dead references and forbidden
-words, and warns on a description that names no moment to read. For example:
+words, and warns on a description that names no moment to read. Outside notes, it also
+warns on a name with a hyphen that a memory held before a move or a forget. For example:
 
   memcore verify dev/memories/tests-before-code.md
 `,

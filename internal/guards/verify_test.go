@@ -2,6 +2,7 @@ package guards
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -262,4 +263,113 @@ func TestFaultsWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(t, "faults", faults, []string{`dev/notes/new.md:1: dead reference [[nobody]]`})
+}
+
+// gitT runs the installed git in dir, as a test author.
+func gitT(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestVerifyGoneNames(t *testing.T) {
+	repo := t.TempDir()
+	memory := func(name string) string {
+		return "---\nname: " + name + "\ndescription: \"Read when you test.\"\n---\n\nA fact.\n"
+	}
+	gitT(t, repo, "init", "-q", "-b", "main")
+	writeT(t, repo, "dev/memories/old-name.md", memory("old-name"))
+	writeT(t, repo, "dev/memories/gone-fact.md", memory("gone-fact"))
+	writeT(t, repo, "dev/memories/solo.md", memory("solo"))
+	writeT(t, repo, "dev/memories/stedo/README.md", "---\nname: stedo\ndescription: \"Read when you test.\"\n---\n")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "add")
+	gitT(t, repo, "mv", "dev/memories/old-name.md", "dev/memories/stedo/new-name.md")
+	writeT(t, repo, "dev/memories/stedo/new-name.md", memory("new-name"))
+	gitT(t, repo, "rm", "-q", "dev/memories/gone-fact.md", "dev/memories/solo.md")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "move and forget")
+
+	const head = "---\nname: x\ndescription: \"Read when you test.\"\n---\n\n"
+	tests := []struct {
+		name     string
+		path     string
+		content  string
+		warnings []string
+	}{
+		{name: "a renamed memory", path: "dev/memories/x.md", content: head + "See old-name.\n", warnings: []string{"x.md:6: the text names old-name, a memory that moved to dev/memories/stedo/new-name.md"}},
+		{name: "a forgotten memory", path: "dev/memories/x.md", content: head + "See gone-fact for it.\n", warnings: []string{"x.md:6: the text names gone-fact, a memory that no longer exists"}},
+		{name: "a name in inline code", path: "dev/memories/x.md", content: head + "See `gone-fact`.\n", warnings: []string{"gone-fact, a memory that no longer exists"}},
+		{name: "a current name", path: "dev/memories/x.md", content: head + "See new-name.\n"},
+		{name: "a fenced block", path: "dev/memories/x.md", content: head + "```\ngone-fact\n```\n"},
+		{name: "a name of one word", path: "dev/memories/x.md", content: head + "A solo run.\n"},
+		{name: "a longer word", path: "dev/memories/x.md", content: head + "See gone-fact-two.\n"},
+		{name: "a note", path: "dev/notes/x.md", content: head + "The memory gone-fact went.\n"},
+		{name: "a plan", path: "dev/plans/x.md", content: head + "Forget gone-fact.\n", warnings: []string{"gone-fact"}},
+		{name: "a level index", path: "dev/README.md", content: "# ~/dev\n\n- gone-fact\n"},
+		{name: "a topic index", path: "dev/memories/stedo/README.md", content: "---\nname: stedo\ndescription: \"Read when you test.\"\n---\n\n- gone-fact\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := VerifyContent(repo, tt.path, []byte(tt.content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, "faults", r.Faults, nil)
+			check(t, "warnings", r.Warnings, tt.warnings)
+		})
+	}
+
+	t.Run("a path that a later document reuses", func(t *testing.T) {
+		chain := t.TempDir()
+		gitT(t, chain, "init", "-q", "-b", "main")
+		step := func(msg string) {
+			gitT(t, chain, "add", "-A")
+			gitT(t, chain, "commit", "-q", "-m", msg)
+		}
+		writeT(t, chain, "dev/memories/first-name.md", memory("first-name"))
+		step("add")
+		gitT(t, chain, "mv", "dev/memories/first-name.md", "dev/memories/mid-name.md")
+		writeT(t, chain, "dev/memories/mid-name.md", memory("mid-name"))
+		step("rename")
+		gitT(t, chain, "mv", "dev/memories/mid-name.md", "dev/memories/last-name.md")
+		writeT(t, chain, "dev/memories/last-name.md", memory("last-name"))
+		step("rename again")
+		writeT(t, chain, "dev/memories/mid-name.md", "---\nname: mid-name\ndescription: \"Read when you test another thing.\"\n---\n\nAnother fact entirely, with other words.\n")
+		step("reuse")
+		gitT(t, chain, "mv", "dev/memories/mid-name.md", "dev/memories/other-name.md")
+		writeT(t, chain, "dev/memories/other-name.md", "---\nname: other-name\ndescription: \"Read when you test another thing.\"\n---\n\nAnother fact entirely, with other words.\n")
+		step("rename the reuse")
+		r, err := VerifyContent(chain, "dev/memories/x.md", []byte(head+"See first-name.\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "warnings", r.Warnings, []string{"first-name, a memory that moved to dev/memories/last-name.md"})
+	})
+
+	t.Run("a repo without git", func(t *testing.T) {
+		plain := t.TempDir()
+		r, err := VerifyContent(plain, "dev/memories/x.md", []byte(head+"See gone-fact.\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "warnings", r.Warnings, nil)
+	})
+
+	t.Run("faults leave the history alone", func(t *testing.T) {
+		writeT(t, repo, "dev/memories/y.md", head+"See gone-fact.\n")
+		faults, err := Faults(repo, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "faults", faults, nil)
+		r, err := Verify(repo, "dev/memories/y.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "warnings", r.Warnings, []string{"y.md:6: the text names gone-fact"})
+	})
 }

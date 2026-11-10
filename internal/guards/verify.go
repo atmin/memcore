@@ -50,6 +50,8 @@ type verifier struct {
 	gone       []string               // paths that count as removed: files, or folders with all they hold
 	pending    []string               // paths that count as present: files of a set that is not on disk yet
 	names      map[string]bool        // the names of the memories in the repo
+	former     map[string]string      // each name that history gives a memory, with its path now or ""
+	formerRead bool                   // whether former holds the history, or stays empty on purpose
 	glossaries map[string][]forbidden // the forbidden words of each glossary, by its path
 }
 
@@ -98,6 +100,7 @@ func FaultsWith(repo string, writes map[string][]byte, removed []string) ([]Find
 		return nil, err
 	}
 	v.gone = removed
+	v.formerRead = true // a former name only warns, and faults need no history
 	for p := range writes {
 		v.pending = append(v.pending, path.Clean(p))
 	}
@@ -284,6 +287,13 @@ func (v *verifier) check(p string, content []byte) (Report, error) {
 		if name != own && !v.names[name] {
 			r.Faults = append(r.Faults, Finding{p, lineOf(m[0]), fmt.Sprintf("dead reference [[%s]]: no memory has that name", name)})
 		}
+	}
+	if store.Kind(p) != "notes" && !isIndex(p) {
+		warnings, err := v.formerNames(p, text, spans)
+		if err != nil {
+			return r, err
+		}
+		r.Warnings = append(r.Warnings, warnings...)
 	}
 
 	if path.Base(p) != "glossary.md" {
@@ -486,6 +496,11 @@ func run(s string, c byte) int {
 
 // maskCode blanks fenced code blocks, indented code blocks and inline code spans.
 func maskCode(s string) string {
+	return maskSpans(maskBlocks(s))
+}
+
+// maskBlocks blanks fenced code blocks and indented code blocks, and keeps inline code.
+func maskBlocks(s string) string {
 	b := []byte(s)
 	var fenceChar byte
 	fenceLen := 0
@@ -524,7 +539,12 @@ func maskCode(s string) string {
 		}
 		start = end + 1
 	}
-	out := string(b)
+	return string(b)
+}
+
+// maskSpans blanks inline code spans.
+func maskSpans(out string) string {
+	b := []byte(out)
 	for i := 0; i < len(b); {
 		if b[i] != '`' {
 			i++
@@ -558,6 +578,111 @@ func maskCode(s string) string {
 		i = closing
 	}
 	return string(b)
+}
+
+// wordRE matches a run of the characters that a name can hold.
+var wordRE = regexp.MustCompile(`[A-Za-z0-9_-]+`)
+
+// formerNames warns on each word of text that equals a name that history gives a memory, which no memory in the
+// repo holds now. It reads prose and inline code, but not code blocks, links or [[name]] references. A name of one
+// word is too common to check, so a name counts only when it holds a hyphen.
+func (v *verifier) formerNames(p, text string, spans []link) ([]Finding, error) {
+	if err := v.readFormer(); err != nil {
+		return nil, err
+	}
+	if len(v.former) == 0 {
+		return nil, nil
+	}
+	b := []byte(maskBlocks(text))
+	for _, l := range spans {
+		copy(b[l.start:l.end], blank(string(b[l.start:l.end])))
+	}
+	prose := string(b)
+	for _, re := range []*regexp.Regexp{wikiRE, autoRE} {
+		prose = re.ReplaceAllStringFunc(prose, blank)
+	}
+	var found []Finding
+	for _, m := range wordRE.FindAllStringIndex(prose, -1) {
+		word := prose[m[0]:m[1]]
+		now, ok := v.former[word]
+		if !ok || v.names[word] {
+			continue
+		}
+		line := strings.Count(text[:m[0]], "\n") + 1
+		if now == "" {
+			found = append(found, Finding{p, line, fmt.Sprintf("the text names %s, a memory that no longer exists", word)})
+		} else {
+			found = append(found, Finding{p, line, fmt.Sprintf("the text names %s, a memory that moved to %s", word, now)})
+		}
+	}
+	return found, nil
+}
+
+// readFormer fills former once from git history: each memory that a commit deleted or renamed, by its name.
+// A renamed memory maps to the path of its last rename when a memory sits there now. A repo without a .git
+// has no history, so it has no former names.
+func (v *verifier) readFormer() error {
+	if v.formerRead {
+		return nil
+	}
+	v.formerRead = true
+	v.former = map[string]string{}
+	if _, err := os.Stat(filepath.Join(v.repo, ".git")); err != nil {
+		return nil
+	}
+	if _, err := store.Git(v.repo, "rev-parse", "--verify", "-q", "HEAD"); err != nil {
+		return nil // no commit yet
+	}
+	out, err := store.Git(v.repo, "log", "-z", "--reverse", "-M", "--diff-filter=DR", "--name-status", "--format=", "HEAD")
+	if err != nil {
+		return fmt.Errorf("read the former memories: %w", err)
+	}
+	// lives maps each path at the end of the history to the paths that its document held before, oldest first.
+	// A rename carries them along, and a deletion ends them.
+	lives := map[string][]string{}
+	final := map[string]string{} // each former path, with the path of its document now, or "" when it went
+	fields := strings.Split(strings.Trim(out, "\x00\n"), "\x00")
+	for i := 0; i < len(fields); i++ {
+		status := strings.TrimSpace(fields[i])
+		switch {
+		case strings.HasPrefix(status, "R") && i+2 < len(fields):
+			from, to := fields[i+1], fields[i+2]
+			lives[to] = append(append(lives[from], from), lives[to]...)
+			delete(lives, from)
+			i += 2
+		case status == "D" && i+1 < len(fields):
+			gone := fields[i+1]
+			for _, f := range append(lives[gone], gone) {
+				final[f] = ""
+			}
+			delete(lives, gone)
+			i++
+		}
+	}
+	for now, before := range lives {
+		_, err := os.Stat(filepath.Join(v.repo, filepath.FromSlash(now)))
+		for _, f := range before {
+			if err == nil && store.IsMemory(now) {
+				final[f] = now
+			} else {
+				final[f] = ""
+			}
+		}
+	}
+	for f, now := range final {
+		if !store.IsMemory(f) {
+			continue
+		}
+		name := strings.TrimSuffix(path.Base(f), ".md")
+		if !strings.Contains(name, "-") {
+			continue
+		}
+		if prev, ok := v.former[name]; ok && prev != "" && now == "" {
+			continue // a document that still lives wins over one that went
+		}
+		v.former[name] = now
+	}
+	return nil
 }
 
 // isIndex reports whether a path is the generated index of a level or of a topic folder, which a write
