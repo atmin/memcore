@@ -159,9 +159,9 @@ memcore stats measures it. Then it lists the unpushed commits as the fold at pus
 them, for the review of the person. Each entry counts the fixups that fold into it. When the
 fold drops commits, the list ends with their count.
 `,
-	"stats": `memcore stats
+	"stats": `memcore stats [<path>]
 
-Takes no input. It measures whether memory helps, from the use log and git history,
+It measures whether memory helps, from the use log and git history,
 and calls no agent. For each week of 7 days up to now, newest first, it prints:
 
   capture   the memories and the other documents written, by command
@@ -173,6 +173,10 @@ and calls no agent. For each week of 7 days up to now, newest first, it prints:
   marks     the count of #again, #wrong and #stale
 
 Then it lists the memories with no logged read in 30 days.
+
+With a path of the memory repo, such as work/shop, it prints only the reads of each memory,
+note and plan under that path instead, most read first. It counts the whole use log, and a
+read counts under the path that its document has now. The path . covers the whole repo.
 `,
 	"push": `memcore push [--expect <commit>]
 

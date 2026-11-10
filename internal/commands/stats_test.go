@@ -955,3 +955,70 @@ func TestMeasureFollowsMoves(t *testing.T) {
 		t.Errorf("unread = %q, want %q: a read before a move counts, and a move keeps the age", unreadPaths, want)
 	}
 }
+
+func TestStatsPath(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	setClock(t, statsNow)
+	note := func(name string) string {
+		return "---\nname: " + name + "\ndescription: \"Read when you test " + name + ".\"\n---\n\nText.\n"
+	}
+	writeT(t, repo, "dev/memories/old-fact.md", memoryText("old-fact", "Read when you test a moved fact.", "A fact that moves, with enough text to keep its identity."))
+	writeT(t, repo, "dev/plans/launch.md", note("launch"))
+	writeT(t, repo, "dev/notes/quiet.md", note("quiet"))
+	writeT(t, repo, "dev-tools/memories/other-fact.md", memoryText("other-fact", "Read when you test a sibling folder.", "A fact."))
+	writeT(t, repo, "memories/root-fact.md", memoryText("root-fact", "Read when you test the root.", "A fact."))
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "remember: facts")
+	gitT(t, repo, "mv", "dev/memories/old-fact.md", "dev/memories/moved-fact.md")
+	gitT(t, repo, "commit", "-q", "-m", "move: dev/memories/old-fact.md to dev/memories/moved-fact.md")
+	writeLog(t, repo,
+		`{"time":"`+ago(40*day)+`","session":"s0","command":"show","paths":["dev/memories/old-fact.md"],"outcome":"ok"}`,
+		`{"time":"`+ago(20*day)+`","command":"move","paths":["dev/memories/old-fact.md","dev/memories/moved-fact.md"],"outcome":"ok","made":["1111111111111111111111111111111111111111"]}`,
+		`{"time":"`+ago(10*day)+`","session":"s1","command":"hook","hook":"tool","paths":["dev/memories/moved-fact.md","dev/plans/launch.md"],"outcome":"ok"}`,
+		`{"time":"`+ago(5*day)+`","session":"s2","command":"show","paths":["dev/plans/launch.md"],"outcome":"ok"}`,
+		`{"time":"`+ago(4*day)+`","session":"s2","command":"show","paths":["dev-tools/memories/other-fact.md"],"outcome":"ok"}`,
+		`{"time":"`+ago(3*day)+`","session":"s2","command":"show","paths":["memories/root-fact.md"],"outcome":"ok"}`,
+		`{"time":"`+ago(2*day)+`","session":"s2","command":"show","paths":["dev/notes/quiet.md"],"outcome":"error","error":"no such file"}`,
+		`{"time": "2026-12-09T`,
+	)
+
+	t.Run("a level", func(t *testing.T) {
+		out, err := run(t, home, "", "stats", "dev")
+		if err != nil {
+			t.Fatalf("stats: %v\n%s", err, out)
+		}
+		want := "Reads of the memories, notes and plans under dev, in the whole use log, by the path each one has now:\n" +
+			"1 line of the use log does not parse, so stats leaves it out.\n" +
+			"   2 dev/memories/moved-fact.md\n" +
+			"   2 dev/plans/launch.md\n" +
+			"   0 dev/notes/quiet.md\n"
+		if out != want {
+			t.Errorf("stats dev =\n%s\nwant\n%s", out, want)
+		}
+	})
+
+	t.Run("the whole repo", func(t *testing.T) {
+		out, err := run(t, home, "", "stats", ".")
+		if err != nil {
+			t.Fatalf("stats: %v\n%s", err, out)
+		}
+		for _, want := range []string{"under the whole memory repo", "   1 memories/root-fact.md\n", "   1 dev-tools/memories/other-fact.md\n", "   2 dev/plans/launch.md\n"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stats . =\n%s\nwant it to hold %q", out, want)
+			}
+		}
+	})
+
+	t.Run("a path with no document refuses", func(t *testing.T) {
+		if out, err := run(t, home, "", "stats", "nowhere"); err == nil || !strings.Contains(err.Error(), "no memory, note or plan") {
+			t.Errorf("error = %v, output %q, want a refusal", err, out)
+		}
+	})
+
+	t.Run("two paths refuse", func(t *testing.T) {
+		if _, err := run(t, home, "", "stats", "dev", "memories"); err == nil || !strings.Contains(err.Error(), "usage") {
+			t.Errorf("error = %v, want the usage", err)
+		}
+	})
+}

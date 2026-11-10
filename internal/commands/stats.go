@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -100,9 +101,10 @@ type week struct {
 
 // runStats prints what the use log and git history say about the use of memory, per week, newest first.
 // It writes nothing itself.
+// With a path, it prints the reads of each document under that path instead.
 func runStats(env Env, args []string) error {
-	if len(args) != 0 {
-		return usageErr("usage: memcore stats")
+	if len(args) > 1 {
+		return usageErr("usage: memcore stats [<path>]")
 	}
 	repo, err := openRepo()
 	if err != nil {
@@ -112,6 +114,9 @@ func runStats(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(args) == 1 {
+		return writeReadsUnder(env, repo, events, broken, args[0])
+	}
 	facts, _, err := commitFacts(repo, loggedCommits(events))
 	if err != nil {
 		return err
@@ -119,13 +124,7 @@ func runStats(env Env, args []string) error {
 	now := clock().UTC()
 	var b strings.Builder
 	fmt.Fprintf(&b, "memcore stats to %s, in weeks of 7 days, newest first.\n", stamp(now))
-	switch broken {
-	case 0:
-	case 1:
-		b.WriteString("1 line of the use log does not parse, so stats leaves it out.\n")
-	default:
-		fmt.Fprintf(&b, "%d lines of the use log do not parse, so stats leaves them out.\n", broken)
-	}
+	writeBroken(&b, broken)
 	if len(events) == 0 && broken == 0 {
 		b.WriteString("\nThe use log is empty.\n")
 	}
@@ -139,6 +138,77 @@ func runStats(env Env, args []string) error {
 	}
 	if _, err := io.WriteString(env.Out, b.String()); err != nil {
 		return fmt.Errorf("write the stats: %w", err)
+	}
+	return nil
+}
+
+// writeBroken names the count of the lines of the use log that do not parse, when there are any.
+func writeBroken(b *strings.Builder, broken int) {
+	switch broken {
+	case 0:
+	case 1:
+		b.WriteString("1 line of the use log does not parse, so stats leaves it out.\n")
+	default:
+		fmt.Fprintf(b, "%d lines of the use log do not parse, so stats leaves them out.\n", broken)
+	}
+}
+
+// writeReadsUnder prints the reads of each memory, note and plan under a path of the memory repo, in the whole
+// use log, with the most reads first and ties by path. A read counts under the path that its document has now.
+// The path . covers the whole repo.
+func writeReadsUnder(env Env, repo string, events []Event, broken int, arg string) error {
+	under, where := "", "the whole memory repo"
+	if path.Clean(filepath.ToSlash(arg)) != "." {
+		p, err := cleanPath(arg)
+		if err != nil {
+			return err
+		}
+		under, where = p, p
+	}
+	now := clock().UTC()
+	lines := ordered(events)
+	follow := follower(lines, now)
+	reads := map[string]int{}
+	for _, l := range lines {
+		if l.at.After(now) {
+			continue
+		}
+		for _, p := range readsOf(l.Event) {
+			reads[follow(p, l.place)]++
+		}
+	}
+	out, err := store.Git(repo, "ls-tree", "-z", "-r", "--name-only", "HEAD")
+	if err != nil {
+		return fmt.Errorf("list the documents: %w", err)
+	}
+	var docs []ranked
+	for _, p := range strings.Split(out, "\x00") {
+		if under != "" && p != under && !strings.HasPrefix(p, under+"/") {
+			continue
+		}
+		kind := store.Kind(p)
+		if !store.IsMemory(p) && !(slices.Contains([]string{"notes", "plans"}, kind) && strings.HasSuffix(p, ".md") && path.Base(p) != "README.md") {
+			continue
+		}
+		docs = append(docs, ranked{reads[p], p})
+	}
+	if len(docs) == 0 {
+		return inputErrf("no memory, note or plan is under %s: memcore orient lists the documents", where)
+	}
+	slices.SortFunc(docs, func(a, b ranked) int {
+		if a.n != b.n {
+			return b.n - a.n
+		}
+		return strings.Compare(a.text, b.text)
+	})
+	var b strings.Builder
+	fmt.Fprintf(&b, "Reads of the memories, notes and plans under %s, in the whole use log, by the path each one has now:\n", where)
+	writeBroken(&b, broken)
+	for _, d := range docs {
+		fmt.Fprintf(&b, "%4d %s\n", d.n, d.text)
+	}
+	if _, err := io.WriteString(env.Out, b.String()); err != nil {
+		return fmt.Errorf("write the reads: %w", err)
 	}
 	return nil
 }
