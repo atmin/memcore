@@ -147,3 +147,182 @@ func authorDate(repo, sha string) (time.Time, error) {
 	}
 	return time.Unix(sec, 0).UTC(), nil
 }
+
+// The states of a chain for the automatic push.
+const (
+	statePush = "push" // the automatic push sends the chain now
+	stateWait = "wait" // the chain gets ripe at a known time
+	stateHeld = "held" // only the person pushes the chain
+)
+
+// verdict is what the automatic push does with one chain of the review queue.
+type verdict struct {
+	chain  *chain
+	state  string
+	reason string    // why a chain is held, or which earlier chain it waits behind
+	ripe   time.Time // when a waiting chain gets ripe
+}
+
+// changedAt returns the newest change of a chain. It is the newer of two dates: the newest author date of its
+// commits, and the date of the key of its target in the record that a fold writes.
+func changedAt(repo string, ch *chain, changed map[string]time.Time) (time.Time, error) {
+	newest, err := newestDate(repo, ch)
+	if err != nil {
+		return time.Time{}, err
+	}
+	_, key, err := keyOf(repo, ch.target.sha)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if t := changed[key]; t.After(newest) {
+		newest = t
+	}
+	return newest, nil
+}
+
+// queueHasMerge reports whether the review queue holds a merge commit.
+func queueHasMerge(repo string) (bool, error) {
+	rng := "HEAD"
+	if hasAccepted(repo) {
+		rng = acceptedRef + "..HEAD"
+	}
+	out, err := store.Git(repo, "rev-list", "--merges", "-n", "1", rng)
+	if err != nil {
+		return false, fmt.Errorf("look for a merge in the review queue: %w", err)
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// sortQueue sorts the chains of the review queue for the automatic push, with the record of the dates.
+func sortQueue(repo string, delay time.Duration, now time.Time) ([]verdict, error) {
+	chains, _, err := chainsOf(repo)
+	if err != nil {
+		return nil, err
+	}
+	changed, err := readChanged(repo)
+	if err != nil {
+		return nil, err
+	}
+	return sortChains(repo, chains, changed, delay, now)
+}
+
+// sortChains gives each chain of the queue, oldest first, its verdict for the automatic push:
+//   - held, when only the person may push a commit of the chain, by personReason;
+//   - held, when the commits of the chain cancel each other, since the next push of the person drops it;
+//   - wait, when the newest change of the chain is younger than the delay;
+//   - push otherwise.
+//
+// A chain that is not held by itself also takes the state of an earlier chain that is not pushed, when both
+// chains change one document. It is then held behind a held chain, and it waits for the later time behind a
+// chain that waits.
+func sortChains(repo string, chains []*chain, changed map[string]time.Time, delay time.Duration, now time.Time) ([]verdict, error) {
+	verdicts := make([]verdict, 0, len(chains))
+	touched := make([]chainPaths, 0, len(chains))
+	for _, ch := range chains {
+		v, err := ownVerdict(repo, ch, changed, delay, now)
+		if err != nil {
+			return nil, err
+		}
+		paths, err := pathsOf(repo, ch)
+		if err != nil {
+			return nil, err
+		}
+		if v.state != stateHeld {
+			// A held chain stops this chain for good, so it counts before a chain that only waits. A chain that
+			// waits itself takes the later of the two times.
+			for i, earlier := range verdicts {
+				if earlier.state == statePush || !paths.shares(touched[i]) {
+					continue
+				}
+				switch {
+				case earlier.state == stateHeld && v.state != stateHeld:
+					v.state, v.ripe = stateHeld, time.Time{}
+					v.reason = "it changes a document of the chain " + short(earlier.chain.target.sha) + ", which is held"
+				case earlier.state == stateWait && v.state != stateHeld && earlier.ripe.After(v.ripe):
+					v.state, v.ripe = stateWait, earlier.ripe
+					v.reason = "it changes a document of the chain " + short(earlier.chain.target.sha) + ", which waits"
+				}
+			}
+		}
+		verdicts = append(verdicts, v)
+		touched = append(touched, paths)
+	}
+	return verdicts, nil
+}
+
+// ownVerdict returns the verdict of a chain by its own commits, without the chains before it.
+func ownVerdict(repo string, ch *chain, changed map[string]time.Time, delay time.Duration, now time.Time) (verdict, error) {
+	v := verdict{chain: ch, state: stateHeld}
+	for _, c := range append([]commit{ch.target}, ch.fixups...) {
+		reason, err := personReason(repo, c.sha)
+		if err != nil {
+			return v, err
+		}
+		if reason != "" {
+			v.reason = reason
+			return v, nil
+		}
+	}
+	cancelled, err := cancels(repo, ch)
+	if err != nil {
+		return v, err
+	}
+	if cancelled {
+		v.reason = "its commits cancel each other"
+		return v, nil
+	}
+	at, err := changedAt(repo, ch, changed)
+	if err != nil {
+		return v, err
+	}
+	if ripe := at.Add(delay); ripe.After(now) {
+		v.state, v.ripe = stateWait, ripe
+		return v, nil
+	}
+	v.state = statePush
+	return v, nil
+}
+
+// chainPaths are the paths that a chain changes, for the question whether two chains change one document.
+type chainPaths struct {
+	docs   map[string]bool // every path but an index
+	topics map[string]bool // each topic index, and whether the chain changes its existence or its frontmatter
+}
+
+// shares reports whether two chains change one document. A level index never counts, because memcore
+// generates it. A topic index counts when one of the two chains changes its existence or its frontmatter.
+func (a chainPaths) shares(b chainPaths) bool {
+	for p := range a.docs {
+		if b.docs[p] {
+			return true
+		}
+	}
+	for p, own := range a.topics {
+		if other, ok := b.topics[p]; ok && (own || other) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathsOf returns the paths that the commits of a chain change.
+func pathsOf(repo string, ch *chain) (chainPaths, error) {
+	paths := chainPaths{docs: map[string]bool{}, topics: map[string]bool{}}
+	for _, c := range append([]commit{ch.target}, ch.fixups...) {
+		out, err := store.Git(repo, "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", "--root", c.sha)
+		if err != nil {
+			return paths, fmt.Errorf("list the files of %s: %w", short(c.sha), err)
+		}
+		parent, hasParent := revParse(repo, c.sha+"^")
+		for _, p := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+			switch _, level := indexLevel(p); {
+			case p == "" || level:
+			case store.IsTopicIndex(p):
+				paths.topics[p] = paths.topics[p] || !hasParent || !sameTopicIndex(repo, parent, c.sha, p)
+			default:
+				paths.docs[p] = true
+			}
+		}
+	}
+	return paths, nil
+}

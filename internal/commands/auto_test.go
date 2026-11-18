@@ -221,3 +221,234 @@ func TestRecordChanged(t *testing.T) {
 		}
 	})
 }
+
+// noteText returns a note with its frontmatter.
+func noteText(name, body string) string {
+	return "---\nname: " + name + "\ndescription: \"Read when you test " + name + ".\"\n---\n\n" + body + "\n"
+}
+
+// handNote commits a note of ~/dev by hand, with an author date.
+func handNote(t *testing.T, repo, name string, date time.Time) {
+	t.Helper()
+	writeT(t, repo, "dev/notes/"+name+".md", noteText(name, "A note."))
+	commitAt(t, repo, "test: the note "+name, date.Format(time.RFC3339))
+}
+
+// draftT runs draft in dir, and fails the test on an error.
+func draftT(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if out, err := run(t, dir, "", append([]string{"draft"}, args...)...); err != nil {
+		t.Fatalf("draft %v: %v\n%s", args, err, out)
+	}
+}
+
+// declinedPush runs a push that the person declines, which folds the queue and pushes nothing.
+func declinedPush(t *testing.T, home string) {
+	t.Helper()
+	var asked string
+	if out, err := runWith(t, Env{Dir: home, Confirm: answer(false, &asked)}, "push"); err != nil || asked == "" {
+		t.Fatalf("push = %v, asked %q\n%s", err, asked, out)
+	}
+}
+
+func TestSortChains(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	const delay = 24 * time.Hour
+	old, fresh := before(72*time.Hour), before(time.Hour)
+	type want struct {
+		state  string
+		reason string    // a part of the reason, or ""
+		ripe   time.Time // the time of a waiting chain, or zero
+	}
+	cases := []struct {
+		name string
+		// queue builds the review queue on top of a pushed init, and returns the verdict of each chain, oldest first.
+		queue func(t *testing.T, home, repo, dev string) []want
+		fails string // a part of the error, or ""
+	}{
+		{name: "a ripe memory", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+			return []want{{state: statePush}}
+		}},
+		{name: "a fresh memory", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, fresh, func() { remember(t, dev, "a-fact", fact) })
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}}
+		}},
+		{name: "an old memory with a fresh fixup", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+			authored(t, fresh, func() { reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.") })
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}}
+		}},
+		{name: "an old memory whose fresh fixup a declined push folded", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+			authored(t, fresh, func() { reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.") })
+			declinedPush(t, home)
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}}
+		}},
+		{name: "an old memory whose fresh fixup by hand a declined push folded", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+			writeT(t, repo, "dev/memories/a-fact.md", memoryText("a-fact", fact, "A sharper fact."))
+			commitAt(t, repo, "fixup! remember: dev/memories/a-fact.md", fresh.Format(time.RFC3339))
+			declinedPush(t, home)
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}}
+		}},
+		{name: "an old target of two documents whose fresh fixup restored one before a declined push", queue: func(t *testing.T, home, repo, dev string) []want {
+			writeT(t, repo, "dev/notes/a.md", noteText("a", "A."))
+			writeT(t, repo, "dev/notes/b.md", noteText("b", "B."))
+			commitAt(t, repo, "test: two notes", old.Format(time.RFC3339))
+			if err := os.Remove(filepath.Join(repo, "dev", "notes", "b.md")); err != nil {
+				t.Fatal(err)
+			}
+			commitAt(t, repo, "fixup! test: two notes", fresh.Format(time.RFC3339))
+			declinedPush(t, home)
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}}
+		}},
+		{name: "a broken record", fails: "changed.json", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+			writeT(t, repo, ".git/memcore/changed.json", "{\"half")
+			return nil
+		}},
+		{name: "a skill", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() { draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.") })
+			return []want{{state: stateHeld, reason: "dev/skills/a-skill/SKILL.md"}}
+		}},
+		{name: "a remember and its forget", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() {
+				remember(t, dev, "a-fact", fact)
+				if out, err := run(t, dev, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+					t.Fatalf("forget: %v\n%s", err, out)
+				}
+			})
+			return []want{{state: stateHeld, reason: "its commits cancel each other"}}
+		}},
+		{name: "a ripe note after a held skill", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() {
+				draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.")
+				draftT(t, dev, "note", "slow-search", "--description", "Read when search is slow.")
+			})
+			return []want{{state: stateHeld, reason: "dev/skills/a-skill/SKILL.md"}, {state: statePush}}
+		}},
+		{name: "a ripe move of a document that a fresh chain made", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, fresh, func() { remember(t, dev, "a-fact", fact) })
+			made := short(headCommit(repo))
+			authored(t, old, func() {
+				if out, err := run(t, dev, "", "move", "a-fact", "the-fact", "--reason", "The name states the topic."); err != nil {
+					t.Fatalf("move: %v\n%s", err, out)
+				}
+			})
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}, {state: stateWait, ripe: fresh.Add(delay), reason: made}}
+		}},
+		{name: "a ripe note in a topic folder that a fresh chain drafted", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, fresh, func() {
+				draftT(t, dev, "topic", "notes/incidents", "--description", "Read when you look into an incident.")
+			})
+			drafted := short(headCommit(repo))
+			authored(t, old, func() {
+				draftT(t, dev, "note", "slow-search", "--topic", "incidents", "--description", "Read when search is slow.")
+			})
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}, {state: stateWait, ripe: fresh.Add(delay), reason: drafted}}
+		}},
+		{name: "a ripe note beside a fresh note of another topic folder", queue: func(t *testing.T, home, repo, dev string) []want {
+			draftT(t, dev, "topic", "notes/incidents", "--description", "Read when you look into an incident.")
+			draftT(t, dev, "topic", "notes/trials", "--description", "Read when you try a tool.")
+			pushYes(t, home)
+			authored(t, fresh, func() {
+				draftT(t, dev, "note", "slow-search", "--topic", "incidents", "--description", "Read when search is slow.")
+			})
+			authored(t, old, func() {
+				draftT(t, dev, "note", "new-editor", "--topic", "trials", "--description", "Read when you pick an editor.")
+			})
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}, {state: statePush}}
+		}},
+		{name: "a ripe note after a held note with one document", queue: func(t *testing.T, home, repo, dev string) []want {
+			authored(t, old, func() {
+				draftT(t, dev, "note", "slow-search", "--description", "Read when search is slow.")
+				draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.")
+			})
+			// A hand commit changes the skill and a note together, so the note is held with the skill.
+			writeT(t, repo, "dev/notes/slow-search.md", noteText("slow-search", "A finding."))
+			writeT(t, repo, "dev/skills/a-skill/SKILL.md", "---\nname: a-skill\ndescription: \"Use when you test.\"\n---\n\nSteps.\n")
+			commitAt(t, repo, "test: a skill and a note", old.Format(time.RFC3339))
+			both := short(headCommit(repo))
+			handNote(t, repo, "other", old)
+			writeT(t, repo, "dev/notes/slow-search.md", noteText("slow-search", "A second finding."))
+			commitAt(t, repo, "test: the note again", old.Format(time.RFC3339))
+			return []want{{state: statePush}, {state: stateHeld}, {state: stateHeld}, {state: statePush}, {state: stateHeld, reason: both}}
+		}},
+		{name: "a fresh change of a note that a held chain changes", queue: func(t *testing.T, home, repo, dev string) []want {
+			writeT(t, repo, "dev/notes/slow-search.md", noteText("slow-search", "A finding."))
+			writeT(t, repo, "dev/skills/a-skill/SKILL.md", "---\nname: a-skill\ndescription: \"Use when you test.\"\n---\n\nSteps.\n")
+			commitAt(t, repo, "test: a skill and a note", old.Format(time.RFC3339))
+			both := short(headCommit(repo))
+			writeT(t, repo, "dev/notes/slow-search.md", noteText("slow-search", "A second finding."))
+			commitAt(t, repo, "test: the note again", fresh.Format(time.RFC3339))
+			return []want{{state: stateHeld}, {state: stateHeld, reason: both}}
+		}},
+		{name: "a waiting change of a note that a later chain keeps waiting", queue: func(t *testing.T, home, repo, dev string) []want {
+			handNote(t, repo, "slow-search", fresh)
+			first := short(headCommit(repo))
+			writeT(t, repo, "dev/notes/slow-search.md", noteText("slow-search", "A second finding."))
+			commitAt(t, repo, "test: the note again", before(2*time.Hour).Format(time.RFC3339))
+			return []want{{state: stateWait, ripe: fresh.Add(delay)}, {state: stateWait, ripe: fresh.Add(delay), reason: first}}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			pushYes(t, home)
+			wants := c.queue(t, home, repo, mkdirT(t, filepath.Join(home, "dev")))
+			got, err := sortQueue(repo, delay, time.Now())
+			if c.fails != "" {
+				if err == nil || !strings.Contains(err.Error(), c.fails) {
+					t.Fatalf("sortQueue = %v, want an error that holds %q", err, c.fails)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(wants) {
+				t.Fatalf("sortQueue gave %d verdicts, want %d\n%s", len(got), len(wants), gitT(t, repo, "log", "--oneline", "origin/main..main"))
+			}
+			for i, w := range wants {
+				g := got[i]
+				if g.state != w.state || !strings.Contains(g.reason, w.reason) || (!w.ripe.IsZero() && !g.ripe.Equal(w.ripe)) {
+					t.Errorf("chain %d, %q: verdict = %s, %q, %v; want %s, %q, %v", i, g.chain.target.subject, g.state, g.reason, g.ripe, w.state, w.reason, w.ripe)
+				}
+				if (g.state == stateWait) == g.ripe.IsZero() {
+					t.Errorf("chain %d: state %s with the time %v", i, g.state, g.ripe)
+				}
+				if strings.Contains(g.reason, g.chain.target.subject) {
+					t.Errorf("chain %d: the reason %q quotes a subject", i, g.reason)
+				}
+			}
+		})
+	}
+}
+
+func TestQueueHasMerge(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	if got, err := queueHasMerge(repo); err != nil || got {
+		t.Errorf("queueHasMerge with no accepted history = %v, %v; want false", got, err)
+	}
+	pushYes(t, home)
+	gitT(t, repo, "checkout", "-q", "-b", "side")
+	handNote(t, repo, "side", before(time.Hour))
+	gitT(t, repo, "checkout", "-q", "main")
+	remember(t, mkdirT(t, filepath.Join(home, "dev")), "a-fact", "Read when you test a fact.")
+	if got, err := queueHasMerge(repo); err != nil || got {
+		t.Errorf("queueHasMerge of a queue with one memory = %v, %v; want false", got, err)
+	}
+	gitT(t, repo, "merge", "-q", "--no-ff", "--no-edit", "side")
+	if got, err := queueHasMerge(repo); err != nil || !got {
+		t.Errorf("queueHasMerge of a queue with a merge = %v, %v; want true", got, err)
+	}
+	// A merge that the remote holds is no merge of the queue.
+	gitT(t, repo, "push", "-q", "origin", "main")
+	gitT(t, repo, "update-ref", acceptedRef, "HEAD")
+	if got, err := queueHasMerge(repo); err != nil || got {
+		t.Errorf("queueHasMerge after the merge is accepted = %v, %v; want false", got, err)
+	}
+}
