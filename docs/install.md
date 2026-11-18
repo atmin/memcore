@@ -55,6 +55,8 @@ Nothing of memcore runs between sessions: there is no service and no scheduled j
 
 A snapshot also starts at the end of each session of Claude Code, through its `SessionEnd` hook.
 
+The automatic push starts the same way, when you turned it on. A call of `memcore` starts `memcore push --auto` in the background, at most once an hour. See [Automatic push](git.md#automatic-push).
+
 ## Uninstall
 
 Uninstall memcore with one command:

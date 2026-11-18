@@ -19,12 +19,15 @@ The docs use each term below with one meaning only.
 - **snapshot**: a commit of new transcripts to the transcripts branch.
 - **hook**: a command that an agent runs at a point of a session, such as its start. `init` adds the hooks of memcore to Claude Code.
 - **mark**: a word that you add to a prompt, `#again`, `#wrong` or `#stale`, to say that memory failed you.
-- **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch.
+- **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch. An automatic push accepts a commit without a review.
 - **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
 - **release**: a version of memcore that a `v*` tag names, with one executable for each system and processor on GitHub.
 - **window**: the local page of `memcore ui`, in which you review, push, browse and search.
 - **accepted mistake**: a memory that a `revise` or a `forget` changed within 14 days after a push accepted it.
 - **fixup**: a commit that corrects an unpushed commit, and that `push` folds into it.
 - **fold**: the step of `push` that folds each fixup into the commit it corrects.
+- **automatic push**: a push that memcore starts by itself, without a question. It sends only ripe commits of memories, notes and plans. It is off until you set `memcore.autopush`.
+- **ripe**: said of a commit of the review queue and its fixups. Their newest change is older than the delay of the automatic push.
+- **held**: said of a commit of the review queue that the automatic push never sends. An example is a skill, or a commit with a likely secret.
 - **use log**: the local record of the calls of memcore, under `.git/memcore/`, which memcore never commits.
 - **read**: a document that a session reads, through a successful `show` or a tool call that a hook logs.

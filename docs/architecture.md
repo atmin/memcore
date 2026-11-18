@@ -31,6 +31,9 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
   - the record of the import of auto-memory, `import.json`, with the outcome of each file;
   - the record of what `init` added to the settings of Claude Code, `init.json`, and a copy of each original file;
   - the log of background work, `background.log`;
+  - the newest date of each chain of the review queue, `changed.json`, for the automatic push;
+  - the record of an automatic push whose commits may still be in the queue, `autopush.pending`;
+  - the lock of a running automatic push, `autopush.pushing`, and the mark of its last start, `autopush.started`;
   - the state of the server of the window, `ui.json`, with its port and its token at mode `0600`, and its lock, `ui.lock`.
 - The tool hooks of Claude Code run after every call of `Bash`, `Read` and `Grep`. So a tool call that reads no document logs no line, and starts no git process.
 - memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. memcore never pushes these refs.
