@@ -33,6 +33,10 @@ func fold(repo string) ([]string, error) {
 	if !slices.ContainsFunc(chains, func(ch *chain) bool { return len(ch.fixups) > 0 }) {
 		return nil, nil
 	}
+	// The fold removes the dates of the fixups, and the automatic push reads the newest date of each chain.
+	if err := recordChanged(repo, chains); err != nil {
+		return nil, err
+	}
 
 	var todo strings.Builder
 	var folded []string
