@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -511,6 +512,197 @@ func TestSortChainsSecret(t *testing.T) {
 		got, err := sortQueue(repo, 24*time.Hour, time.Now())
 		if err != nil || len(got) != 1 || got[0].state != stateHeld || got[0].reason != "a likely secret in dev/notes/trial.md" {
 			t.Errorf("sortQueue = %+v, %v; want the chain held for its fixup", got, err)
+		}
+	})
+}
+
+// frozen returns HEAD, the refs and the changes of the working tree of a repo, to compare before and after.
+func frozen(t *testing.T, repo string) string {
+	t.Helper()
+	return gitT(t, repo, "rev-parse", "HEAD") + gitT(t, repo, "for-each-ref", "--format=%(refname) %(objectname)") +
+		gitT(t, repo, "status", "--porcelain", "--untracked-files=all")
+}
+
+// chainsT returns the chains of the review queue.
+func chainsT(t *testing.T, repo string) []*chain {
+	t.Helper()
+	chains, _, err := chainsOf(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return chains
+}
+
+func TestBuildAside(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	old := before(72 * time.Hour)
+	// build runs buildAside on some chains of the queue, and checks that the memory repo stays as it was.
+	build := func(t *testing.T, repo string, chains []*chain) (clone, tip string, built []*chain, err error) {
+		t.Helper()
+		was := frozen(t, repo)
+		tmp := t.TempDir()
+		tip, built, err = buildAside(repo, tmp, chains)
+		if got := frozen(t, repo); got != was {
+			t.Errorf("buildAside changed the memory repo:\n%s\nwant\n%s", got, was)
+		}
+		return filepath.Join(tmp, "clone"), tip, built, err
+	}
+	// onBase checks that the built commits are n commits on the accepted commit, and returns their subjects.
+	onBase := func(t *testing.T, repo, clone, tip string, n int) {
+		t.Helper()
+		base := strings.TrimSpace(gitT(t, repo, "rev-parse", acceptedRef))
+		if got := strings.TrimSpace(gitT(t, clone, "rev-list", "--count", base+".."+tip)); got != fmt.Sprint(n) {
+			t.Fatalf("the clone holds %s commits on the accepted commit, want %d", got, n)
+		}
+		if got := strings.TrimSpace(gitT(t, clone, "rev-parse", tip+"~"+fmt.Sprint(n))); got != base {
+			t.Errorf("the built commits stand on %s, want the accepted commit %s", got, base)
+		}
+	}
+	sameTree := func(t *testing.T, repo, clone, tip string) {
+		t.Helper()
+		if got, want := gitT(t, clone, "rev-parse", tip+"^{tree}"), gitT(t, repo, "rev-parse", "HEAD^{tree}"); got != want {
+			t.Errorf("the tree of the built tip differs from the tree of the queue:\n%s", gitT(t, clone, "diff", "--stat", "main", tip))
+		}
+	}
+
+	t.Run("two chains", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		remember(t, dev, "a-fact", fact)
+		draftT(t, dev, "note", "slow-search", "--description", "Read when search is slow.")
+		clone, tip, built, err := build(t, repo, chainsT(t, repo))
+		if err != nil || len(built) != 2 {
+			t.Fatalf("buildAside = %d chains, %v; want two", len(built), err)
+		}
+		onBase(t, repo, clone, tip, 2)
+		sameTree(t, repo, clone, tip)
+		if got, want := gitT(t, clone, "log", "--format=%s%n%b", "-2", tip), gitT(t, repo, "log", "--format=%s%n%b", "-2", "HEAD"); got != want {
+			t.Errorf("the built messages = %q, want %q", got, want)
+		}
+		// The first built commit holds the memory with its indexes, and not the note.
+		first := tip + "~1"
+		if got := gitT(t, clone, "show", first+":dev/README.md"); !strings.Contains(got, "a-fact") || strings.Contains(got, "slow-search") {
+			t.Errorf("the index of the first built commit =\n%s", got)
+		}
+	})
+
+	t.Run("a chain with a fixup", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		gitT(t, repo, "config", "commit.cleanup", "strip")
+		clone, tip, built, err := build(t, repo, chainsT(t, repo))
+		if err != nil || len(built) != 1 {
+			t.Fatalf("buildAside = %d chains, %v; want one", len(built), err)
+		}
+		onBase(t, repo, clone, tip, 1)
+		sameTree(t, repo, clone, tip)
+		if got, err := authorDate(clone, tip); err != nil || !got.Equal(old) {
+			t.Errorf("the built commit has the author date %v, %v; want the date %v of its target", got, err, old)
+		}
+		if got, want := gitT(t, clone, "show", "-s", "--format=%an <%ae>%n%B", tip), gitT(t, repo, "show", "-s", "--format=%an <%ae>%n%B", "HEAD~1"); got != want {
+			t.Errorf("the built commit = %q, want the author and the message of its target %q", got, want)
+		}
+	})
+
+	t.Run("a note in a new level", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		draftT(t, mkdirT(t, filepath.Join(home, "lab")), "note", "slow-search", "--description", "Read when search is slow.")
+		clone, tip, built, err := build(t, repo, chainsT(t, repo))
+		if err != nil || len(built) != 1 {
+			t.Fatalf("buildAside = %d chains, %v; want one", len(built), err)
+		}
+		sameTree(t, repo, clone, tip)
+		if got := gitT(t, clone, "show", tip+":README.md"); !strings.Contains(got, "[lab](lab/README.md)") {
+			t.Errorf("the root index of the built commit =\n%s\nwant the level lab", got)
+		}
+	})
+
+	t.Run("a chain whose change the accepted history holds", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		pushYes(t, home)
+		draftT(t, mkdirT(t, filepath.Join(home, "dev")), "note", "slow-search", "--description", "Read when search is slow.")
+		other := secondClone(t, remote)
+		gitT(t, other, "fetch", "-q", repo, "main")
+		gitT(t, other, "cherry-pick", "-x", "FETCH_HEAD")
+		gitT(t, other, "push", "-q", "origin", "main")
+		// The accepted commit moves without a rebase of the queue, which would drop the chain.
+		gitT(t, repo, "fetch", "-q", "origin", "+refs/heads/main:"+acceptedRef)
+		chains := chainsT(t, repo)
+		if len(chains) != 1 {
+			t.Fatalf("the queue holds %d chains, want one", len(chains))
+		}
+		_, tip, built, err := build(t, repo, chains)
+		if err != nil || tip != "" || len(built) != 0 {
+			t.Errorf("buildAside = %q, %d chains, %v; want no commit", tip, len(built), err)
+		}
+	})
+
+	t.Run("a note beside a note of the same level that is not built", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		draftT(t, dev, "note", "slow-search", "--description", "Read when search is slow.")
+		draftT(t, dev, "note", "new-editor", "--description", "Read when you pick an editor.")
+		chains := chainsT(t, repo)
+		clone, tip, built, err := build(t, repo, chains[1:])
+		if err != nil || len(built) != 1 {
+			t.Fatalf("buildAside = %d chains, %v; want one", len(built), err)
+		}
+		onBase(t, repo, clone, tip, 1)
+		if got := gitT(t, clone, "show", tip+":dev/README.md"); !strings.Contains(got, "new-editor") || strings.Contains(got, "slow-search") {
+			t.Errorf("the index of the built commit =\n%s\nwant only the built note", got)
+		}
+		if got := gitT(t, clone, "show", tip+":README.md"); !strings.Contains(got, "[dev](dev/README.md)") {
+			t.Errorf("the root index of the built commit =\n%s\nwant the level dev", got)
+		}
+		if got := gitT(t, clone, "show", "--format=", "--name-only", tip); strings.Contains(got, "slow-search") {
+			t.Errorf("the built commit changes %q, want it without the other note", got)
+		}
+	})
+
+	t.Run("a note beside a memory of a new level that is not built", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		remember(t, mkdirT(t, filepath.Join(home, "lab")), "a-fact", fact)
+		draftT(t, mkdirT(t, filepath.Join(home, "dev")), "note", "new-editor", "--description", "Read when you pick an editor.")
+		// A folder that no commit holds is an empty level, which the index lists in the memory repo too.
+		mkdirT(t, filepath.Join(repo, "shop"))
+		clone, tip, built, err := build(t, repo, chainsT(t, repo)[1:])
+		if err != nil || len(built) != 1 {
+			t.Fatalf("buildAside = %d chains, %v; want one", len(built), err)
+		}
+		got := gitT(t, clone, "show", tip+":README.md")
+		if strings.Contains(got, "lab") || !strings.Contains(got, "[dev](dev/README.md)") || !strings.Contains(got, "[shop](shop/README.md)") {
+			t.Errorf("the root index of the built commit =\n%s\nwant dev and shop, without the level of the other chain", got)
+		}
+	})
+
+	t.Run("two chains that conflict in a document", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		handNote(t, repo, "trial", old)
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A second finding."))
+		commitAt(t, repo, "test: the note again", old.Format(time.RFC3339))
+		chains := chainsT(t, repo)
+		_, tip, built, err := build(t, repo, chains[1:])
+		if err == nil || !strings.Contains(err.Error(), short(chains[1].target.sha)) || !strings.Contains(err.Error(), "dev/notes/trial.md") {
+			t.Errorf("buildAside = %q, %d chains, %v; want an error that names the chain and the document", tip, len(built), err)
+		}
+		if strings.Contains(fmt.Sprint(err), "test: the note again") {
+			t.Errorf("the error %v quotes a subject", err)
+		}
+	})
+
+	t.Run("no accepted history", func(t *testing.T) {
+		_, repo, _ := newMemory(t)
+		if _, _, err := buildAside(repo, t.TempDir(), chainsT(t, repo)); err == nil {
+			t.Error("buildAside with no accepted history: no error")
 		}
 	})
 }

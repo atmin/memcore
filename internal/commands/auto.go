@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -374,4 +375,120 @@ func secretIn(repo string, ch *chain) (string, error) {
 		return "a likely secret in the commit message", nil
 	}
 	return "", nil
+}
+
+// buildAside builds the commits of an automatic push in a scratch clone under tmp, and changes nothing in the
+// memory repo. It checks out the accepted commit in the clone, detached. Then it does these for each chain,
+// oldest first:
+//   - It applies the target and then each fixup. When only indexes conflict, it writes them again from the
+//     documents, as a rebase of memcore does.
+//   - It writes the indexes as a fold does.
+//   - It commits once, with the message, the author and the author date of the target.
+//
+// A chain that leaves no change against the commit before it gets no commit, and is not in built. A conflict
+// in any other document is an error that names the chain by its target. tip is the last commit that it built,
+// or "" with none. The clone tmp/clone holds the commits, and the caller fetches tip from it.
+func buildAside(repo, tmp string, chains []*chain) (tip string, built []*chain, err error) {
+	base, ok := revParse(repo, acceptedRef)
+	if !ok {
+		return "", nil, errors.New("build the automatic push: the memory repo has no accepted history")
+	}
+	clone, err := scratchClone(repo, tmp)
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := store.Git(clone, "checkout", "-q", "--detach", base); err != nil {
+		return "", nil, fmt.Errorf("check out the accepted commit in the clone: %w", err)
+	}
+	if err := dropQueueFolders(repo, clone); err != nil {
+		return "", nil, err
+	}
+	for _, ch := range chains {
+		name := short(ch.target.sha)
+		for _, c := range append([]commit{ch.target}, ch.fixups...) {
+			if _, err := store.Git(clone, "cherry-pick", "--no-commit", c.sha); err != nil {
+				out, derr := store.Git(clone, "diff", "--name-only", "-z", "--diff-filter=U")
+				if derr != nil || out == "" {
+					return "", nil, fmt.Errorf("apply %s of the chain %s in the clone: %w", short(c.sha), name, err)
+				}
+				paths := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+				var ce *conflictError
+				if err := resolveIndexes(clone, paths); errors.As(err, &ce) {
+					return "", nil, fmt.Errorf("the chain %s conflicts with the commits before it in %s, so the automatic push built nothing", name, strings.Join(ce.paths, ", "))
+				} else if err != nil {
+					return "", nil, fmt.Errorf("apply %s of the chain %s in the clone: %w", short(c.sha), name, err)
+				}
+			}
+		}
+		indexes, err := writeIndexes(clone)
+		if err != nil {
+			return "", nil, fmt.Errorf("write the indexes of the chain %s in the clone: %w", name, err)
+		}
+		if _, err := store.Git(clone, append([]string{"--literal-pathspecs", "add", "-A", "--"}, indexes...)...); err != nil {
+			return "", nil, fmt.Errorf("stage the indexes of the chain %s in the clone: %w", name, err)
+		}
+		if _, err := store.Git(clone, "diff", "--cached", "--quiet"); err == nil {
+			continue // the commit before the chain holds its change
+		}
+		if err := commitAside(clone, tmp, ch.target.sha); err != nil {
+			return "", nil, err
+		}
+		built = append(built, ch)
+	}
+	if len(built) > 0 {
+		tip = headCommit(clone)
+	}
+	return tip, built, nil
+}
+
+// commitAside commits the staged change of the clone with the message, the author and the author date of a
+// target. It passes the message in a file with --cleanup=verbatim, so no setting of git changes the message.
+func commitAside(clone, tmp, target string) error {
+	out, err := store.Git(clone, "show", "-s", "--no-show-signature", "--date=raw", "--format=%an <%ae>%x00%ad%x00%B", target)
+	if err != nil {
+		return fmt.Errorf("read the commit %s: %w", short(target), err)
+	}
+	fields := strings.SplitN(out, "\x00", 3)
+	if len(fields) != 3 {
+		return fmt.Errorf("read the commit %s: git printed %q", short(target), out)
+	}
+	file := filepath.Join(tmp, "message")
+	if err := os.WriteFile(file, []byte(strings.TrimRight(fields[2], "\n")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write the message of the chain %s: %w", short(target), err)
+	}
+	// The raw date is "<seconds> <zone>", and @ marks it as that form for every length of the seconds.
+	if _, err := store.Git(clone, "commit", "-q", "--cleanup=verbatim", "-F", file, "--author="+fields[0], "--date=@"+fields[1]); err != nil {
+		return fmt.Errorf("commit the chain %s in the clone: %w", short(target), err)
+	}
+	return nil
+}
+
+// dropQueueFolders removes from the clone each folder that holds no file there, while the review queue tracks
+// a file in it. scratchClone copies every folder of the working tree, since an index lists the empty folders
+// of its level. A folder of a chain that is not built is no empty folder: the accepted history lacks it. The
+// build of a chain creates the folders of its own files.
+func dropQueueFolders(repo, clone string) error {
+	out, err := store.Git(repo, "ls-tree", "-r", "-d", "-z", "--name-only", "--full-tree", "HEAD")
+	if err != nil {
+		return fmt.Errorf("list the folders of the review queue: %w", err)
+	}
+	folders := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+	slices.Sort(folders)
+	slices.Reverse(folders) // a folder comes after the folders inside it
+	for _, folder := range folders {
+		if folder == "" {
+			continue
+		}
+		if err := noSymlink(clone, folder); err != nil {
+			return err
+		}
+		dir := filepath.Join(clone, filepath.FromSlash(folder))
+		if _, err := os.Stat(dir); err != nil || holdsFile(dir) {
+			continue
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("remove the folder %s of the clone: %w", folder, err)
+		}
+	}
+	return nil
 }

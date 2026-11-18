@@ -1142,3 +1142,81 @@ func TestStaleIndexTopics(t *testing.T) {
 		t.Errorf("inbox after the push = %q, want no stale index", out)
 	}
 }
+
+func TestSettleOnBase(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	pushYes(t, home)
+	note := "---\nname: trial\ndescription: \"Read when you try it.\"\n---\n\nA.\n"
+	// Another machine pushes a note by hand, so the index of the accepted commit is stale.
+	other := secondClone(t, remote)
+	writeT(t, other, "dev/notes/trial.md", note)
+	gitT(t, other, "add", "-A")
+	gitT(t, other, "commit", "-q", "-m", "test: a note from another machine")
+	gitT(t, other, "push", "-q", "origin", "main")
+	// The queue holds the same note, so its pick becomes empty on the accepted commit.
+	writeT(t, repo, "dev/notes/trial.md", note)
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: the same note")
+	pick := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	gitT(t, repo, "fetch", "-q", "origin", "+refs/heads/main:"+acceptedRef)
+	accepted := strings.TrimSpace(gitT(t, repo, "rev-parse", acceptedRef))
+
+	todo := filepath.Join(t.TempDir(), "todo")
+	writeT(t, filepath.Dir(todo), "todo", "pick "+pick+"\nexec false\n")
+	if err := rebaseEditor(repo, "cp '"+todo+"'", "-q", "-i", accepted); err != nil {
+		t.Fatalf("rebase: %v", err)
+	}
+	if ok, err := isAncestor(repo, accepted, "HEAD"); err != nil || !ok {
+		t.Fatalf("the accepted commit is no ancestor of HEAD: %v\n%s", err, gitT(t, repo, "log", "--oneline", "-4"))
+	}
+	if got := strings.TrimSpace(gitT(t, repo, "log", "--format=%s", accepted+"..HEAD")); got != "index: README.md\nindex: dev/README.md" && got != "index: dev/README.md\nindex: README.md" {
+		t.Errorf("the queue = %q, want one index commit for each stale index", got)
+	}
+	if stale, err := staleIndexes(repo); err != nil || len(stale) > 0 {
+		t.Errorf("stale indexes after the rebase = %q, %v; want none", stale, err)
+	}
+	if out := gitT(t, repo, "status", "--porcelain"); out != "" || rebasing(repo) {
+		t.Errorf("the rebase left the working tree %q, rebasing %v", out, rebasing(repo))
+	}
+}
+
+func TestSettleOnBaseFixup(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	pushYes(t, home)
+	note := "---\nname: trial\ndescription: \"Read when you try it.\"\n---\n\nA.\n"
+	other := secondClone(t, remote)
+	writeT(t, other, "dev/notes/trial.md", note)
+	gitT(t, other, "add", "-A")
+	gitT(t, other, "commit", "-q", "-m", "test: a note from another machine")
+	gitT(t, other, "push", "-q", "origin", "main")
+	// The queue holds the same note and a fixup that removes it. The pick becomes empty on the accepted commit,
+	// and the fixup would then empty the accepted commit itself.
+	writeT(t, repo, "dev/notes/trial.md", note)
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "test: the same note")
+	pick := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	gitT(t, repo, "rm", "-q", "dev/notes/trial.md")
+	gitT(t, repo, "commit", "-q", "-m", "fixup! test: the same note")
+	fixup := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	gitT(t, repo, "fetch", "-q", "origin", "+refs/heads/main:"+acceptedRef)
+	accepted := strings.TrimSpace(gitT(t, repo, "rev-parse", acceptedRef))
+
+	todo := filepath.Join(t.TempDir(), "todo")
+	writeT(t, filepath.Dir(todo), "todo", "pick "+pick+"\nfixup "+fixup+"\nexec false\n")
+	err := rebaseEditor(repo, "cp '"+todo+"'", "-q", "-i", accepted)
+	if err == nil {
+		// Without an error, the rebase must have kept the accepted commit under the queue.
+		if ok, aerr := isAncestor(repo, accepted, "HEAD"); aerr != nil || !ok {
+			t.Fatalf("the rebase rewrote the accepted commit: %v\n%s", aerr, gitT(t, repo, "log", "--oneline", "-4"))
+		}
+		return
+	}
+	if got := headCommit(repo); got != fixup || rebasing(repo) {
+		t.Errorf("after the error %v, HEAD = %s and rebasing = %v; want the queue as it was, at %s", err, got, rebasing(repo), fixup)
+	}
+	if out := gitT(t, repo, "status", "--porcelain"); out != "" {
+		t.Errorf("the working tree = %q, want it clean", out)
+	}
+}
