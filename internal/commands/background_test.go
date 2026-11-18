@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,4 +116,112 @@ func TestAutoSnapshotLocked(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Errorf("starts while another call schedules = %v, want none", *calls)
 	}
+}
+
+func TestAutoPush(t *testing.T) {
+	pushStarts := func(calls [][]string) int {
+		n := 0
+		for _, c := range calls {
+			if len(c) == 2 && c[0] == "push" && c[1] == "--auto" {
+				n++
+			}
+		}
+		return n
+	}
+	tests := []struct {
+		name    string
+		setting string        // the value of memcore.autopush, or "" for none
+		age     time.Duration // of the mark of the last start, or 0 for none
+		command string
+		want    int
+	}{
+		{"the setting off", "", 0, "orient", 0},
+		{"the first call", "24h", 0, "orient", 1},
+		{"a call within the hour", "24h", 59 * time.Minute, "orient", 0},
+		{"a call after the hour", "24h", 61 * time.Minute, "orient", 1},
+		{"push itself", "24h", 0, "push", 0},
+		{"init", "24h", 0, "init", 0},
+		{"help", "24h", 0, "help", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, repo, _ := newMemory(t)
+			if tt.setting != "" {
+				gitT(t, repo, "config", "memcore.autopush", tt.setting)
+			}
+			mark := filepath.Join(store.StateDir(repo), "autopush.started")
+			if tt.age > 0 {
+				writeT(t, store.StateDir(repo), "autopush.started", "")
+				at := time.Now().Add(-tt.age)
+				if err := os.Chtimes(mark, at, at); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := recordStarts(t)
+			if err := autoPush(repo, tt.command); err != nil {
+				t.Fatal(err)
+			}
+			if got := pushStarts(*calls); got != tt.want || len(*calls) != tt.want {
+				t.Fatalf("starts = %v, want %d of push --auto", *calls, tt.want)
+			}
+			if _, err := os.Stat(mark); tt.setting == "" && err == nil {
+				t.Error("a call with the setting off left a mark")
+			}
+		})
+	}
+
+	t.Run("a second call starts no second push", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		gitT(t, repo, "config", "memcore.autopush", "24h")
+		calls := recordStarts(t)
+		for i := 0; i < 3; i++ {
+			if out, err := run(t, home, "", "orient"); err != nil {
+				t.Fatalf("orient: %v\n%s", err, out)
+			}
+		}
+		if got := pushStarts(*calls); got != 1 {
+			t.Errorf("starts = %v, want one push --auto", *calls)
+		}
+	})
+
+	t.Run("a setting that memcore cannot read", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		gitT(t, repo, "config", "memcore.autopush", "soon")
+		calls := recordStarts(t)
+		out, err := run(t, home, "", "orient")
+		if err != nil || !strings.Contains(out, "warning: read the setting memcore.autopush") {
+			t.Errorf("orient = %v\n%s\nwant a warning that names the setting", err, out)
+		}
+		if got := pushStarts(*calls); got != 0 {
+			t.Errorf("starts = %v, want none", *calls)
+		}
+	})
+
+	t.Run("a start that fails leaves no mark", func(t *testing.T) {
+		_, repo, _ := newMemory(t)
+		gitT(t, repo, "config", "memcore.autopush", "24h")
+		prev := startBackground
+		t.Cleanup(func() { startBackground = prev })
+		startBackground = func(string, ...string) error { return errors.New("no executable") }
+		if err := autoPush(repo, "orient"); err == nil {
+			t.Error("autoPush with a failed start returned no error")
+		}
+		if _, err := os.Stat(filepath.Join(store.StateDir(repo), "autopush.started")); err == nil {
+			t.Error("a failed start left its mark, which would hold back the next start for an hour")
+		}
+	})
+
+	t.Run("another call schedules", func(t *testing.T) {
+		_, repo, _ := newMemory(t)
+		gitT(t, repo, "config", "memcore.autopush", "24h")
+		unlock, ok, err := store.TryLockFile(repo, "autopush.schedule")
+		if err != nil || !ok {
+			t.Fatalf("TryLockFile: %v, %v", ok, err)
+		}
+		defer unlock()
+		calls := recordStarts(t)
+		if err := autoPush(repo, "orient"); err != nil || len(*calls) != 0 {
+			t.Errorf("autoPush while another call schedules = %v, starts %v; want none", err, *calls)
+		}
+	})
 }

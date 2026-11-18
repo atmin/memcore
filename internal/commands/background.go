@@ -18,6 +18,9 @@ import (
 // snapshotEvery is the time between two snapshots that a call of memcore starts in the background.
 const snapshotEvery = 6 * time.Hour
 
+// autoPushEvery is the time between two automatic pushes that a call of memcore starts in the background.
+const autoPushEvery = time.Hour
+
 // startBackground runs memcore with args in its own session, detached, and does not wait for it.
 // Its output goes to .git/memcore/background.log. Tests replace it.
 var startBackground = func(repo string, args ...string) error {
@@ -102,4 +105,39 @@ func lastSnapshot(repo string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return last, !last.IsZero()
+}
+
+// autoPush starts memcore push --auto in the background after a command, at most once in autoPushEvery, and
+// only with the setting of the automatic push on. It skips push, init and help.
+func autoPush(repo, command string) error {
+	if slices.Contains([]string{"push", "init", "help"}, command) {
+		return nil
+	}
+	// One call at a time checks and marks. A call that finds another call at it leaves the start to that call.
+	unlock, ok, err := store.TryLockFile(repo, "autopush.schedule")
+	if err != nil || !ok {
+		return err
+	}
+	defer unlock()
+	mark := filepath.Join(store.StateDir(repo), "autopush.started")
+	if info, err := os.Stat(mark); err == nil && time.Since(info.ModTime()) < autoPushEvery {
+		return nil
+	}
+	// The setting is read only now, so a call within the hour of a start runs no git process for it.
+	if _, on, err := autoPushDelay(repo); err != nil || !on {
+		return err
+	}
+	// The mark comes first, so the calls during a long push start no second one.
+	if err := os.WriteFile(mark, nil, 0o644); err != nil {
+		return fmt.Errorf("mark the start of an automatic push: %w", err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(mark, now, now); err != nil {
+		return fmt.Errorf("mark the start of an automatic push: %w", err)
+	}
+	if err := startBackground(repo, "push", "--auto"); err != nil {
+		os.Remove(mark) // a start that failed holds back no later one
+		return err
+	}
+	return nil
 }

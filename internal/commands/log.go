@@ -116,6 +116,9 @@ func Run(env Env, name string, args []string) error {
 			if berr := autoSnapshot(repo, name, e.started); berr != nil {
 				fmt.Fprintf(warnings, "warning: %v\n", berr)
 			}
+			if berr := autoPush(repo, name); berr != nil {
+				fmt.Fprintf(warnings, "warning: %v\n", berr)
+			}
 		}
 	}
 	if late {
