@@ -315,7 +315,7 @@ func TestSortChains(t *testing.T) {
 		}},
 		{name: "a skill", queue: func(t *testing.T, home, repo, dev string) []want {
 			authored(t, old, func() { draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.") })
-			return []want{{state: stateHeld, reason: "dev/skills/a-skill/SKILL.md"}}
+			return []want{{state: stateHeld, reason: "only the person pushes dev/skills/a-skill/SKILL.md"}}
 		}},
 		{name: "a remember and its forget", queue: func(t *testing.T, home, repo, dev string) []want {
 			authored(t, old, func() {
@@ -2096,5 +2096,169 @@ func TestPushAutoTrailer(t *testing.T) {
 		if got := trailers(t, remote, "main"); slices.Contains(got, true) {
 			t.Errorf("a push of the person sent the trailer: %v", got)
 		}
+	})
+}
+
+func TestInboxAuto(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	old, fresh := before(72*time.Hour), before(time.Hour)
+	lacks := func(t *testing.T, out string, texts ...string) {
+		t.Helper()
+		for _, text := range texts {
+			if strings.Contains(out, text) {
+				t.Errorf("inbox holds %q:\n%s", text, out)
+			}
+		}
+	}
+
+	t.Run("the setting off", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A note."))
+		commitAt(t, repo, "test: a note for "+fakeToken()+"\n\nThe token is "+fakeToken()+".", old.Format(time.RFC3339))
+		out := inboxT(t, home)
+		lacks(t, out, "Automatic push", "pushes automatically", "held:", "ripe:", "pushed these commits automatically", fakeToken())
+		holds(t, out, "test: a note for [secret:hosting-token]", "The token is [secret:hosting-token].")
+	})
+
+	t.Run("a waiting memory, a ripe note and a held skill", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		authored(t, old, func() {
+			draftT(t, dev, "note", "trial", "--description", "Read when you test trial.")
+			draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.")
+		})
+		authored(t, fresh, func() { remember(t, dev, "a-fact", fact) })
+		out := inboxT(t, home)
+		holds(t, out,
+			"Automatic push: on, after 24h.\n",
+			"    A  dev/memories/a-fact.md\n    pushes automatically after "+fresh.Add(24*time.Hour).Format("2006-01-02 15:04 UTC")+"\n",
+			"    A  dev/skills/a-skill/SKILL.md\n    held: only the person pushes dev/skills/a-skill/SKILL.md\n",
+			"    A  dev/notes/trial.md\n    ripe: the next automatic push sends it\n")
+		lacks(t, out, "pushed these commits automatically")
+	})
+
+	t.Run("a chain with a fixup, as the fold leaves it", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		authored(t, fresh, func() { reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.") })
+		out := inboxT(t, home)
+		holds(t, out, "    1 fixup folds in.\n", "    pushes automatically after "+fresh.Add(24*time.Hour).Format("2006-01-02 15:04 UTC")+"\n")
+		if n := strings.Count(out, "pushes automatically after"); n != 1 {
+			t.Errorf("inbox shows the state %d times, want once for the folded chain:\n%s", n, out)
+		}
+	})
+
+	t.Run("no delay, and a merge", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		gitT(t, repo, "config", "memcore.autopush", "0s")
+		remember(t, mkdirT(t, filepath.Join(home, "dev")), "a-fact", fact)
+		holds(t, inboxT(t, home), "Automatic push: on, with no delay.\n", "    ripe: the next automatic push sends it\n")
+		gitT(t, repo, "config", "memcore.autopush", "soon")
+		out, err := run(t, home, "", "inbox")
+		if err != nil || !strings.Contains(out, "warning: read the setting memcore.autopush") || !strings.Contains(out, "remember: dev/memories/a-fact.md") {
+			t.Errorf("inbox with a setting that memcore cannot read = %v\n%s\nwant a warning and the queue", err, out)
+		}
+	})
+
+	t.Run("a secret that spans the lines of a commit body", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		key := "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nQUJDREVGR0hJSktMTU5PUA\n-----END OPENSSH PRIVATE KEY-----"
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A note."))
+		commitAt(t, repo, "test: a note\n\nThe key:\n"+key+"\nUse it with care.", old.Format(time.RFC3339))
+		for _, setting := range []string{"", "24h"} {
+			if setting != "" {
+				gitT(t, repo, "config", "memcore.autopush", setting)
+			}
+			out := inboxT(t, home)
+			holds(t, out, "[secret:private-key]", "Use it with care.")
+			lacks(t, out, "b3BlbnNzaC1rZXktdjEAAAAA", "QUJDREVGR0hJSktMTU5PUA", "BEGIN OPENSSH")
+		}
+	})
+
+	t.Run("a remote that lost a commit with a token in its subject", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		base := headCommit(repo)
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A note."))
+		commitAt(t, repo, "test: a note for "+fakeToken(), old.Format(time.RFC3339))
+		if err := writeMarker(repo, rewritten{accepted: headCommit(repo), fetched: base}); err != nil {
+			t.Fatal(err)
+		}
+		for _, setting := range []string{"", "24h"} {
+			if setting != "" {
+				gitT(t, repo, "config", "memcore.autopush", setting)
+			}
+			out, _ := run(t, home, "", "inbox")
+			holds(t, out, "The remote no longer holds these accepted commits.", "test: a note for [secret:hosting-token]")
+			lacks(t, out, fakeToken())
+		}
+	})
+
+	t.Run("a held note with a token in its commit message", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A note."))
+		commitAt(t, repo, "test: a note\n\nThe token is "+fakeToken()+".", old.Format(time.RFC3339))
+		out := inboxT(t, home)
+		holds(t, out, "The token is [secret:hosting-token].", "    held: a likely secret in the commit message\n")
+		lacks(t, out, fakeToken())
+	})
+
+	t.Run("a clean chain behind a chain with a token in its subject", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A note."))
+		commitAt(t, repo, "test: a note for "+fakeToken(), old.Format(time.RFC3339))
+		first := short(headCommit(repo))
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A finding."))
+		commitAt(t, repo, "test: the note again", old.Format(time.RFC3339))
+		out := inboxT(t, home)
+		holds(t, out, "test: a note for [secret:hosting-token]", "    held: a likely secret in the commit message\n",
+			"    held: it changes a document of the chain "+first+", which is held\n")
+		lacks(t, out, fakeToken())
+	})
+
+	t.Run("the automatic pushes since the last push of the person", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		auto := func(name string) string {
+			t.Helper()
+			authored(t, old, func() { draftT(t, dev, "note", name, "--description", "Read when you test "+name+".") })
+			if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+				t.Fatalf("push --auto = %q, %v", out, err)
+			}
+			return abbrev(repo, acceptedCommit(repo)) + " draft: dev/notes/" + name + ".md"
+		}
+		const section = "memcore pushed these commits automatically since the last push of the person, newest first:\n"
+		first := auto("first")
+		second := auto("second")
+		holds(t, inboxT(t, home), "Nothing waits for review.\n\n"+section+"  "+second+"\n  "+first+"\n")
+
+		authored(t, old, func() { draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.") })
+		declinedPush(t, home)
+		holds(t, inboxT(t, home), section+"  "+second+"\n  "+first+"\n")
+
+		pushYes(t, home)
+		lacks(t, inboxT(t, home), "pushed these commits automatically")
+
+		third := auto("third")
+		out := inboxT(t, home)
+		holds(t, out, section+"  "+third+"\n")
+		lacks(t, out, first, second)
 	})
 }

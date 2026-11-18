@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/atmin/memcore/internal/guards"
 	"github.com/atmin/memcore/internal/store"
 )
 
@@ -42,11 +43,16 @@ func runInbox(env Env, args []string) error {
 // report prints what waits on the person, without a fetch. First come a rewritten remote, the stale indexes and
 // the files that keep auto-memory on. Then comes the queue as the fold at push leaves it. The queue includes the
 // index commits that push adds, and the header counts them apart. When the preview of the fold fails, report
-// warns and lists each commit of the queue as it is. The caller holds the write lock.
+// warns and lists each commit of the queue as it is.
+//
+// With the automatic push on, a line says so, each entry of the queue ends with its state, and a last section
+// lists the commits that memcore pushed automatically since the last push of the person.
+// Each subject, body, path and reason passes through guards.Redact, so report prints no likely secret.
+// The caller holds the write lock.
 func report(env Env, repo string) error {
 	if m, ok, err := readMarker(repo); err == nil && ok {
 		lost, _ := store.Git(repo, "log", "--oneline", m.fetched+".."+m.accepted)
-		fmt.Fprintf(env.Out, "The remote no longer holds these accepted commits. memcore recover drops them here and keeps the queue:\n%s", indent(lost))
+		fmt.Fprintf(env.Out, "The remote no longer holds these accepted commits. memcore recover drops them here and keeps the queue:\n%s", indent(guards.Redact(lost)))
 	}
 	if stale, err := staleIndexes(repo); err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\n", err)
@@ -56,6 +62,31 @@ func report(env Env, repo string) error {
 	if err := reportBlockers(env, repo); err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\n", err)
 	}
+	header, states, err := autoStates(repo)
+	if header != "" {
+		fmt.Fprintln(env.Out, header)
+	}
+	if err != nil {
+		fmt.Fprintf(env.Err, "warning: %v\nThe queue below shows no state of the automatic push.\n", err)
+	}
+	if err := reportQueue(env, repo, states); err != nil {
+		return err
+	}
+	if header == "" {
+		return nil
+	}
+	pushed, err := autoPushed(repo)
+	if err != nil {
+		fmt.Fprintf(env.Err, "warning: %v\n", err)
+	} else if len(pushed) > 0 {
+		fmt.Fprintf(env.Out, "\nmemcore pushed these commits automatically since the last push of the person, newest first:\n%s", indent(strings.Join(pushed, "\n")))
+	}
+	return nil
+}
+
+// reportQueue lists the review queue as the fold at push leaves it. states holds the state of each commit of
+// the queue for the automatic push, by its ID, or is nil.
+func reportQueue(env Env, repo string, states map[string]string) error {
 	_, queue, err := queueOf(repo)
 	if err != nil {
 		return err
@@ -64,7 +95,7 @@ func report(env Env, repo string) error {
 	entries, err := preview(repo, false)
 	if err != nil {
 		fmt.Fprintf(env.Err, "warning: %v\nThe queue below lists each commit as it is, without the fold.\n", err)
-		return listQueue(env, repo, queue)
+		return listQueue(env, repo, queue, states)
 	}
 	if len(queue) == 0 && len(entries) == 0 {
 		fmt.Fprintln(env.Out, "Nothing waits for review.")
@@ -96,7 +127,7 @@ func report(env Env, repo string) error {
 	}
 	switch {
 	case same:
-		return listQueue(env, repo, queue) // each commit keeps its sha, so the list is the queue as git shows it
+		return listQueue(env, repo, queue, states) // each commit keeps its sha, so the list is the queue as git shows it
 	case len(queue) == 0: // every entry is an index commit
 		fmt.Fprintf(env.Out, "The review queue holds no unpushed commits. Push adds %s, newest first:\n", plural(added, "index commit"))
 	case added == 0 && kept == 0:
@@ -113,7 +144,7 @@ func report(env Env, repo string) error {
 		if p.target != "" {
 			name = abbrev(repo, p.target)
 		}
-		fmt.Fprintf(env.Out, "\n  %s %s\n", name, p.subject)
+		fmt.Fprintf(env.Out, "\n  %s %s\n", name, guards.Redact(p.subject))
 		writeBody(env, p.body)
 		switch len(p.fixups) {
 		case 0:
@@ -123,6 +154,7 @@ func report(env Env, repo string) error {
 			fmt.Fprintf(env.Out, "    %d fixups fold in.\n", len(p.fixups))
 		}
 		writeFiles(env, p.files)
+		writeAutoState(env, states[p.target])
 	}
 	dropped := 0
 	for _, sha := range shas {
@@ -149,8 +181,8 @@ func abbrev(repo, sha string) string {
 	return short(sha)
 }
 
-// listQueue lists each commit of the queue as it is, newest first, with its body and its files.
-func listQueue(env Env, repo string, queue []string) error {
+// listQueue lists each commit of the queue as it is, newest first, with its body, its files and its state.
+func listQueue(env Env, repo string, queue []string, states map[string]string) error {
 	if len(queue) == 0 {
 		fmt.Fprintln(env.Out, "Nothing waits for review.")
 		return nil
@@ -166,9 +198,12 @@ func listQueue(env Env, repo string, queue []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(env.Out, "\n  %s\n", c)
+		fmt.Fprintf(env.Out, "\n  %s\n", guards.Redact(c))
 		writeBody(env, detail)
 		writeFiles(env, files)
+		if full, ok := revParse(repo, sha); ok {
+			writeAutoState(env, states[full])
+		}
 	}
 	writeClosing(env, repo)
 	return nil
@@ -176,17 +211,25 @@ func listQueue(env Env, repo string, queue []string) error {
 
 // writeBody writes the lines of a commit body that are not blank, indented under the subject.
 func writeBody(env Env, body string) {
-	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+	// The whole body is redacted before the split, because a secret can span lines, as a private key does.
+	for _, line := range strings.Split(strings.TrimSpace(guards.Redact(body)), "\n") {
 		if line != "" {
 			fmt.Fprintf(env.Out, "    %s\n", line)
 		}
 	}
 }
 
+// writeAutoState writes the state of a commit for the automatic push, indented under its files, when it has one.
+func writeAutoState(env Env, state string) {
+	if state != "" {
+		fmt.Fprintf(env.Out, "    %s\n", state)
+	}
+}
+
 // writeFiles writes the files of a commit, each with its status letter, indented under the subject.
 func writeFiles(env Env, files []fileStatus) {
 	for _, f := range files {
-		fmt.Fprintf(env.Out, "    %s  %s\n", f.status, f.path)
+		fmt.Fprintf(env.Out, "    %s  %s\n", f.status, guards.Redact(f.path))
 	}
 }
 

@@ -262,8 +262,12 @@ func ownVerdict(repo string, ch *chain, changed map[string]time.Time, delay time
 		if err != nil {
 			return v, err
 		}
-		if reason != "" {
+		if reason == "a merge commit" {
 			v.reason = reason
+			return v, nil
+		}
+		if reason != "" {
+			v.reason = "only the person pushes " + reason
 			return v, nil
 		}
 	}
@@ -953,4 +957,102 @@ func finishDrop(repo string) error {
 		return fmt.Errorf("remove the commits of an automatic push from the review queue: %w", err)
 	}
 	return clearPending(repo)
+}
+
+// autoStates returns what inbox shows of the automatic push: a header line, and the state of each commit of
+// the review queue, by its ID. With the setting off, it returns "" and no state. No state quotes a secret.
+func autoStates(repo string) (header string, states map[string]string, err error) {
+	delay, on, err := autoPushDelay(repo)
+	if err != nil || !on {
+		return "", nil, err
+	}
+	header = "Automatic push: on, after " + plainDuration(delay) + "."
+	if delay == 0 {
+		header = "Automatic push: on, with no delay."
+	}
+	if merge, err := queueHasMerge(repo); err != nil {
+		return header, nil, err
+	} else if merge {
+		header += " It pushes nothing while the queue holds a merge commit."
+	}
+	verdicts, err := sortQueue(repo, delay, clock())
+	if err != nil {
+		return header, nil, err
+	}
+	states = map[string]string{}
+	for _, v := range verdicts {
+		var line string
+		switch v.state {
+		case statePush:
+			line = "ripe: the next automatic push sends it"
+		case stateWait:
+			line = "pushes automatically after " + v.ripe.UTC().Format("2006-01-02 15:04 UTC")
+			if v.reason != "" {
+				line += ": " + v.reason
+			}
+		default:
+			line = "held: " + v.reason
+		}
+		line = guards.Redact(line)
+		for _, c := range append([]commit{v.chain.target}, v.chain.fixups...) {
+			states[c.sha] = line
+		}
+	}
+	return header, states, nil
+}
+
+// plainDuration writes a delay without the units that are zero, as 24h or 1h30m.
+func plainDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
+// autoPushed lists the accepted commits with the trailer of an automatic push that came after the last push
+// of the person, newest first, each as its short ID and its subject. The last push of the person is the newest
+// push event of the use log with the outcome ok, no By and at least one pushed commit. Without such an event,
+// the list covers the whole accepted history.
+func autoPushed(repo string) ([]string, error) {
+	accepted, ok := revParse(repo, acceptedRef)
+	if !ok {
+		return nil, nil
+	}
+	events, _, err := readLog(repo)
+	if err != nil {
+		return nil, err
+	}
+	rng := accepted
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Command != "push" || e.Outcome != "ok" || e.By != "" || len(e.Pushed) == 0 {
+			continue
+		}
+		// The event lists its commits oldest first, so the last one is the tip that the person pushed.
+		if tip, ok := revParse(repo, e.Pushed[len(e.Pushed)-1]); ok {
+			if has, err := isAncestor(repo, tip, accepted); err == nil && has {
+				rng = tip + ".." + accepted
+			}
+		}
+		break
+	}
+	out, err := store.Git(repo, "log", "-z", "--no-show-signature", "--format=%H%n%B", rng)
+	if err != nil {
+		return nil, fmt.Errorf("list the automatic pushes: %w", err)
+	}
+	var pushed []string
+	for _, record := range strings.Split(out, "\x00") {
+		sha, message, ok := strings.Cut(record, "\n")
+		message = strings.TrimRight(message, "\n")
+		if !ok || (message != autoTrailer && !strings.HasSuffix(message, "\n"+autoTrailer)) {
+			continue
+		}
+		subject, _, _ := strings.Cut(message, "\n")
+		pushed = append(pushed, abbrev(repo, sha)+" "+guards.Redact(subject))
+	}
+	return pushed, nil
 }
