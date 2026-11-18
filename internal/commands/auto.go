@@ -389,7 +389,8 @@ func secretIn(repo string, ch *chain) (string, error) {
 //   - It applies the target and then each fixup. When only indexes conflict, it writes them again from the
 //     documents, as a rebase of memcore does.
 //   - It writes the indexes as a fold does.
-//   - It commits once, with the message, the author and the author date of the target.
+//   - It commits once, with the message, the author and the author date of the target, and the trailer of an
+//     automatic push.
 //
 // A chain that leaves no change against the commit before it gets no commit, and is not in built. A conflict
 // in any other document is an error that names the chain by its target. tip is the last commit that it built,
@@ -447,8 +448,12 @@ func buildAside(repo, tmp string, chains []*chain) (tip string, built []*chain, 
 	return tip, built, nil
 }
 
+// autoTrailer ends the message of each commit of an automatic push, after a blank line.
+const autoTrailer = "Pushed: auto"
+
 // commitAside commits the staged change of the clone with the message, the author and the author date of a
-// target. It passes the message in a file with --cleanup=verbatim, so no setting of git changes the message.
+// target. It ends the message with autoTrailer. It passes the message in a file with --cleanup=verbatim, so no
+// setting of git changes the message or removes the trailer.
 func commitAside(clone, tmp, target string) error {
 	out, err := store.Git(clone, "show", "-s", "--no-show-signature", "--date=raw", "--format=%an <%ae>%x00%ad%x00%B", target)
 	if err != nil {
@@ -459,7 +464,9 @@ func commitAside(clone, tmp, target string) error {
 		return fmt.Errorf("read the commit %s: git printed %q", short(target), out)
 	}
 	file := filepath.Join(tmp, "message")
-	if err := os.WriteFile(file, []byte(strings.TrimRight(fields[2], "\n")+"\n"), 0o644); err != nil {
+	// The trailer marks a commit that memcore pushed with no review. No other code writes it.
+	message := strings.TrimRight(fields[2], "\n") + "\n\n" + autoTrailer + "\n"
+	if err := os.WriteFile(file, []byte(message), 0o644); err != nil {
 		return fmt.Errorf("write the message of the chain %s: %w", short(target), err)
 	}
 	// The raw date is "<seconds> <zone>", and @ marks it as that form for every length of the seconds.

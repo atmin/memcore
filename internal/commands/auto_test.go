@@ -581,8 +581,11 @@ func TestBuildAside(t *testing.T) {
 		}
 		onBase(t, repo, clone, tip, 2)
 		sameTree(t, repo, clone, tip)
-		if got, want := gitT(t, clone, "log", "--format=%s%n%b", "-2", tip), gitT(t, repo, "log", "--format=%s%n%b", "-2", "HEAD"); got != want {
-			t.Errorf("the built messages = %q, want %q", got, want)
+		for _, rev := range []string{"~1", ""} {
+			got, want := gitT(t, clone, "show", "-s", "--format=%B", tip+rev), strings.TrimRight(gitT(t, repo, "show", "-s", "--format=%B", "HEAD"+rev), "\n")+"\n\nPushed: auto\n\n"
+			if got != want {
+				t.Errorf("the built message = %q, want %q", got, want)
+			}
 		}
 		// The first built commit holds the memory with its indexes, and not the note.
 		first := tip + "~1"
@@ -597,7 +600,9 @@ func TestBuildAside(t *testing.T) {
 		dev := mkdirT(t, filepath.Join(home, "dev"))
 		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
 		reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		// With these settings, a commit with the default cleanup would lose the trailer as a comment.
 		gitT(t, repo, "config", "commit.cleanup", "strip")
+		gitT(t, repo, "config", "core.commentChar", "P")
 		clone, tip, built, err := build(t, repo, chainsT(t, repo))
 		if err != nil || len(built) != 1 {
 			t.Fatalf("buildAside = %d chains, %v; want one", len(built), err)
@@ -607,8 +612,10 @@ func TestBuildAside(t *testing.T) {
 		if got, err := authorDate(clone, tip); err != nil || !got.Equal(old) {
 			t.Errorf("the built commit has the author date %v, %v; want the date %v of its target", got, err, old)
 		}
-		if got, want := gitT(t, clone, "show", "-s", "--format=%an <%ae>%n%B", tip), gitT(t, repo, "show", "-s", "--format=%an <%ae>%n%B", "HEAD~1"); got != want {
-			t.Errorf("the built commit = %q, want the author and the message of its target %q", got, want)
+		got := gitT(t, clone, "show", "-s", "--format=%an <%ae>%n%B", tip)
+		want := strings.TrimRight(gitT(t, repo, "show", "-s", "--format=%an <%ae>%n%B", "HEAD~1"), "\n") + "\n\nPushed: auto\n\n"
+		if got != want {
+			t.Errorf("the built commit = %q, want the author and the message of its target, with the trailer: %q", got, want)
 		}
 	})
 
@@ -1990,5 +1997,104 @@ func TestPushAuto(t *testing.T) {
 			t.Errorf("push --auto --expect = %q, %v; want a usage error", out, err)
 		}
 		unmoved(t, repo, remote, head, tip)
+	})
+}
+
+// trailers returns, for each commit of a range, whether its message ends with the trailer of an automatic push.
+func trailers(t *testing.T, repo, rng string) []bool {
+	t.Helper()
+	var marked []bool
+	for _, sha := range strings.Fields(gitT(t, repo, "rev-list", "--reverse", rng)) {
+		message := strings.TrimRight(gitT(t, repo, "show", "-s", "--format=%B", sha), "\n")
+		marked = append(marked, strings.HasSuffix(message, "\n\nPushed: auto"))
+		if strings.Count(message, "Pushed: auto") > 1 {
+			t.Errorf("the commit %s holds the trailer twice:\n%s", short(sha), message)
+		}
+	}
+	return marked
+}
+
+func TestPushAutoTrailer(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	old := before(72 * time.Hour)
+	// noTrailer checks that no commit of the queue has the trailer.
+	noTrailer := func(t *testing.T, repo, when string) {
+		t.Helper()
+		if marked := trailers(t, repo, acceptedRef+"..main"); slices.Contains(marked, true) {
+			t.Errorf("%s, a commit of the queue has the trailer: %v", when, marked)
+		}
+		if out := gitT(t, repo, "log", "--format=%B", acceptedRef+"..main"); strings.Contains(out, "Pushed: auto") {
+			t.Errorf("%s, the queue holds the trailer:\n%s", when, out)
+		}
+	}
+
+	t.Run("each pushed commit ends with the trailer", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		// A setting that removes the lines of a comment must not remove the trailer.
+		gitT(t, repo, "config", "commit.cleanup", "strip")
+		gitT(t, repo, "config", "core.commentChar", "P")
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			draftT(t, dev, "note", "trial", "--description", "Read when you test trial.")
+			draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.")
+		})
+		noTrailer(t, repo, "before the push")
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 2 commits automatically.\n" {
+			t.Fatalf("push --auto = %q, %v", out, err)
+		}
+		noTrailer(t, repo, "after the push")
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" {
+			t.Errorf("the queue = %q, want only the skill", got)
+		}
+		// The remote holds the init that the person pushed, and then the two commits of the automatic push.
+		if got := trailers(t, remote, "main"); len(got) != 3 || got[0] || !got[1] || !got[2] {
+			t.Errorf("the trailers of the remote = %v, want them on the two automatic commits only\n%s", got, gitT(t, remote, "log", "--format=%B", "main"))
+		}
+	})
+
+	t.Run("a reason stays above the trailer", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		draftT(t, dev, "note", "trial", "--description", "Read when you test trial.")
+		pushYes(t, home)
+		autoOn(t, repo)
+		authored(t, old, func() { reviseT(t, dev, noteText("trial", "A finding."), "dev/notes/trial.md", "The trial ended.") })
+		if out, err := pushAutoT(t, home); err != nil {
+			t.Fatalf("push --auto: %v\n%s", err, out)
+		}
+		if got, want := gitT(t, remote, "show", "-s", "--format=%B", "main"), "revise: dev/notes/trial.md\n\nThe trial ended.\n\nPushed: auto\n\n"; got != want {
+			t.Errorf("the pushed message = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no commit of the queue has the trailer after a rejected push", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.")
+		})
+		rejectPushes(t, remote)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the rejection of the remote", out)
+		}
+		noTrailer(t, repo, "after a rejected push")
+		if err := Fetch(repo); err != nil {
+			t.Fatal(err)
+		}
+		noTrailer(t, repo, "after the fetch that follows a rejected push")
+		if err := os.Remove(filepath.Join(remote, "hooks", "pre-receive")); err != nil {
+			t.Fatal(err)
+		}
+		pushYes(t, home)
+		if got := trailers(t, remote, "main"); slices.Contains(got, true) {
+			t.Errorf("a push of the person sent the trailer: %v", got)
+		}
 	})
 }
