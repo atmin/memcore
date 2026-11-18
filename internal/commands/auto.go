@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atmin/memcore/internal/guards"
 	"github.com/atmin/memcore/internal/store"
 )
 
@@ -209,6 +210,7 @@ func sortQueue(repo string, delay time.Duration, now time.Time) ([]verdict, erro
 // sortChains gives each chain of the queue, oldest first, its verdict for the automatic push:
 //   - held, when only the person may push a commit of the chain, by personReason;
 //   - held, when the commits of the chain cancel each other, since the next push of the person drops it;
+//   - held, when a document or a commit message of the chain holds a likely secret;
 //   - wait, when the newest change of the chain is younger than the delay;
 //   - push otherwise.
 //
@@ -271,6 +273,9 @@ func ownVerdict(repo string, ch *chain, changed map[string]time.Time, delay time
 		v.reason = "its commits cancel each other"
 		return v, nil
 	}
+	if v.reason, err = secretIn(repo, ch); err != nil || v.reason != "" {
+		return v, err
+	}
 	at, err := changedAt(repo, ch, changed)
 	if err != nil {
 		return v, err
@@ -325,4 +330,48 @@ func pathsOf(repo string, ch *chain) (chainPaths, error) {
 		}
 	}
 	return paths, nil
+}
+
+// secretIn returns the reason that a chain is held for a likely secret, or "". It scans each commit message of
+// the chain, and each path and each blob that a commit of the chain adds or changes. The reason names the
+// first path, or the commit message, and never the secret: a secret in a path shows as its placeholder.
+func secretIn(repo string, ch *chain) (string, error) {
+	inMessage := false
+	for _, c := range append([]commit{ch.target}, ch.fixups...) {
+		out, err := store.Git(repo, "diff-tree", "-r", "-z", "--root", "--no-commit-id", "--raw", "--no-renames", "--ignore-submodules=none", c.sha)
+		if err != nil {
+			return "", fmt.Errorf("list the files of %s: %w", short(c.sha), err)
+		}
+		fields := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
+		for i := 0; i+1 < len(fields); i += 2 {
+			// A record is ":<old mode> <new mode> <old blob> <new blob> <status>", then the path.
+			meta := strings.Fields(fields[i])
+			if len(meta) != 5 {
+				return "", fmt.Errorf("read the files of %s: git printed %q", short(c.sha), fields[i])
+			}
+			if meta[1] != "100644" && meta[1] != "100755" {
+				if len(guards.Secrets(fields[i+1])) > 0 {
+					return "a likely secret in " + guards.Redact(fields[i+1]), nil
+				}
+				continue // a removed path, or no regular file
+			}
+			text, err := store.Git(repo, "cat-file", "blob", meta[3])
+			if err != nil {
+				return "", fmt.Errorf("read %s at %s: %w", fields[i+1], short(c.sha), err)
+			}
+			// A path may hold a secret itself, and the remote would get the path too.
+			if len(guards.Secrets(text)) > 0 || len(guards.Secrets(fields[i+1])) > 0 {
+				return "a likely secret in " + guards.Redact(fields[i+1]), nil
+			}
+		}
+		message, err := store.Git(repo, "show", "-s", "--no-show-signature", "--format=%B", c.sha)
+		if err != nil {
+			return "", fmt.Errorf("read the message of %s: %w", short(c.sha), err)
+		}
+		inMessage = inMessage || len(guards.Secrets(message)) > 0
+	}
+	if inMessage {
+		return "a likely secret in the commit message", nil
+	}
+	return "", nil
 }

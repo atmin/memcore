@@ -452,3 +452,65 @@ func TestQueueHasMerge(t *testing.T) {
 		t.Errorf("queueHasMerge after the merge is accepted = %v, %v; want false", got, err)
 	}
 }
+
+// fakeToken returns a text that guards.Secrets reads as a hosting token. No service issued it.
+func fakeToken() string {
+	return "ghp_" + strings.Repeat("a1B2", 9)
+}
+
+func TestSortChainsSecret(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	old := before(72 * time.Hour)
+	cases := []struct {
+		name, body, message string
+		state, reason       string
+	}{
+		{name: "a note with a token", body: "The token is " + fakeToken() + ".", message: "test: a note", state: stateHeld, reason: "a likely secret in dev/notes/trial.md"},
+		{name: "a clean note with a token in its commit message", body: "A note.", message: "test: a note\n\nThe token is " + fakeToken() + ".", state: stateHeld, reason: "a likely secret in the commit message"},
+		{name: "a clean note with a token in its subject", body: "A note.", message: "test: a note for " + fakeToken(), state: stateHeld, reason: "a likely secret in the commit message"},
+		{name: "a clean note", body: "A note.", message: "test: a note", state: statePush},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			pushYes(t, home)
+			writeT(t, repo, "dev/notes/trial.md", noteText("trial", c.body))
+			commitAt(t, repo, c.message, old.Format(time.RFC3339))
+			got, err := sortQueue(repo, 24*time.Hour, time.Now())
+			if err != nil || len(got) != 1 {
+				t.Fatalf("sortQueue = %v, %v; want one verdict", got, err)
+			}
+			if got[0].state != c.state || got[0].reason != c.reason {
+				t.Errorf("verdict = %s, %q; want %s, %q", got[0].state, got[0].reason, c.state, c.reason)
+			}
+			if strings.Contains(got[0].reason, fakeToken()) {
+				t.Errorf("the reason %q quotes the secret", got[0].reason)
+			}
+		})
+	}
+
+	t.Run("a token in a file name", func(t *testing.T) {
+		for _, body := range []string{"A note.", "The token is " + fakeToken() + "."} {
+			home, repo, _ := newMemory(t)
+			pushYes(t, home)
+			writeT(t, repo, "dev/notes/"+fakeToken()+".md", noteText("trial", body))
+			commitAt(t, repo, "test: a note", old.Format(time.RFC3339))
+			got, err := sortQueue(repo, 24*time.Hour, time.Now())
+			if err != nil || len(got) != 1 || got[0].state != stateHeld || got[0].reason != "a likely secret in dev/notes/[secret:hosting-token].md" {
+				t.Errorf("sortQueue with the body %q = %+v, %v; want the chain held, with a placeholder in the path", body, got, err)
+			}
+		}
+	})
+
+	t.Run("a token in a fixup", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		pushYes(t, home)
+		handNote(t, repo, "trial", old)
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "The token is "+fakeToken()+"."))
+		commitAt(t, repo, "fixup! test: the note trial", old.Format(time.RFC3339))
+		got, err := sortQueue(repo, 24*time.Hour, time.Now())
+		if err != nil || len(got) != 1 || got[0].state != stateHeld || got[0].reason != "a likely secret in dev/notes/trial.md" {
+			t.Errorf("sortQueue = %+v, %v; want the chain held for its fixup", got, err)
+		}
+	})
+}
