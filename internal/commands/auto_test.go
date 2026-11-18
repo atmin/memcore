@@ -1,14 +1,17 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/atmin/memcore/internal/guards"
+	"github.com/atmin/memcore/internal/store"
 )
 
 // authored runs f with date as the author date of each commit that f makes.
@@ -704,5 +707,1288 @@ func TestBuildAside(t *testing.T) {
 		if _, _, err := buildAside(repo, t.TempDir(), chainsT(t, repo)); err == nil {
 			t.Error("buildAside with no accepted history: no error")
 		}
+	})
+}
+
+// autoOn turns the automatic push on, with a delay of a day.
+func autoOn(t *testing.T, repo string) {
+	t.Helper()
+	gitT(t, repo, "config", "memcore.autopush", "24h")
+}
+
+// pushAutoT runs push --auto with a confirmer that fails the test, because the automatic push never asks.
+func pushAutoT(t *testing.T, home string) (string, error) {
+	t.Helper()
+	asks := func(prompt string) (bool, error) {
+		t.Errorf("the automatic push asked %q", prompt)
+		return false, nil
+	}
+	return runWith(t, Env{Dir: home, Confirm: asks}, "push", "--auto")
+}
+
+// queueT returns the subjects of the review queue, newest first.
+func queueT(t *testing.T, repo string) string {
+	t.Helper()
+	return strings.TrimSpace(gitT(t, repo, "log", "--format=%s", acceptedRef+"..main"))
+}
+
+// afterPush makes the next pushes of memcore run f after the remote took them, and return its error.
+func afterPush(t *testing.T, f func() error) {
+	t.Helper()
+	prev := gitPush
+	gitPush = func(repo string, held *os.File, args ...string) error {
+		if err := prev(repo, held, args...); err != nil {
+			return err
+		}
+		return f()
+	}
+	t.Cleanup(func() { gitPush = prev })
+}
+
+// noRecord checks that no record and no ref of an automatic push stay.
+func noRecord(t *testing.T, repo string) {
+	t.Helper()
+	if _, waits, err := readPending(repo); err != nil || waits {
+		t.Errorf("the record of the automatic push stays: %v, %v", waits, err)
+	}
+	if _, ok := revParse(repo, autoRef); ok {
+		t.Error("the ref of the automatic push stays")
+	}
+}
+
+// hasRecord checks that the record and the ref of an automatic push stay.
+func hasRecord(t *testing.T, repo string) {
+	t.Helper()
+	if _, waits, err := readPending(repo); err != nil || !waits {
+		t.Errorf("the record of the automatic push = %v, %v; want it to stay", waits, err)
+	}
+	if _, ok := revParse(repo, autoRef); !ok {
+		t.Error("the ref of the automatic push is gone")
+	}
+}
+
+func TestRefused(t *testing.T) {
+	cases := []struct {
+		name, text string
+		want       bool
+	}{
+		{"a hook that declines", "remote: no\nTo /r\n ! [remote rejected] 0123456 -> main (pre-receive hook declined)\nerror: failed to push some refs to '/r'", true},
+		{"no fast-forward", "To /r\n ! [rejected]        0123456 -> main (fetch first)\nerror: failed to push some refs to '/r'", true},
+		{"a remote that reports no status", "To /r\n ! [remote failure]  0123456 -> main (remote failed to report status)\nerror: failed to push some refs to '/r'", false},
+		{"a tag that the remote rejects", "To /r\n ! [remote rejected] v1 -> v1 (hook declined)\nerror: failed to push some refs to '/r'", false},
+		{"a connection that breaks", "fatal: the remote end hung up unexpectedly", false},
+		{"a hook that prints the words", "remote: ! [remote rejected] by nobody\nfatal: the remote end hung up unexpectedly", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := refused(errors.New("git push: exit status 1: " + c.text)); got != c.want {
+				t.Errorf("refused = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if refused(nil) {
+		t.Error("refused(nil) = true")
+	}
+}
+
+func TestPushArgs(t *testing.T) {
+	args := pushArgs("0123456789abcdef")
+	if len(args) == 0 || args[0] != "push" || !slices.Contains(args, "0123456789abcdef:refs/heads/main") {
+		t.Fatalf("pushArgs = %q, want a push of the tip to main", args)
+	}
+	for _, a := range args {
+		if a == "-f" || strings.HasPrefix(a, "--force") || strings.HasPrefix(a, "+") || a == "--mirror" || a == "--delete" || a == "-d" {
+			t.Errorf("pushArgs = %q, and %q can rewrite the remote", args, a)
+		}
+	}
+}
+
+func TestPushAuto(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	const fact = "Read when you test a fact."
+	old, fresh := before(72*time.Hour), before(time.Hour)
+	// start gives a memory repo with a pushed init and the automatic push on.
+	start := func(t *testing.T) (home, repo, remote, dev string) {
+		t.Helper()
+		home, repo, remote = newMemory(t)
+		pushYes(t, home)
+		autoOn(t, repo)
+		return home, repo, remote, mkdirT(t, filepath.Join(home, "dev"))
+	}
+	ripeNote := func(t *testing.T, dev, name string) {
+		t.Helper()
+		authored(t, old, func() { draftT(t, dev, "note", name, "--description", "Read when you test "+name+".") })
+	}
+	heldSkill := func(t *testing.T, dev string) {
+		t.Helper()
+		authored(t, old, func() { draftT(t, dev, "skill", "a-skill", "--description", "Use when you test.") })
+	}
+	remoteTip := func(t *testing.T, remote string) string {
+		t.Helper()
+		return strings.TrimSpace(gitT(t, remote, "rev-parse", "main"))
+	}
+	// unmoved checks that a run left the remote and HEAD as they were.
+	unmoved := func(t *testing.T, repo, remote, head, tip string) {
+		t.Helper()
+		if got := headCommit(repo); got != head {
+			t.Errorf("HEAD moved from %s to %s", head, got)
+		}
+		if got := remoteTip(t, remote); got != tip {
+			t.Errorf("the remote moved from %s to %s", tip, got)
+		}
+	}
+
+	t.Run("the setting off", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		pushYes(t, home)
+		authored(t, old, func() { remember(t, mkdirT(t, filepath.Join(home, "dev")), "a-fact", fact) })
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		out, err := pushAutoT(t, home)
+		if err != nil || out != "The automatic push is off.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+	})
+
+	t.Run("nothing ripe, with a stale index", func(t *testing.T) {
+		home, repo, remote, _ := start(t)
+		writeT(t, repo, "dev/memories/by-hand.md", memoryText("by-hand", "Read when you edit by hand.", "A fact."))
+		commitAt(t, repo, "test: a memory by hand", fresh.Format(time.RFC3339))
+		other := secondClone(t, remote)
+		writeT(t, other, "work/notes/elsewhere.md", noteText("elsewhere", "From another machine."))
+		gitT(t, other, "add", "-A")
+		gitT(t, other, "commit", "-q", "-m", "test: a commit from another machine")
+		gitT(t, other, "push", "-q", "origin", "main")
+		head, accepted := headCommit(repo), acceptedCommit(repo)
+		out, err := pushAutoT(t, home)
+		if err != nil || out != "Nothing is ripe.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		if headCommit(repo) != head || acceptedCommit(repo) != accepted {
+			t.Error("a run with nothing ripe changed the queue or fetched")
+		}
+		if stale, _ := staleIndexes(repo); len(stale) == 0 {
+			t.Error("a run with nothing ripe regenerated the stale index")
+		}
+	})
+
+	t.Run("two ripe memories", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			remember(t, dev, "deploys", "Read before you deploy on Fridays.")
+		})
+		tree := gitT(t, repo, "rev-parse", "HEAD^{tree}")
+		out, err := pushAutoT(t, home)
+		if err != nil || out != "Pushed 2 commits automatically.\n" {
+			t.Fatalf("push --auto = %q, %v", out, err)
+		}
+		if got := subjects(t, remote); got != "remember: dev/memories/deploys.md\nremember: dev/memories/a-fact.md\ninit: create the memory repo" {
+			t.Errorf("remote history = %q", got)
+		}
+		if got := queueT(t, repo); got != "" {
+			t.Errorf("the queue = %q, want it empty", got)
+		}
+		if head := headCommit(repo); head != acceptedCommit(repo) || head != remoteTip(t, remote) {
+			t.Errorf("HEAD = %s, want the accepted commit %s and the remote tip %s", head, acceptedCommit(repo), remoteTip(t, remote))
+		}
+		if got := gitT(t, repo, "rev-parse", "HEAD^{tree}"); got != tree {
+			t.Error("the pushed tree differs from the tree of the queue")
+		}
+		if out := gitT(t, repo, "status", "--porcelain"); out != "" {
+			t.Errorf("the working tree = %q, want it clean", out)
+		}
+		noRecord(t, repo)
+		e := last(t, repo)
+		if e.Command != "push" || e.Outcome != "ok" || e.By != "auto" || len(e.Pushed) != 2 || e.Pushed[1] != remoteTip(t, remote) {
+			t.Errorf("logged push = %+v, want an automatic push of two commits", e)
+		}
+	})
+
+	t.Run("two commits with one key, a ripe note and a held skill", func(t *testing.T) {
+		home, repo, remote, _ := start(t)
+		writeT(t, repo, "dev/notes/trial.md", noteText("trial", "A note."))
+		commitAt(t, repo, "test: by hand", old.Format(time.RFC3339))
+		writeT(t, repo, "dev/skills/a-skill/SKILL.md", "---\nname: a-skill\ndescription: \"Use when you test.\"\n---\n\nSteps.\n")
+		commitAt(t, repo, "test: by hand", old.Format(time.RFC3339))
+		if keyT(t, repo, "HEAD") != keyT(t, repo, "HEAD~1") {
+			t.Fatal("the two commits have different keys")
+		}
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("push --auto = %q, %v", out, err)
+		}
+		if _, err := store.Git(remote, "cat-file", "-e", "main:dev/skills/a-skill/SKILL.md"); err == nil {
+			t.Error("the remote holds the skill")
+		}
+		if _, err := store.Git(remote, "cat-file", "-e", "main:dev/notes/trial.md"); err != nil {
+			t.Errorf("the remote lacks the note: %v", err)
+		}
+		if got := gitT(t, repo, "log", "--format=", "--name-only", acceptedRef+"..main"); !strings.Contains(got, "dev/skills/a-skill/SKILL.md") || strings.Contains(got, "trial.md") {
+			t.Errorf("the queue changes %q, want only the skill", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a ripe note behind a held skill", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		heldSkill(t, dev)
+		ripeNote(t, dev, "slow-search")
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("push --auto = %q, %v", out, err)
+		}
+		if got := subjects(t, remote); got != "draft: dev/notes/slow-search.md\ninit: create the memory repo" {
+			t.Errorf("remote history = %q, want the note", got)
+		}
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" {
+			t.Errorf("the queue = %q, want only the skill", got)
+		}
+		if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")); got != remoteTip(t, remote) || got != acceptedCommit(repo) {
+			t.Errorf("the skill stands on %s, want the new accepted commit %s", got, remoteTip(t, remote))
+		}
+		if got, err := authorDate(repo, "HEAD"); err != nil || !got.Equal(old) {
+			t.Errorf("the skill has the author date %v, %v; want %v", got, err, old)
+		}
+		if stale, err := staleIndexes(repo); err != nil || len(stale) > 0 {
+			t.Errorf("stale indexes = %q, %v; want none", stale, err)
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "README.md")); !strings.Contains(got, "a-skill") || !strings.Contains(got, "slow-search") {
+			t.Errorf("the index of dev =\n%s\nwant the skill and the note", got)
+		}
+		if got := gitT(t, remote, "show", "main:dev/README.md"); strings.Contains(got, "a-skill") {
+			t.Errorf("the remote index of dev =\n%s\nwant it without the skill", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a ripe note behind a held script whose name a foreign file holds", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() { draftT(t, dev, "script", "a-tool", "--description", "Run when you test.") })
+		writeT(t, home, ".local/bin/a-tool", "#!/bin/sh\n")
+		ripeNote(t, dev, "slow-search")
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("push --auto = %q, %v", out, err)
+		}
+		if got := subjects(t, remote); got != "draft: dev/notes/slow-search.md\ninit: create the memory repo" {
+			t.Errorf("remote history = %q, want the note", got)
+		}
+		if got := queueT(t, repo); got != "draft: dev/bin/a-tool" {
+			t.Errorf("the queue = %q, want only the script", got)
+		}
+	})
+
+	t.Run("a ripe chain with a fixup", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("push --auto = %q, %v", out, err)
+		}
+		if got := subjects(t, remote); got != "remember: dev/memories/a-fact.md\ninit: create the memory repo" {
+			t.Errorf("remote history = %q, want the remember folded", got)
+		}
+		if got := gitT(t, remote, "show", "main:dev/memories/a-fact.md"); !strings.Contains(got, "A sharper fact.") {
+			t.Errorf("the remote memory =\n%s\nwant the revised text", got)
+		}
+		if got, err := authorDate(remote, "main"); err != nil || !got.Equal(old) {
+			t.Errorf("the pushed commit has the author date %v, %v; want %v", got, err, old)
+		}
+		if got := queueT(t, repo); got != "" {
+			t.Errorf("the queue = %q, want it empty", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a fresh chain with a fixup", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		authored(t, fresh, func() { reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.") })
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err != nil || out != "Nothing is ripe.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+		if got := queueT(t, repo); got != "fixup! remember: dev/memories/a-fact.md\nremember: dev/memories/a-fact.md" {
+			t.Errorf("the queue = %q, want the two commits", got)
+		}
+		first, _ := authorDate(repo, "HEAD~1")
+		second, _ := authorDate(repo, "HEAD")
+		if !first.Equal(old) || !second.Equal(fresh) {
+			t.Errorf("the author dates = %v and %v, want %v and %v", first, second, old, fresh)
+		}
+	})
+
+	t.Run("a ripe chain whose change the fetched history holds", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		other := secondClone(t, remote)
+		gitT(t, other, "fetch", "-q", repo, "main")
+		gitT(t, other, "cherry-pick", "-x", "FETCH_HEAD")
+		gitT(t, other, "push", "-q", "origin", "main")
+		tip := remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err != nil || out != "Nothing is ripe.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		if got := remoteTip(t, remote); got != tip {
+			t.Errorf("the remote moved from %s to %s", tip, got)
+		}
+		if head := headCommit(repo); head != tip || queueT(t, repo) != "" {
+			t.Errorf("HEAD = %s with the queue %q, want the fetched tip and no queue", head, queueT(t, repo))
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a ripe remember and its ripe forget", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			if out, err := run(t, dev, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+				t.Fatalf("forget: %v\n%s", err, out)
+			}
+		})
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err != nil || out != "Nothing is ripe.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+	})
+
+	t.Run("a merge in the queue", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		gitT(t, repo, "checkout", "-q", "-b", "side")
+		handNote(t, repo, "side", old)
+		gitT(t, repo, "checkout", "-q", "main")
+		ripeNote(t, dev, "slow-search")
+		authored(t, old, func() { gitT(t, repo, "merge", "-q", "--no-ff", "--no-edit", "side") })
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err != nil || out != "The queue holds a merge commit, so the person pushes.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+	})
+
+	t.Run("a fetched change of the same document", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		draftT(t, dev, "note", "trial", "--description", "Read when you test trial.")
+		pushYes(t, home)
+		other := secondClone(t, remote)
+		writeT(t, other, "dev/notes/trial.md", noteText("trial", "From another machine."))
+		gitT(t, other, "add", "-A")
+		gitT(t, other, "commit", "-q", "-m", "test: the note from another machine")
+		gitT(t, other, "push", "-q", "origin", "main")
+		authored(t, old, func() { reviseT(t, dev, noteText("trial", "From this machine."), "dev/notes/trial.md", "A finding.") })
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "change the same documents") {
+			t.Errorf("push --auto = %q, %v; want the conflict of the fetch", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+		noRecord(t, repo)
+	})
+
+	t.Run("a remote that rejects the push", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		rejectPushes(t, remote)
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "push to origin") {
+			t.Fatalf("push --auto = %q, %v; want the rejection of the remote", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+		// The remote said no, so it never gets this built tip, and the record goes at once.
+		noRecord(t, repo)
+		if e := last(t, repo); e.Outcome != "error" || len(e.Pushed) != 0 {
+			t.Errorf("logged push = %+v, want an error with no pushed commit", e)
+		}
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		noRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+		if err := os.Remove(filepath.Join(remote, "hooks", "pre-receive")); err != nil {
+			t.Fatal(err)
+		}
+		pushYes(t, home)
+		if got := gitT(t, remote, "log", "--format=%B", "main"); strings.Contains(got, "Pushed: auto") {
+			t.Errorf("a push of the person sent the trailer of an automatic push:\n%s", got)
+		}
+		if got := subjects(t, remote); got != "remember: dev/memories/a-fact.md\ninit: create the memory repo" {
+			t.Errorf("remote history = %q", got)
+		}
+	})
+
+	t.Run("a remote that rejects the push, with settings of git that change its output", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		gitT(t, repo, "config", "color.transport", "always")
+		gitT(t, repo, "config", "push.followTags", "true")
+		rejectPushes(t, remote)
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err == nil || !strings.Contains(err.Error(), "push to origin") {
+			t.Fatalf("push --auto = %q, %v; want the rejection of the remote", out, err)
+		}
+		noRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+	})
+
+	t.Run("a remote that rejects the push after another clone advanced it", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		heldSkill(t, dev)
+		other := secondClone(t, remote)
+		writeT(t, other, "work/notes/elsewhere.md", noteText("elsewhere", "From another machine."))
+		gitT(t, other, "add", "-A")
+		gitT(t, other, "commit", "-q", "-m", "test: a commit from another machine")
+		gitT(t, other, "push", "-q", "origin", "main")
+		rejectPushes(t, remote)
+		tip := remoteTip(t, remote)
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "push to origin") {
+			t.Fatalf("push --auto = %q, %v; want the rejection of the remote", out, err)
+		}
+		// The queue is as the fetch left it: the same two commits, on the fetched tip.
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md\ndraft: dev/notes/slow-search.md" {
+			t.Errorf("the queue = %q, want the note and the skill", got)
+		}
+		if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~2")); got != tip || acceptedCommit(repo) != tip || remoteTip(t, remote) != tip {
+			t.Errorf("the queue stands on %s, want the fetched tip %s", got, tip)
+		}
+		if got := gitT(t, repo, "log", "--format=%B", acceptedRef+"..main"); strings.Contains(got, "Pushed: auto") {
+			t.Errorf("a commit of the queue has the trailer:\n%s", got)
+		}
+		noRecord(t, repo)
+		head := headCommit(repo)
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		noRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+	})
+
+	t.Run("a push that the remote accepts and that reports a failure", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		heldSkill(t, dev)
+		head := headCommit(repo)
+		afterPush(t, func() error { return errors.New("the connection broke") })
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "the connection broke") {
+			t.Fatalf("push --auto = %q, %v; want the failure of the push", out, err)
+		}
+		if got := subjects(t, remote); got != "draft: dev/notes/slow-search.md\ninit: create the memory repo" {
+			t.Fatalf("remote history = %q, want the note", got)
+		}
+		if e := last(t, repo); e.Outcome != "error" || len(e.Pushed) != 0 {
+			t.Errorf("logged push = %+v, want an error with no pushed commit", e)
+		}
+		if headCommit(repo) != head {
+			t.Error("a push that reports a failure changed the queue")
+		}
+		hasRecord(t, repo)
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" {
+			t.Errorf("the queue after the fetch = %q, want only the skill", got)
+		}
+		if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")); got != remoteTip(t, remote) {
+			t.Errorf("the skill stands on %s, want the remote tip", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a move of the accepted checkout that fails after the push", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		// A file in the place of ~/.local/bin fails syncAccepted.
+		afterPush(t, func() error {
+			writeT(t, home, ".local/bin", "no folder\n")
+			return nil
+		})
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "the remote has the automatic push") {
+			t.Fatalf("push --auto = %q, %v; want the failure after the push", out, err)
+		}
+		if e := last(t, repo); e.Outcome != "error" || e.By != "auto" || len(e.Pushed) != 1 || e.Pushed[0] != remoteTip(t, remote) {
+			t.Errorf("logged push = %+v, want the pushed commit", e)
+		}
+		hasRecord(t, repo)
+		if err := os.Remove(filepath.Join(home, ".local", "bin")); err != nil {
+			t.Fatal(err)
+		}
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got := queueT(t, repo); got != "" || headCommit(repo) != remoteTip(t, remote) {
+			t.Errorf("the queue after the fetch = %q, want it empty on the remote tip", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a record that names a commit that the queue lacks", func(t *testing.T) {
+		home, repo, _, dev := start(t)
+		// A chain with a fixup builds into one commit, which no commit of the queue equals.
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		afterPush(t, func() error { return errors.New("the connection broke") })
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		gitT(t, repo, "commit", "-q", "--amend", "-m", "fixup! remember: dev/memories/a-fact.md\n\nAmended by hand.")
+		head := headCommit(repo)
+		err := Fetch(repo)
+		if err == nil || !strings.Contains(err.Error(), "by hand") || !strings.Contains(err.Error(), "autopush.pending") {
+			t.Errorf("Fetch = %v, want an error that tells the person to remove the commits by hand", err)
+		}
+		if headCommit(repo) != head {
+			t.Error("finishDrop changed a queue that lacks a commit of the record")
+		}
+		hasRecord(t, repo)
+	})
+
+	t.Run("a hand edit after the push and before the removal", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		heldSkill(t, dev)
+		head := headCommit(repo)
+		afterPush(t, func() error {
+			writeT(t, repo, "dev/notes/by-hand.md", noteText("by-hand", "An edit by hand."))
+			return nil
+		})
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "the next fetch removes its commits") {
+			t.Fatalf("push --auto = %q, %v; want the report that the next fetch finishes the removal", out, err)
+		}
+		if got := subjects(t, remote); got != "draft: dev/notes/slow-search.md\ninit: create the memory repo" {
+			t.Fatalf("remote history = %q, want the note", got)
+		}
+		if headCommit(repo) != head {
+			t.Error("the removal moved HEAD over a hand edit")
+		}
+		if got := readT(t, filepath.Join(repo, "dev", "notes", "by-hand.md")); !strings.Contains(got, "An edit by hand.") {
+			t.Errorf("the hand edit = %q", got)
+		}
+		hasRecord(t, repo)
+		if e := last(t, repo); e.By != "auto" || len(e.Pushed) != 1 {
+			t.Errorf("logged push = %+v, want the pushed commit", e)
+		}
+		commitAt(t, repo, "test: an edit by hand", fresh.Format(time.RFC3339))
+		if out, err := run(t, home, "", "inbox"); err != nil {
+			t.Fatalf("inbox: %v\n%s", err, out)
+		}
+		if got := queueT(t, repo); got != "test: an edit by hand\ndraft: dev/skills/a-skill/SKILL.md" {
+			t.Errorf("the queue after inbox = %q, want it without the pushed note", got)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev", "notes", "slow-search.md")); err != nil {
+			t.Errorf("the pushed note is gone from the working tree: %v", err)
+		}
+		noRecord(t, repo)
+	})
+
+	// failPush makes the next pushes of memcore fail before the remote gets them, as a connection that breaks.
+	failPush := func(t *testing.T) (restore func()) {
+		t.Helper()
+		prev := gitPush
+		gitPush = func(string, *os.File, ...string) error { return errors.New("the connection broke") }
+		t.Cleanup(func() { gitPush = prev })
+		return func() { gitPush = prev }
+	}
+	// factAndSkill gives a ripe chain of a memory with a fixup, and a held skill.
+	factAndSkill := func(t *testing.T, dev string) {
+		t.Helper()
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		heldSkill(t, dev)
+	}
+	const skillOnly = "draft: dev/skills/a-skill/SKILL.md"
+	// plainSubjects checks that no commit of the remote has the subject of a fixup.
+	plainSubjects := func(t *testing.T, remote string) {
+		t.Helper()
+		if got := subjects(t, remote); strings.Contains(got, "fixup!") {
+			t.Errorf("the remote holds the subject of a fixup:\n%s", got)
+		}
+	}
+
+	t.Run("a record whose built tip the remote can still get", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		// The built tip is a commit that only this machine holds.
+		built := commitOn(t, repo, tip, "draft: dev/notes/slow-search.md", []treeFile{{"dev/notes/slow-search.md", "100644", "A note.\n"}})
+		gitT(t, repo, "update-ref", autoRef, built)
+		if err := writePending(repo, pending{Tip: built, Commits: []string{head}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		hasRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+		_ = home
+	})
+
+	t.Run("a record whose built tip can no longer land", func(t *testing.T) {
+		_, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		built := commitOn(t, repo, tip, "draft: dev/notes/slow-search.md", []treeFile{{"dev/notes/slow-search.md", "100644", "A note.\n"}})
+		gitT(t, repo, "update-ref", autoRef, built)
+		if err := writePending(repo, pending{Tip: built, Commits: []string{head}}); err != nil {
+			t.Fatal(err)
+		}
+		// Another machine moves the remote on. The remote now rejects the built tip, because it is no fast-forward.
+		other := secondClone(t, remote)
+		writeT(t, other, "work/notes/elsewhere.md", noteText("elsewhere", "From another machine."))
+		gitT(t, other, "add", "-A")
+		gitT(t, other, "commit", "-q", "-m", "test: a commit from another machine")
+		gitT(t, other, "push", "-q", "origin", "main")
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		noRecord(t, repo)
+		if got := queueT(t, repo); got != "draft: dev/notes/slow-search.md" || strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")) != remoteTip(t, remote) {
+			t.Errorf("the queue = %q, want the note on the remote tip", got)
+		}
+	})
+
+	t.Run("a push that the remote takes after its client died, with a fetch in between", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		head := headCommit(repo)
+		failPush(t)
+		if out, err := pushAutoT(t, home); err == nil || !strings.Contains(err.Error(), "the connection broke") {
+			t.Fatalf("push --auto = %q, %v; want the failure of the push", out, err)
+		}
+		rec, _, _ := readPending(repo)
+		// The fetch in between finds no built tip on the remote. The record stays, and so does the queue.
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("the fetch in between: %v", err)
+		}
+		hasRecord(t, repo)
+		if headCommit(repo) != head {
+			t.Error("the fetch in between changed the queue")
+		}
+		// The remote takes the built tip late.
+		gitT(t, repo, "push", "-q", "origin", rec.Tip+":refs/heads/main")
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("the fetch after the remote took the tip: %v", err)
+		}
+		if got := queueT(t, repo); got != skillOnly || strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")) != remoteTip(t, remote) {
+			t.Errorf("the queue = %q, want only the skill, on the remote tip", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("the next automatic push sends the same built tip", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		rec, _, _ := readPending(repo)
+		restore()
+		var sent []string
+		prev := gitPush
+		t.Cleanup(func() { gitPush = prev })
+		gitPush = func(repo string, held *os.File, args ...string) error {
+			sent = args
+			if held == nil {
+				t.Error("the second push gave its git process no lock to hold")
+			}
+			return prev(repo, held, args...)
+		}
+		out, err := pushAutoT(t, home)
+		if err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("the second push --auto = %q, %v", out, err)
+		}
+		if !slices.Contains(sent, rec.Tip+":refs/heads/main") || remoteTip(t, remote) != rec.Tip {
+			t.Errorf("the second push sent %q, want the built tip %s of the first push", sent, rec.Tip)
+		}
+		if got := queueT(t, repo); got != skillOnly {
+			t.Errorf("the queue = %q, want only the skill", got)
+		}
+		if e := last(t, repo); e.By != "auto" || len(e.Pushed) != 1 || e.Pushed[0] != rec.Tip {
+			t.Errorf("logged push = %+v, want the built tip by auto", e)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a push of the person while a record stays", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		restore()
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		// A push of the person would fold the recorded commits, so it refuses until the automatic push ends.
+		var asked string
+		_, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push")
+		if err == nil || !strings.Contains(err.Error(), "memcore push --auto") || asked != "" {
+			t.Fatalf("push = %v, asked %q; want a refusal that names push --auto", err, asked)
+		}
+		hasRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("the second push --auto = %q, %v", out, err)
+		}
+		pushYes(t, home)
+		if got := queueT(t, repo); got != "" {
+			t.Errorf("the queue = %q, want it empty", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a second push that a hook rejects keeps the record of an open push", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		restore()
+		hasRecord(t, repo)
+		rejectPushes(t, remote)
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "push to origin") {
+			t.Fatalf("the second push --auto = %q, %v; want the rejection of the remote", out, err)
+		}
+		// The first push is still open: the remote can take it late. So the no of the second push ends nothing.
+		hasRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+		if !strings.Contains(err.Error(), pendingPath(repo)) {
+			t.Errorf("the error = %v, want one that names the file of the record", err)
+		}
+		// The remote takes the first push late, and the fetch removes the pushed chain.
+		if err := os.Remove(filepath.Join(remote, "hooks", "pre-receive")); err != nil {
+			t.Fatal(err)
+		}
+		rec, _, _ := readPending(repo)
+		gitT(t, repo, "push", "-q", "origin", rec.Tip+":refs/heads/main")
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got := queueT(t, repo); got != skillOnly {
+			t.Errorf("the queue = %q, want only the skill", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a second push that fails keeps the record", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		failPush(t)
+		for i := 0; i < 2; i++ {
+			if out, err := pushAutoT(t, home); err == nil || !strings.Contains(err.Error(), "the connection broke") {
+				t.Fatalf("push --auto %d = %q, %v; want the failure of the push", i, out, err)
+			}
+			hasRecord(t, repo)
+			unmoved(t, repo, remote, head, tip)
+		}
+	})
+
+	t.Run("a fresh fixup after a push that failed", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		rec, _, _ := readPending(repo)
+		restore()
+		// The remote can still get the built tip. So the second push sends that tip, and the correction stays.
+		authored(t, fresh, func() {
+			reviseT(t, dev, memoryText("a-fact", fact, "The sharpest fact."), "a-fact", "Sharpest.")
+		})
+		out, err := pushAutoT(t, home)
+		if err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("the second push --auto = %q, %v", out, err)
+		}
+		if got := remoteTip(t, remote); got != rec.Tip {
+			t.Errorf("the remote tip = %s, want the built tip %s of the first push", got, rec.Tip)
+		}
+		// The record sent the last change of the memory, so the correction is a commit of its own, and no fixup.
+		if got := queueT(t, repo); got != "revise: dev/memories/a-fact.md\n"+skillOnly {
+			t.Errorf("the queue = %q, want the correction and the skill", got)
+		}
+		if got := readT(t, filepath.Join(repo, "dev/memories/a-fact.md")); !strings.Contains(got, "The sharpest fact.") {
+			t.Errorf("the memory lost its correction:\n%s", got)
+		}
+		noRecord(t, repo)
+		pushYes(t, home)
+		plainSubjects(t, remote)
+		if got := gitT(t, remote, "show", "main:dev/memories/a-fact.md"); !strings.Contains(got, "The sharpest fact.") {
+			t.Errorf("the remote lacks the correction:\n%s", got)
+		}
+	})
+
+	t.Run("a ripe correction and a ripe forget after a push that failed", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			remember(t, dev, "b-fact", "Use before a deploy on a Friday.")
+		})
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		restore()
+		authored(t, old, func() {
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+			reviseT(t, dev, memoryText("a-fact", fact, "The sharpest fact."), "a-fact", "Sharpest.")
+			if out, err := run(t, dev, "", "forget", "b-fact", "--reason", "A mistake."); err != nil {
+				t.Fatalf("forget: %v\n%s", err, out)
+			}
+		})
+		// The second correction is a fixup of the first one, which the record did not send.
+		if got := queueT(t, repo); !strings.HasPrefix(got, "forget: dev/memories/b-fact.md\nfixup! revise: dev/memories/a-fact.md\nrevise: dev/memories/a-fact.md\n") {
+			t.Fatalf("the queue = %q, want a forget, a fixup and a revise on the recorded commits", got)
+		}
+		// The second push sends the built tip, and the third sends the correction and the forget.
+		for i, want := range []string{"Pushed 2 commits automatically.\n", "Pushed 2 commits automatically.\n"} {
+			if out, err := pushAutoT(t, home); err != nil || out != want {
+				t.Fatalf("push --auto %d = %q, %v; want %q", i+2, out, err, want)
+			}
+		}
+		plainSubjects(t, remote)
+		if got := queueT(t, repo); got != "" {
+			t.Errorf("the queue = %q, want it empty", got)
+		}
+		if got := gitT(t, remote, "ls-tree", "-r", "--name-only", "main"); strings.Contains(got, "b-fact.md") || !strings.Contains(got, "a-fact.md") {
+			t.Errorf("the remote holds these files, want a-fact and no b-fact:\n%s", got)
+		}
+		if got := gitT(t, remote, "show", "main:dev/memories/a-fact.md"); !strings.Contains(got, "The sharpest fact.") {
+			t.Errorf("the remote lacks the correction:\n%s", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a correction after a hand fixup of a recorded commit", func(t *testing.T) {
+		home, repo, _, dev := start(t)
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		// The person commits a fixup by hand. Its target leaves the queue with the record, so memcore adds no
+		// second fixup to that chain.
+		writeT(t, repo, "dev/memories/a-fact.md", memoryText("a-fact", fact, "A fact by hand."))
+		gitT(t, repo, "commit", "-q", "-am", "fixup! remember: dev/memories/a-fact.md")
+		reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		if got := strings.TrimSpace(gitT(t, repo, "log", "-1", "--format=%s")); got != "revise: dev/memories/a-fact.md" {
+			t.Errorf("the subject of the correction = %q, want a plain revise", got)
+		}
+	})
+
+	t.Run("a hand fixup of a recorded commit is held after the removal", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		restore()
+		authored(t, old, func() {
+			writeT(t, repo, "dev/memories/a-fact.md", memoryText("a-fact", fact, "A fact by hand."))
+			gitT(t, repo, "commit", "-q", "-am", "fixup! remember: dev/memories/a-fact.md")
+		})
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("the second push --auto = %q, %v", out, err)
+		}
+		// The fixup lost its target. It is ripe, and still only the person sends its subject.
+		tip := remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err != nil || out != "Nothing is ripe.\n" || remoteTip(t, remote) != tip {
+			t.Errorf("the third push --auto = %q, %v; want nothing ripe", out, err)
+		}
+		if got := queueT(t, repo); got != "fixup! remember: dev/memories/a-fact.md" {
+			t.Errorf("the queue = %q, want the hand fixup", got)
+		}
+		plainSubjects(t, remote)
+	})
+
+	t.Run("a forget after a push that failed, and a remote that takes the push late", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() { remember(t, dev, "a-fact", fact) })
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		rec, _, _ := readPending(repo)
+		restore()
+		if out, err := run(t, dev, "", "forget", "a-fact", "--reason", "A mistake."); err != nil {
+			t.Fatalf("forget: %v\n%s", err, out)
+		}
+		head := headCommit(repo)
+		// A fold would drop the remember with its forget, so the push of the person refuses.
+		var asked string
+		_, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push")
+		if err == nil || !strings.Contains(err.Error(), "memcore push --auto") || asked != "" || headCommit(repo) != head {
+			t.Fatalf("push = %v, asked %q; want a refusal that leaves the queue", err, asked)
+		}
+		hasRecord(t, repo)
+		// The remote takes the built tip late. The forget stays in the queue, so the memory stays forgotten.
+		gitT(t, repo, "push", "-q", "origin", rec.Tip+":refs/heads/main")
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		noRecord(t, repo)
+		// The record sent the remember, so its forget is a commit of its own, and no fixup.
+		if got := queueT(t, repo); got != "forget: dev/memories/a-fact.md" {
+			t.Errorf("the queue = %q, want only the forget", got)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "dev/memories/a-fact.md")); err == nil {
+			t.Error("the forgotten memory is back")
+		}
+		pushYes(t, home)
+		plainSubjects(t, remote)
+		if got := gitT(t, remote, "ls-tree", "-r", "--name-only", "main"); strings.Contains(got, "a-fact.md") {
+			t.Errorf("the remote still holds the forgotten memory:\n%s", got)
+		}
+	})
+
+	t.Run("a recover while a record stays", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		first := remoteTip(t, remote)
+		remember(t, dev, "pushed-then-lost", "Read when the remote loses a commit.")
+		pushYes(t, home)
+		factAndSkill(t, dev)
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		restore()
+		// The remote loses a commit that the built tip stands on. So the built tip must never land.
+		gitT(t, remote, "update-ref", "refs/heads/main", first)
+		if err := Fetch(repo); err == nil || !strings.Contains(err.Error(), "memcore recover") {
+			t.Fatalf("Fetch: error = %v, want one that names memcore recover", err)
+		}
+		hasRecord(t, repo)
+		var asked string
+		if out, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "recover"); err != nil {
+			t.Fatalf("recover: %v\n%s", err, out)
+		}
+		noRecord(t, repo)
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("push --auto after the recover = %q, %v", out, err)
+		}
+		if got := subjects(t, remote); got != "remember: dev/memories/a-fact.md\ninit: create the memory repo" {
+			t.Errorf("remote history = %q, want the memory on the init commit, without the lost commit", got)
+		}
+		if got := queueT(t, repo); got != skillOnly {
+			t.Errorf("the queue = %q, want only the skill", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("the setting off while a record stays", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		factAndSkill(t, dev)
+		restore := failPush(t)
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		rec, _, _ := readPending(repo)
+		restore()
+		gitT(t, repo, "config", "--unset", "memcore.autopush")
+		// The remote may hold the built tip already, so the push ends also with the setting off.
+		if out, err := pushAutoT(t, home); err != nil || out != "Pushed 1 commit automatically.\n" {
+			t.Fatalf("the second push --auto = %q, %v", out, err)
+		}
+		if got := remoteTip(t, remote); got != rec.Tip {
+			t.Errorf("the remote tip = %s, want the built tip %s", got, rec.Tip)
+		}
+		noRecord(t, repo)
+		head := headCommit(repo)
+		authored(t, old, func() { draftT(t, dev, "note", "later", "--description", "Read when you test later.") })
+		if out, err := pushAutoT(t, home); err != nil || out != "The automatic push is off.\n" || remoteTip(t, remote) != rec.Tip {
+			t.Errorf("the third push --auto = %q, %v; want it off", out, err)
+		}
+		_ = head
+	})
+
+	t.Run("a record whose commit the accepted history holds", func(t *testing.T) {
+		_, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		heldSkill(t, dev)
+		// The built commit is the commit of the queue itself, as when both get one ID.
+		note := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1"))
+		gitT(t, repo, "push", "-q", "origin", note+":refs/heads/main")
+		gitT(t, repo, "update-ref", autoRef, note)
+		if err := writePending(repo, pending{Tip: note, Commits: []string{note}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" || remoteTip(t, remote) != note {
+			t.Errorf("the queue = %q, want only the skill", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a branch switch after the push and before the removal", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		heldSkill(t, dev)
+		head := headCommit(repo)
+		afterPush(t, func() error {
+			gitT(t, repo, "checkout", "-q", "-b", "side", "HEAD~1")
+			return nil
+		})
+		out, err := pushAutoT(t, home)
+		if err == nil || !strings.Contains(err.Error(), "checks out main first") {
+			t.Fatalf("push --auto = %q, %v; want the refusal of another branch", out, err)
+		}
+		side := strings.TrimSpace(gitT(t, repo, "rev-parse", "side"))
+		if got := strings.TrimSpace(gitT(t, repo, "rev-parse", "main")); got != head || side != strings.TrimSpace(gitT(t, repo, "rev-parse", head+"~1")) {
+			t.Errorf("the removal moved main to %s or the other branch to %s", got, side)
+		}
+		hasRecord(t, repo)
+		gitT(t, repo, "checkout", "-q", "main")
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" || strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")) != remoteTip(t, remote) {
+			t.Errorf("the queue after the fetch = %q, want only the skill, on the remote tip", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a push that still runs when a fetch looks", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		heldSkill(t, dev)
+		head := headCommit(repo)
+		// memcore was killed during its push, and its git process still runs: it holds the lock of the push.
+		ripe := chainsT(t, repo)[:1]
+		tmp := t.TempDir()
+		tip, built, err := buildAside(repo, tmp, ripe)
+		if err != nil || len(built) != 1 {
+			t.Fatalf("buildAside = %d chains, %v", len(built), err)
+		}
+		gitT(t, repo, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--refmap=", filepath.Join(tmp, "clone"), "HEAD")
+		gitT(t, repo, "update-ref", autoRef, tip)
+		if err := writePending(repo, pending{Tip: tip, Commits: []string{ripe[0].target.sha, ripe[0].fixups[0].sha}}); err != nil {
+			t.Fatal(err)
+		}
+		pushing, free, err := lockPush(repo)
+		if err != nil || !free {
+			t.Fatalf("lockPush = %v, %v", free, err)
+		}
+		still := func(t *testing.T, err error) {
+			t.Helper()
+			if err == nil || !strings.Contains(err.Error(), "an automatic push still runs") {
+				t.Errorf("error = %v, want the refusal while a push runs", err)
+			}
+			if headCommit(repo) != head {
+				t.Error("a command during a push changed the queue")
+			}
+			hasRecord(t, repo)
+		}
+		still(t, Fetch(repo))
+		var asked string
+		_, err = runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "push")
+		still(t, err)
+		if asked != "" {
+			t.Errorf("a push during an automatic push asked %q", asked)
+		}
+		_, err = pushAutoT(t, home)
+		still(t, err)
+		// The push ends now, and the remote takes the tip.
+		gitT(t, repo, "push", "-q", "origin", tip+":refs/heads/main")
+		pushing.Close()
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" || strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")) != remoteTip(t, remote) {
+			t.Errorf("the queue after the fetch = %q, want only the skill, on the remote tip", got)
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("the git process of the push holds the lock", func(t *testing.T) {
+		home, repo, _, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		prev := gitPush
+		t.Cleanup(func() { gitPush = prev })
+		gitPush = func(repo string, held *os.File, args ...string) error {
+			if held == nil {
+				t.Error("the automatic push gave its git process no lock to hold")
+			} else if _, free, err := lockPush(repo); err != nil || free {
+				t.Errorf("lockPush during the push = %v, %v; want the lock held", free, err)
+			}
+			if _, waits, err := readPending(repo); err != nil || !waits {
+				t.Errorf("the record during the push = %v, %v; want it written before the push", waits, err)
+			}
+			return prev(repo, held, args...)
+		}
+		if out, err := pushAutoT(t, home); err != nil {
+			t.Fatalf("push --auto: %v\n%s", err, out)
+		}
+		if f, free, err := lockPush(repo); err != nil || !free {
+			t.Errorf("lockPush after the push = %v, %v; want the lock free", free, err)
+		} else {
+			f.Close()
+		}
+		noRecord(t, repo)
+	})
+
+	t.Run("a drop while a record stays", func(t *testing.T) {
+		home, repo, _, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		heldSkill(t, dev)
+		afterPush(t, func() error { return errors.New("the connection broke") })
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		head := headCommit(repo)
+		var asked string
+		_, err := runWith(t, Env{Dir: home, Confirm: answer(true, &asked)}, "drop", head, "--reason", "A test.")
+		if err == nil || !strings.Contains(err.Error(), "run memcore inbox first") || !strings.Contains(err.Error(), "memcore push --auto") || asked != "" || headCommit(repo) != head {
+			t.Errorf("drop = %v, asked %q; want a refusal that leaves the queue", err, asked)
+		}
+		hasRecord(t, repo)
+	})
+
+	t.Run("an interruption after the removal and before the end of the record", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		heldSkill(t, dev)
+		sent := strings.Fields(gitT(t, repo, "rev-list", "--reverse", acceptedRef+"..HEAD~1"))
+		if out, err := pushAutoT(t, home); err != nil {
+			t.Fatalf("push --auto: %v\n%s", err, out)
+		}
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		// The record is as the removal left it before it ended: the commits are gone from the queue.
+		gitT(t, repo, "update-ref", autoRef, tip)
+		rec := pending{Tip: tip, Commits: sent, Removing: true, Base: tip}
+		if err := writePending(repo, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch after a removal that ended: %v", err)
+		}
+		noRecord(t, repo)
+		unmoved(t, repo, remote, head, tip)
+		// The same holds when another machine advanced the remote before this fetch.
+		other := secondClone(t, remote)
+		writeT(t, other, "work/notes/elsewhere.md", noteText("elsewhere", "From another machine."))
+		gitT(t, other, "add", "-A")
+		gitT(t, other, "commit", "-q", "-m", "test: a commit from another machine")
+		gitT(t, other, "push", "-q", "origin", "main")
+		gitT(t, repo, "update-ref", autoRef, tip)
+		if err := writePending(repo, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := Fetch(repo); err != nil {
+			t.Fatalf("Fetch after a removal that ended and a remote that advanced: %v", err)
+		}
+		noRecord(t, repo)
+		if got := queueT(t, repo); got != "draft: dev/skills/a-skill/SKILL.md" || strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD~1")) != remoteTip(t, remote) {
+			t.Errorf("the queue = %q, want only the skill, on the remote tip", got)
+		}
+		head, tip = headCommit(repo), remoteTip(t, remote)
+		// Without the mark of a removal, the same record means that the person changed the queue.
+		gitT(t, repo, "update-ref", autoRef, tip)
+		rec.Removing = false
+		if err := writePending(repo, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := Fetch(repo); err == nil || !strings.Contains(err.Error(), "by hand") {
+			t.Errorf("Fetch = %v, want the error of a queue that lacks a commit of the record", err)
+		}
+		hasRecord(t, repo)
+	})
+
+	t.Run("an aborted removal and then a queue that the person rewrote", func(t *testing.T) {
+		home, repo, _, dev := start(t)
+		authored(t, old, func() {
+			remember(t, dev, "a-fact", fact)
+			reviseT(t, dev, memoryText("a-fact", fact, "A sharper fact."), "a-fact", "Sharper.")
+		})
+		afterPush(t, func() error { return errors.New("the connection broke") })
+		if out, err := pushAutoT(t, home); err == nil {
+			t.Fatalf("push --auto = %q, want the failure of the push", out)
+		}
+		// A removal started and was aborted, so its mark stays. Then the person rewrites both commits by hand.
+		rec, _, err := readPending(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec.Removing, rec.Base = true, acceptedCommit(repo)
+		if err := writePending(repo, rec); err != nil {
+			t.Fatal(err)
+		}
+		gitT(t, repo, "reset", "-q", "--soft", "HEAD~2")
+		gitT(t, repo, "commit", "-q", "-m", "test: the memory, rewritten by hand")
+		head := headCommit(repo)
+		if err := Fetch(repo); err == nil || !strings.Contains(err.Error(), "by hand") {
+			t.Errorf("Fetch = %v, want the error of a queue that lacks a commit of the record", err)
+		}
+		if headCommit(repo) != head {
+			t.Error("finishDrop changed a queue that the person rewrote")
+		}
+		hasRecord(t, repo)
+	})
+
+	t.Run("no accepted history", func(t *testing.T) {
+		home, repo, remote := newMemory(t)
+		autoOn(t, repo)
+		authored(t, old, func() {
+			draftT(t, mkdirT(t, filepath.Join(home, "dev")), "note", "slow-search", "--description", "Read when search is slow.")
+		})
+		head := headCommit(repo)
+		out, err := pushAutoT(t, home)
+		if err != nil || out != "The remote holds no accepted history, so the person pushes first.\n" {
+			t.Errorf("push --auto = %q, %v", out, err)
+		}
+		if _, err := store.Git(remote, "rev-parse", "--verify", "-q", "main"); err == nil || headCommit(repo) != head {
+			t.Error("a run with no accepted history pushed or changed the queue")
+		}
+	})
+
+	t.Run("a working tree with changes", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		writeT(t, repo, "dev/notes/by-hand.md", noteText("by-hand", "An edit by hand."))
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		if out, err := pushAutoT(t, home); err == nil || !strings.Contains(err.Error(), "dev/notes/by-hand.md") {
+			t.Errorf("push --auto = %q, %v; want a refusal that names the file", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
+	})
+
+	t.Run("--auto with --expect", func(t *testing.T) {
+		home, repo, remote, dev := start(t)
+		ripeNote(t, dev, "slow-search")
+		head, tip := headCommit(repo), remoteTip(t, remote)
+		asks := func(string) (bool, error) { t.Error("push asked"); return false, nil }
+		out, err := runWith(t, Env{Dir: home, Confirm: asks}, "push", "--auto", "--expect", head)
+		if err == nil || !strings.Contains(err.Error(), "usage: memcore push [--expect <commit> | --auto]") {
+			t.Errorf("push --auto --expect = %q, %v; want a usage error", out, err)
+		}
+		unmoved(t, repo, remote, head, tip)
 	})
 }

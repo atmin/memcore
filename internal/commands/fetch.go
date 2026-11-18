@@ -14,6 +14,7 @@ import (
 )
 
 // Fetch fetches origin, and rebases the review queue onto the accepted history when it exists.
+// Before the rebase, it finishes the removal of the chains that an automatic push sent, by finishDrop.
 // On a conflict it aborts the rebase and returns an error that names the paths.
 // The caller holds the write lock.
 func Fetch(repo string) error {
@@ -25,6 +26,11 @@ func Fetch(repo string) error {
 		return fmt.Errorf("the memory repo has %q checked out: the person checks out main first", strings.TrimSpace(out))
 	}
 	if err := refuseRewritten(repo); err != nil {
+		return err
+	}
+	// While an automatic push still runs, the remote may get its commits after this fetch. So nothing may
+	// rewrite the queue yet. The check comes before the fetch: a push that ended before it shows in it.
+	if err := refusePushing(repo); err != nil {
 		return err
 	}
 	// The fetch lands under refs/memcore/fetched/, so origin/main moves only after the check below.
@@ -52,6 +58,10 @@ func Fetch(repo string) error {
 		return fmt.Errorf("move the accepted history: %w", err)
 	}
 	if err := syncAccepted(repo); err != nil {
+		return err
+	}
+	// An automatic push may have left its commits in the queue. The fetch knows now whether the remote has them.
+	if err := finishDrop(repo); err != nil {
 		return err
 	}
 	err = rebase(repo, "-q", acceptedRef)

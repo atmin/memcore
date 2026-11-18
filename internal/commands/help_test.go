@@ -78,7 +78,7 @@ func TestHelp(t *testing.T) {
 		if out, err := run(t, home, "", "help"); err != nil || !strings.Contains(out, row) {
 			t.Errorf("help: %v, output %q, want the row %q", err, out, row)
 		}
-		want := `memcore push [--expect <commit>]
+		want := `memcore push [--expect <commit> | --auto]
 
 The person runs it at a terminal, and confirms. An agent runs it only when the person asks.
 It refuses uncommitted changes, fetches, and folds each fixup into the commit it corrects.
@@ -86,6 +86,12 @@ Then it pushes the unpushed commits. An agent pushes only memories, notes, plans
 indexes. For a skill, a script, a helper, a conventions file or a glossary, it names the
 commits, and the person pushes them. With --expect <commit>, it pushes nothing unless main
 is at that commit, so it pushes only the queue that the person reviewed.
+
+With --auto, it is the automatic push, which memcore starts itself. It asks nothing, and
+it pushes nothing unless the person set memcore.autopush in the git configuration of the
+memory repo, as git config memcore.autopush 24h. Then it pushes each commit of memories,
+notes and plans whose newest change is older than that delay, with its fixups folded in.
+Every other commit waits for the person. memcore inbox shows the state of each commit.
 `
 		if out, err := run(t, home, "", "help", "push"); err != nil || out != want {
 			t.Errorf("help push: %v, output\n%s\nwant\n%s", err, out, want)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,5 +101,25 @@ func TestGitIndex(t *testing.T) {
 	}
 	if out, _ := Git(dir, "ls-files"); out != "" {
 		t.Errorf("the index of the repo holds %q, want nothing", out)
+	}
+}
+
+func TestGitHolding(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Git(dir, "init", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	held, err := os.Create(filepath.Join(dir, "held"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	// The alias runs a shell as a child of git. The shell sees the file as its file descriptor 3.
+	probe := []string{"-c", "alias.probe=!test -e /dev/fd/3", "probe"}
+	if _, err := GitHolding(dir, held, probe...); err != nil {
+		t.Errorf("GitHolding: the git process did not inherit the file: %v", err)
+	}
+	if _, err := Git(dir, probe...); err == nil {
+		t.Error("Git: the git process inherited a file")
 	}
 }

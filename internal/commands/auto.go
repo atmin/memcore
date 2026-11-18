@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/atmin/memcore/internal/guards"
@@ -266,6 +267,11 @@ func ownVerdict(repo string, ch *chain, changed map[string]time.Time, delay time
 			return v, nil
 		}
 	}
+	// A fixup that leads a chain found no commit to fold into. Only the person sends such a subject.
+	if _, orphan := fixupTarget(ch.target.subject); orphan {
+		v.reason = "a fixup with no commit to fold into"
+		return v, nil
+	}
 	cancelled, err := cancels(repo, ch)
 	if err != nil {
 		return v, err
@@ -491,4 +497,453 @@ func dropQueueFolders(repo, clone string) error {
 		}
 	}
 	return nil
+}
+
+// autoRef keeps the built tip of an automatic push in the memory repo, until its removal from the queue ends.
+const autoRef = "refs/memcore/auto"
+
+// pending is the record of an automatic push whose chains may still be in the review queue.
+type pending struct {
+	Tip      string   `json:"tip"`                // the built tip that the automatic push sent
+	Commits  []string `json:"commits"`            // each commit of the built chains in the queue
+	Open     bool     `json:"open,omitempty"`     // a push of the tip ended with an error that was no plain no
+	Removing bool     `json:"removing,omitempty"` // the removal of the commits from the queue started
+	Base     string   `json:"base,omitempty"`     // the accepted commit that the removal moves the queue onto
+}
+
+// pushLock is the file of the local state that an automatic push locks while its git process pushes. The git
+// process holds the lock itself. So the lock also stays when memcore dies during the push and git goes on.
+const pushLock = "autopush.pushing"
+
+// lockPush takes the lock of a running automatic push, and returns its open file. It returns false when
+// another push holds the lock. The lock goes when every process that holds the file closes it.
+func lockPush(repo string) (*os.File, bool, error) {
+	f, err := os.OpenFile(filepath.Join(store.StateDir(repo), pushLock), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, false, fmt.Errorf("open the lock of the automatic push: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("take the lock of the automatic push: %w", err)
+	}
+	return f, true, nil
+}
+
+// refusePushing returns an error while the push of a recorded automatic push still runs. Until it ends, no
+// fetch can tell whether the remote gets its commits, so nothing may rewrite the queue. A free lock proves only
+// that the git process of this machine ended: finishDrop keeps the record while the remote can still get the tip.
+func refusePushing(repo string) error {
+	if _, waits, err := readPending(repo); err != nil || !waits {
+		return err
+	}
+	f, free, err := lockPush(repo)
+	if err != nil {
+		return err
+	}
+	if !free {
+		return errors.New("an automatic push still runs, so memcore leaves the review queue as it is: run the command again when the push ends")
+	}
+	return f.Close()
+}
+
+func pendingPath(repo string) string {
+	return filepath.Join(store.StateDir(repo), "autopush.pending")
+}
+
+// readPending reads the record of an automatic push, and returns false when there is none.
+func readPending(repo string) (pending, bool, error) {
+	var rec pending
+	b, err := os.ReadFile(pendingPath(repo))
+	if errors.Is(err, fs.ErrNotExist) {
+		return rec, false, nil
+	}
+	if err != nil {
+		return rec, false, fmt.Errorf("read the record of the automatic push: %w", err)
+	}
+	if err := json.Unmarshal(b, &rec); err != nil || rec.Tip == "" {
+		return rec, false, fmt.Errorf("read the record of the automatic push: the file %s is damaged, so the person removes the pushed commits from the review queue by hand, and then removes the file", pendingPath(repo))
+	}
+	return rec, true, nil
+}
+
+// inPending reports whether the record of an automatic push names the commit sha of the review queue, or the
+// target of its chain. Such a commit leaves the queue when that push ends.
+func inPending(repo, sha string) (bool, error) {
+	rec, waits, err := readPending(repo)
+	if err != nil || !waits {
+		return false, err
+	}
+	if slices.Contains(rec.Commits, sha) {
+		return true, nil
+	}
+	chains, _, err := chainsOf(repo)
+	if err != nil {
+		return false, err
+	}
+	for _, ch := range chains {
+		for _, f := range ch.fixups {
+			if f.sha == sha {
+				return slices.Contains(rec.Commits, ch.target.sha), nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// writePending writes the record of an automatic push, whole, through a temporary file and a rename.
+func writePending(repo string, rec pending) error {
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("encode the record of the automatic push: %w", err)
+	}
+	tmp, err := os.CreateTemp(store.StateDir(repo), "autopush-*.pending")
+	if err != nil {
+		return fmt.Errorf("write the record of the automatic push: %w", err)
+	}
+	defer os.Remove(tmp.Name()) // after the rename, this removes nothing
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write the record of the automatic push: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write the record of the automatic push: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), pendingPath(repo)); err != nil {
+		return fmt.Errorf("write the record of the automatic push: %w", err)
+	}
+	return nil
+}
+
+// clearPending removes the record of an automatic push, and the ref of its built tip.
+func clearPending(repo string) error {
+	if err := os.Remove(pendingPath(repo)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove the record of the automatic push: %w", err)
+	}
+	if _, ok := revParse(repo, autoRef); ok {
+		if _, err := store.Git(repo, "update-ref", "-d", autoRef); err != nil {
+			return fmt.Errorf("remove the ref of the automatic push: %w", err)
+		}
+	}
+	return nil
+}
+
+// pushAuto is the automatic push: memcore push --auto. It asks nothing. It pushes the chains of the review
+// queue that sortChains gives the state push, as the commits that buildAside builds in a scratch clone.
+// Its fetch rebases the queue as every fetch does. Nothing else changes the queue until the remote accepts the
+// push. After that, finishDrop removes only the pushed chains. It holds the write lock for the whole run.
+// When the record of an earlier automatic push stays after the fetch, the remote lacks that built tip and can
+// still get it. Then it sends the same tip again, and builds nothing, also with the setting off. It never
+// removes such a record itself: a push that lands late would then meet a queue that changed.
+func pushAuto(env Env, repo string) error {
+	delay, on, err := autoPushDelay(repo)
+	if err != nil {
+		return err
+	}
+	// A record is of a push that started with the setting on. The remote may hold its commits already, so that
+	// push ends also with the setting off.
+	if _, waits, err := readPending(repo); err != nil {
+		return err
+	} else if !on && !waits {
+		fmt.Fprintln(env.Out, "The automatic push is off.")
+		return nil
+	}
+	unlock, err := store.Lock(repo)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := cleanTree(repo, "the automatic push pushed nothing"); err != nil {
+		return err
+	}
+	// A rebase turns a merge into plain commits, so the automatic push cannot keep it.
+	if merge, err := queueHasMerge(repo); err != nil {
+		return err
+	} else if merge {
+		fmt.Fprintln(env.Out, "The queue holds a merge commit, so the person pushes.")
+		return nil
+	}
+	// With a record, the fetch below finishes the removal of the last automatic push, even with nothing ripe.
+	if _, waits, err := readPending(repo); err != nil {
+		return err
+	} else if !waits {
+		ripe, err := ripeChains(repo, delay)
+		if err != nil {
+			return err
+		}
+		if len(ripe) == 0 {
+			fmt.Fprintln(env.Out, "Nothing is ripe.")
+			return nil // no fetch, so the window and push --expect see a stable queue
+		}
+	}
+	if err := Fetch(repo); err != nil {
+		return err
+	}
+	// A record that stays after the fetch is of a built tip that the remote lacks and can still get. Only the
+	// remote can end that: this push sends the same tip again, and builds nothing.
+	if rec, waits, err := readPending(repo); err != nil {
+		return err
+	} else if waits {
+		base, ok := revParse(repo, acceptedRef)
+		if !ok {
+			return errors.New("the record of an automatic push stays, and the memory repo has no accepted history")
+		}
+		return sendBuilt(env, repo, base, rec)
+	}
+	if !on {
+		fmt.Fprintln(env.Out, "The automatic push is off.")
+		return nil
+	}
+	base, ok := revParse(repo, acceptedRef)
+	if !ok {
+		fmt.Fprintln(env.Out, "The remote holds no accepted history, so the person pushes first.")
+		return nil
+	}
+	// The fetch gives each commit of the queue a new ID, and it may drop a commit.
+	ripe, err := ripeChains(repo, delay)
+	if err != nil {
+		return err
+	}
+	if len(ripe) == 0 {
+		fmt.Fprintln(env.Out, "Nothing is ripe.")
+		return nil
+	}
+	tmp, err := os.MkdirTemp("", "memcore-autopush-")
+	if err != nil {
+		return fmt.Errorf("create the directory of the automatic push: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+	tip, built, err := buildAside(repo, tmp, ripe)
+	if err != nil {
+		return err
+	}
+	if tip == "" {
+		fmt.Fprintln(env.Out, "Nothing is ripe.")
+		return nil
+	}
+	// The built commits come into the memory repo under a ref of their own. No branch moves.
+	if _, err := store.Git(repo, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--refmap=", filepath.Join(tmp, "clone"), "HEAD"); err != nil {
+		return fmt.Errorf("fetch the built commits from the clone: %w", err)
+	}
+	if _, err := store.Git(repo, "update-ref", autoRef, tip); err != nil {
+		return fmt.Errorf("keep the built commits: %w", err)
+	}
+	rec := pending{Tip: tip}
+	for _, ch := range built {
+		for _, c := range append([]commit{ch.target}, ch.fixups...) {
+			rec.Commits = append(rec.Commits, c.sha)
+		}
+	}
+	return sendBuilt(env, repo, base, rec)
+}
+
+// sendBuilt pushes the built tip of a record, and then removes its chains from the review queue. base is the
+// accepted commit that the built commits stand on. The caller holds the write lock.
+func sendBuilt(env Env, repo, base string, rec pending) error {
+	out, err := store.Git(repo, "rev-list", "--reverse", base+".."+rec.Tip)
+	if err != nil {
+		return fmt.Errorf("list the built commits: %w", err)
+	}
+	// The git process of the push holds this lock until it ends, also when memcore dies first. While the lock
+	// is held, a fetch refuses, because it cannot tell yet whether the remote gets the commits.
+	held, free, err := lockPush(repo)
+	if err != nil {
+		return err
+	}
+	if !free {
+		return errors.New("another automatic push still runs, so the automatic push pushed nothing")
+	}
+	defer held.Close()
+	if err := writePending(repo, rec); err != nil {
+		return err
+	}
+	// The two settings keep the output of git as refused reads it: one ref, and no colour.
+	args := append([]string{"-c", "push.followTags=false", "-c", "color.transport=false"}, pushArgs(rec.Tip)...)
+	if err := gitPush(repo, held, args...); err != nil {
+		// After a plain no, the remote never gets the built tip from this push. With no earlier push that is
+		// still open, the record goes: a record that stayed would hold back every push and drop of the person.
+		if refused(err) && !rec.Open {
+			if cerr := clearPending(repo); cerr != nil {
+				return fmt.Errorf("push to origin: %w; %v", err, cerr)
+			}
+			return fmt.Errorf("push to origin: %w", err)
+		}
+		if refused(err) {
+			// An earlier push of this tip is still open, and the remote can take it late. So the record stays.
+			return fmt.Errorf("push to origin: %w\nAn earlier push of the same commits may still end on the remote, so their record stays. When the remote never takes them, the person removes the file %s", err, pendingPath(repo))
+		}
+		// Otherwise the remote may have accepted the push, or may accept it later. The record and the ref
+		// stay. The next fetch finds out, and the next automatic push sends the same tip again.
+		rec.Open = true
+		if werr := writePending(repo, rec); werr != nil {
+			return fmt.Errorf("push to origin: %w; %v", err, werr)
+		}
+		return fmt.Errorf("push to origin: %w", err)
+	}
+	env.event().By, env.event().Pushed = "auto", strings.Fields(out)
+	if err := accept(repo, rec.Tip); err != nil {
+		return fmt.Errorf("the remote has the automatic push, and the next fetch removes its commits from the review queue: %w", err)
+	}
+	if err := finishDrop(repo); err != nil {
+		return fmt.Errorf("the remote has the automatic push, and the next fetch removes its commits from the review queue: %w", err)
+	}
+	fmt.Fprintf(env.Out, "Pushed %s automatically.\n", commits(len(env.event().Pushed)))
+	return nil
+}
+
+// refused reports whether the error of a git push says that the push ended with a plain no for the ref: git
+// itself refused to send it, or the remote reported that it rejected it. git prints such a line with the mark
+// "!" and the word rejected, and the line names the branch main. A line of the remote starts with "remote:", so no hook can forge one. Every other
+// failure is open: the remote may still take the push.
+func refused(err error) bool {
+	if err == nil {
+		return false
+	}
+	for _, line := range strings.Split(err.Error(), "\n") {
+		line = strings.TrimSpace(line)
+		if (strings.HasPrefix(line, "! [rejected]") || strings.HasPrefix(line, "! [remote rejected]")) && strings.Contains(line, " -> main (") {
+			return true
+		}
+	}
+	return false
+}
+
+// ripeChains returns the chains of the review queue that the automatic push sends now, oldest first.
+func ripeChains(repo string, delay time.Duration) ([]*chain, error) {
+	verdicts, err := sortQueue(repo, delay, clock())
+	if err != nil {
+		return nil, err
+	}
+	var ripe []*chain
+	for _, v := range verdicts {
+		if v.state == statePush {
+			ripe = append(ripe, v.chain)
+		}
+	}
+	return ripe, nil
+}
+
+// finishDrop removes from the review queue the chains that an automatic push sent, by its record. Without a
+// record it does nothing. The caller holds the write lock, and the accepted ref is as the remote has it.
+//   - When the accepted history lacks the built tip, the remote did not get the push yet. The remote can
+//     still get it while the built tip and the queue both stand on the accepted commit: a push whose client
+//     died can end late, and the next automatic push sends the same tip again. Then the record and the ref
+//     stay, and so does the queue. Otherwise the remote rejects the built tip, and it removes only the record
+//     and the ref.
+//   - When the queue lacks a commit of the record, it changes nothing, and returns an error. The one exception
+//     is a removal that ended and left only the record: the removal started, the queue holds no commit of the
+//     record, and main stands on the commit that the removal moved the queue onto.
+//   - Otherwise it runs one interactive rebase of main onto the accepted commit. Its todo drops each commit of
+//     the record by its ID, and picks every other commit of the queue as it is. Then it removes the record
+//     and the ref.
+//
+// When the rebase cannot run or stops on a conflict, the record stays, and the next fetch tries again.
+func finishDrop(repo string) error {
+	rec, waits, err := readPending(repo)
+	if err != nil || !waits {
+		return err
+	}
+	accepted, ok := revParse(repo, acceptedRef)
+	_, built := revParse(repo, rec.Tip)
+	has := false
+	if ok && built {
+		if has, err = isAncestor(repo, rec.Tip, accepted); err != nil {
+			return fmt.Errorf("look for the automatic push in the accepted history: %w", err)
+		}
+	}
+	if !has {
+		if !ok || !built {
+			return clearPending(repo)
+		}
+		// With the accepted commit under the queue too, the rebase of the fetch rewrites no commit of the record.
+		for _, rev := range []string{rec.Tip, "HEAD"} {
+			if under, err := isAncestor(repo, accepted, rev); err != nil {
+				return fmt.Errorf("look for the accepted commit under the automatic push: %w", err)
+			} else if !under {
+				return clearPending(repo)
+			}
+		}
+		return nil
+	}
+	// The rebase below rewrites the branch that is checked out, and the queue is the branch main.
+	if out, err := store.Git(repo, "symbolic-ref", "-q", "--short", "HEAD"); err != nil || strings.TrimSpace(out) != "main" {
+		return fmt.Errorf("the memory repo has %q checked out, so the commits of an automatic push stay in the review queue: the person checks out main first", strings.TrimSpace(out))
+	}
+	queue, err := revList(repo, "HEAD")
+	if err != nil {
+		return err
+	}
+	present, gone := 0, ""
+	for _, sha := range rec.Commits {
+		if slices.Contains(queue, sha) {
+			present++
+			continue
+		}
+		// A built commit can be the commit of the queue itself, with the same ID. Then the accepted history holds it.
+		if _, ok := revParse(repo, sha); ok {
+			if has, err := isAncestor(repo, sha, accepted); err != nil {
+				return fmt.Errorf("look for the commit %s in the accepted history: %w", short(sha), err)
+			} else if has {
+				continue
+			}
+		}
+		if gone == "" {
+			gone = sha
+		}
+	}
+	if gone != "" {
+		// A removal that ended leaves main on the commit that it moved the queue onto. The record names that
+		// commit, because a later fetch can move the accepted commit on. A queue that the person rewrote does
+		// not stand there: only this removal, or a fetch after it, moves the queue onto that commit.
+		ended := false
+		if _, ok := revParse(repo, rec.Base); rec.Removing && present == 0 && rec.Base != "" && ok {
+			if ended, err = isAncestor(repo, rec.Base, "HEAD"); err != nil {
+				return fmt.Errorf("look for the base of the removal under the review queue: %w", err)
+			}
+		}
+		if ended {
+			return clearPending(repo)
+		}
+		return fmt.Errorf("the remote has an automatic push, and the review queue no longer holds its commit %s: the person removes the pushed commits from the queue by hand, and then removes the file %s", short(gone), pendingPath(repo))
+	}
+	if present == 0 {
+		// The accepted history holds each commit of the record itself, or a removal that started has ended.
+		return clearPending(repo)
+	}
+	if err := cleanTree(repo, "the commits of an automatic push stay in the review queue until the next fetch"); err != nil {
+		return err
+	}
+	var todo strings.Builder
+	for _, sha := range queue {
+		if slices.Contains(rec.Commits, sha) {
+			fmt.Fprintf(&todo, "drop %s\n", sha)
+			continue
+		}
+		fmt.Fprintf(&todo, "pick %s\nexec false\n", sha) // a stop where rebase regenerates the indexes of this commit
+	}
+	path := filepath.Join(store.StateDir(repo), "todo.drop")
+	if err := os.WriteFile(path, []byte(todo.String()), 0o644); err != nil {
+		return fmt.Errorf("write the todo of the removal: %w", err)
+	}
+	defer os.Remove(path)
+	// The record says that the removal started. So a retry tells a removal that ended from a queue that the
+	// person changed.
+	rec.Removing, rec.Base = true, accepted
+	if err := writePending(repo, rec); err != nil {
+		return err
+	}
+	editor := "cp '" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+	if err := rebaseEditor(repo, editor, "-q", "-i", accepted); err != nil {
+		// When the abort left the queue as it was, the removal did not start after all.
+		if !rebasing(repo) && headCommit(repo) == queue[len(queue)-1] {
+			rec.Removing, rec.Base = false, ""
+			if werr := writePending(repo, rec); werr != nil {
+				return fmt.Errorf("remove the commits of an automatic push from the review queue: %w; %v", err, werr)
+			}
+		}
+		return fmt.Errorf("remove the commits of an automatic push from the review queue: %w", err)
+	}
+	return clearPending(repo)
 }

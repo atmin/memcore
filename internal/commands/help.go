@@ -178,7 +178,7 @@ With a path of the memory repo, such as work/shop, it prints only the reads of e
 note and plan under that path instead, most read first. It counts the whole use log, and a
 read counts under the path that its document has now. The path . covers the whole repo.
 `,
-	"push": `memcore push [--expect <commit>]
+	"push": `memcore push [--expect <commit> | --auto]
 
 The person runs it at a terminal, and confirms. An agent runs it only when the person asks.
 It refuses uncommitted changes, fetches, and folds each fixup into the commit it corrects.
@@ -186,6 +186,12 @@ Then it pushes the unpushed commits. An agent pushes only memories, notes, plans
 indexes. For a skill, a script, a helper, a conventions file or a glossary, it names the
 commits, and the person pushes them. With --expect <commit>, it pushes nothing unless main
 is at that commit, so it pushes only the queue that the person reviewed.
+
+With --auto, it is the automatic push, which memcore starts itself. It asks nothing, and
+it pushes nothing unless the person set memcore.autopush in the git configuration of the
+memory repo, as git config memcore.autopush 24h. Then it pushes each commit of memories,
+notes and plans whose newest change is older than that delay, with its fixups folded in.
+Every other commit waits for the person. memcore inbox shows the state of each commit.
 `,
 	"recover": `memcore recover
 

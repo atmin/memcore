@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"slices"
 	"strings"
@@ -19,22 +20,31 @@ import (
 // It pushes the tip that it counted, so a commit that lands while it asks waits for the next push.
 // With --expect, it pushes nothing unless main is at that commit before the fetch, so it pushes only a queue
 // that the person reviewed.
+// With --auto, it is the automatic push: it asks nothing, and pushes only the ripe chains, by pushAuto.
 func runPush(env Env, args []string) error {
+	const usage = "usage: memcore push [--expect <commit> | --auto]"
 	flags := flag.NewFlagSet("push", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	expect := flags.String("expect", "", "the tip of main that the person reviewed")
+	auto := flags.Bool("auto", false, "push the ripe chains without a question")
 	pos, err := parseInterleaved(flags, args)
 	if err != nil || len(pos) != 0 {
-		return usageErr("usage: memcore push [--expect <commit>]")
+		return usageErr(usage)
 	}
 	given := false
 	flags.Visit(func(f *flag.Flag) { given = given || f.Name == "expect" })
+	if given && *auto {
+		return usageErr(usage)
+	}
 	if given && *expect == "" {
 		return usageErr("--expect needs the commit that the person reviewed")
 	}
 	repo, err := openRepo()
 	if err != nil {
 		return err
+	}
+	if *auto {
+		return pushAuto(env, repo)
 	}
 	tip, base, queue, made, folded, err := prepare(repo, *expect)
 	env.event().Made, env.event().Folded = made, folded
@@ -85,18 +95,40 @@ func runPush(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := store.Git(repo, "push", "-q", "origin", tip+":refs/heads/main"); err != nil {
+	if err := gitPush(repo, nil, pushArgs(tip)...); err != nil {
 		return fmt.Errorf("push to origin: %w", err)
 	}
 	env.event().Pushed = pushed
-	if _, err := store.Git(repo, "update-ref", acceptedRef, tip); err != nil {
-		return fmt.Errorf("move the accepted history to the pushed tip: %w", err)
-	}
-	if err := syncAccepted(repo); err != nil {
+	if err := accept(repo, tip); err != nil {
 		return err
 	}
 	fmt.Fprintf(env.Out, "Pushed %s.\n", commits(len(queue)))
 	return nil
+}
+
+// pushArgs returns the arguments of git for every push of memcore: the commit tip to the branch main of
+// origin. It holds no force option and no refspec with +, so no push of memcore rewrites the remote.
+func pushArgs(tip string) []string {
+	return []string{"push", "-q", "origin", tip + ":refs/heads/main"}
+}
+
+// gitPush runs the push of memcore. With held, the git process inherits that open file, and a lock on it stays
+// while the push runs. Tests replace gitPush, to fail a push or to act right after one.
+var gitPush = func(repo string, held *os.File, args ...string) error {
+	if held == nil {
+		_, err := store.Git(repo, args...)
+		return err
+	}
+	_, err := store.GitHolding(repo, held, args...)
+	return err
+}
+
+// accept moves the accepted history to a pushed tip, and moves the accepted checkout and its scripts with it.
+func accept(repo, tip string) error {
+	if _, err := store.Git(repo, "update-ref", acceptedRef, tip); err != nil {
+		return fmt.Errorf("move the accepted history to the pushed tip: %w", err)
+	}
+	return syncAccepted(repo)
 }
 
 // agentQueue refuses the push of an agent when a commit of the queue up to tip needs the person. It names each
@@ -172,6 +204,13 @@ func prepare(repo, expect string) (tip, base string, queue, made, folded []strin
 	}
 	if err := Fetch(repo); err != nil {
 		return "", "", nil, nil, nil, err
+	}
+	// A record that stays after the fetch is of an automatic push that the remote lacks and can still get. A
+	// fold gives the recorded commits new IDs, and can drop one. So this push waits until that push ends.
+	if _, waits, err := readPending(repo); err != nil {
+		return "", "", nil, nil, nil, err
+	} else if waits {
+		return "", "", nil, nil, nil, errors.New("an automatic push has not ended, so push pushed nothing: run memcore push --auto, which sends its commits again, and then memcore push")
 	}
 	if made, err = regenerate(repo); err != nil {
 		return "", "", nil, made, nil, err

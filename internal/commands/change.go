@@ -249,7 +249,8 @@ func docLevel(p string) (string, bool) {
 
 // commitMessage returns the commit message of a command that changes one document. When the queue holds the
 // last change of the document, the message makes a fixup of that change. Push folds the fixup into it.
-// Otherwise the message is "<command>: <path>". The reason goes in the body.
+// Otherwise the message is "<command>: <path>". The reason goes in the body. A change that the record of an
+// automatic push names counts as pushed.
 func commitMessage(repo, rel, command, reason string) (string, error) {
 	plain := command + ": " + rel + "\n\n" + reason
 	out, err := store.Git(repo, "--literal-pathspecs", "log", "-1", "--format=%H%x00%s", "--", rel)
@@ -268,6 +269,11 @@ func commitMessage(repo, rel, command, reason string) (string, error) {
 		if pushed {
 			return plain, nil
 		}
+	}
+	// An automatic push that has not ended has sent that change already. Its removal drops the change from the
+	// queue, and a fixup would then stay without a target. So the message is plain.
+	if sent, err := inPending(repo, sha); err != nil || sent {
+		return plain, err
 	}
 	return "fixup! " + subject + "\n\n" + plain, nil
 }

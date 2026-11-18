@@ -69,6 +69,12 @@ func runRecover(env Env, args []string) error {
 		}
 		return err
 	}
+	// The built tip of an automatic push that has not ended stands on the lost commits. A second push of it
+	// would bring them back, so its record ends here. The rebase gave the recorded commits new IDs. They stay
+	// in the queue, as the list above showed the person.
+	if err := clearPending(repo); err != nil {
+		return err
+	}
 	if _, err := store.Git(repo, "update-ref", acceptedRef, m.fetched); err != nil {
 		return fmt.Errorf("move the accepted history: %w", err)
 	}

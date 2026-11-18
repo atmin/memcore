@@ -40,6 +40,12 @@ func runDrop(env Env, args []string) error {
 	if err := cleanTree(repo, "drop dropped nothing"); err != nil {
 		return err
 	}
+	// The record of an automatic push names commits of the queue by their IDs, and a drop gives them new ones.
+	if _, waits, err := readPending(repo); err != nil {
+		return err
+	} else if waits {
+		return errors.New("an automatic push has not left the review queue yet, so drop dropped nothing: run memcore inbox first, and then memcore push --auto when drop still refuses")
+	}
 	if rebasing(repo) {
 		return errors.New("a rebase is in progress in the memory repo: the person finishes it or aborts it first")
 	}

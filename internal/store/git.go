@@ -38,9 +38,22 @@ func GitIndex(dir, index, stdin string, args ...string) (string, error) {
 	return git(dir, stdin, []string{"GIT_INDEX_FILE=" + index}, args...)
 }
 
+// GitHolding runs the installed git in dir, like Git, and the git process inherits the open file held, as its
+// file descriptor 3. A lock of flock on that file then stays for as long as the git process runs, also when
+// the caller dies first. So another process can tell whether the git process still runs.
+func GitHolding(dir string, held *os.File, args ...string) (string, error) {
+	return run(dir, "", nil, []*os.File{held}, args...)
+}
+
 // git runs the installed git without the variables that point it away from dir, then with env.
 func git(dir, stdin string, env []string, args ...string) (string, error) {
+	return run(dir, stdin, env, nil, args...)
+}
+
+// run runs the installed git as git does, and the git process inherits the open files.
+func run(dir, stdin string, env []string, files []*os.File, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	cmd.ExtraFiles = files
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = dir
 	for _, kv := range os.Environ() {
