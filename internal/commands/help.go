@@ -159,6 +159,34 @@ memcore stats measures it. Then it lists the unpushed commits as the fold at pus
 them, for the review of the person. Each entry counts the fixups that fold into it. When the
 fold drops commits, the list ends with their count.
 `,
+	"sleep": `memcore sleep [--budget <dollars>] [--sessions <n>]
+
+It runs one sleep pass. Only the person runs a pass, at a terminal, because a pass sends
+redacted transcripts to the provider of the agent, and spends the limits of its plan.
+
+A pass reads each transcript of the transcripts branch that it has not judged yet, of a
+session with a logged start. Your agent, headless, lists your corrections in it. Then the
+agent judges each correction against the memories that the session saw:
+
+  capture      no memory held the fact
+  retrieval    a memory held the fact, and the session did not read it
+  application  the session read the memory, and acted against it
+  stale        a memory says otherwise
+  unrelated    the correction concerns no memory
+
+A pass proposes no change and commits nothing. It ends at its budget, or after --sessions
+sessions, whichever comes first. The budget is in dollars at API prices, as the agent
+reports them: on a subscription, a pass spends the limits of the plan, and no money. A
+pass can pass its budget by one call. These settings of the memory repo change the defaults:
+
+  git config memcore.sleepbudget 2       the budget of a pass
+  git config memcore.sleepmodel sonnet   the model of the agent
+  git config memcore.sleepagent claude   the agent, and claude is the only one now
+
+Example:
+
+memcore sleep --sessions 5
+`,
 	"stats": `memcore stats [<path>]
 
 It measures whether memory helps, from the use log and git history,

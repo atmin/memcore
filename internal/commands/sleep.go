@@ -214,6 +214,10 @@ func sleepSessions(repo string, events []Event, records []sleepRecord, now time.
 		if !units[i].Start.Equal(units[j].Start) {
 			return units[i].Start.Before(units[j].Start)
 		}
+		// The files of one session stay together.
+		if units[i].Session != units[j].Session {
+			return units[i].Session < units[j].Session
+		}
 		return units[i].File < units[j].File
 	})
 	return units, nil
