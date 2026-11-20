@@ -20,7 +20,7 @@ The docs use each term below with one meaning only.
 - **hook**: a command that an agent runs at a point of a session, such as its start. `init` adds the hooks of memcore to Claude Code.
 - **sleep pass**: one run of `memcore sleep`. It reads the new transcripts, and records your corrections with a verdict each.
 - **correction**: your words in a session that tell the agent it did wrong, or how to do it differently.
-- **verdict**: what a sleep pass says about a correction: a miss of one kind, a stale memory, or unrelated to memory.
+- **verdict**: what a sleep pass says about a correction: a miss of one kind, a stale memory, unrelated to memory, or before memory. Before memory means that memcore saw the session only after the correction.
 - **miss**: a correction that memory should have prevented. A capture miss means that no memory held the fact. A retrieval miss means that a memory held it, and the session did not read it. An application miss means that the session read the memory, and acted against it.
 - **mark**: a word that you add to a prompt, `#again`, `#wrong` or `#stale`, to say that memory failed you.
 - **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch. An automatic push accepts a commit without a review.

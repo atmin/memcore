@@ -76,7 +76,7 @@ Agents seldom call `verify` themselves, because the write commands run it.
 - **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. A subagent can inherit the session id of its agent. So one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
 - **Friction:** the failed calls of memcore, grouped by command and error. Errors that differ only in a path, a commit or a number fall in one group. The five largest groups show, then the count of the rest.
 - **Marks:** the counts of `#again`, `#wrong` and `#stale`.
-- **Misses:** the capture, retrieval and application misses and the stale memories, from the records of the sleep passes. A correction counts in the week of its own time. Then come the judged sessions, of the sessions with a logged start in the week. A session counts in the week of its first start. A week without a judged session says so.
+- **Misses:** the capture, retrieval and application misses and the stale memories, from the records of the sleep passes. A correction counts in the week of its own time. A correction with the verdict "before memory" or "unrelated" counts as no miss. Then come the judged sessions, of the sessions with a logged start in the week. A session counts in the week of its first start. A week without a judged session says so.
 
 More rules of `stats`:
 - A line without a session still counts for capture, review, friction and marks. A line that does not parse stays out, and `stats` names the count.
@@ -105,7 +105,7 @@ A pass judges each file of the transcripts branch that fits all of these:
 
 A pass works on the oldest session first, in two stages:
 1. **Extract.** The agent lists your corrections in the transcript. A transcript over 300,000 bytes goes in parts. memcore keeps a correction only when its quote matches your text in one line. The record holds the time and the words of that line, and the one-sentence rule of the agent.
-2. **Judge.** The agent compares each correction with the memories on the path of the session, at the commit that the session saw then. It answers that a memory holds the fact, that a memory says otherwise, that no memory holds it, or that it concerns no memory.
+2. **Judge.** The agent compares each correction with the memories on the path of the session. It reads them at the commit of the newest event of the session at or before the correction. It answers that a memory holds the fact, that a memory says otherwise, that no memory holds it, or that it concerns no memory.
 
 memcore turns each answer into a verdict:
 - **capture miss:** no memory held the fact.
@@ -113,6 +113,7 @@ memcore turns each answer into a verdict:
 - **application miss:** the session read that memory before the correction, and acted against it.
 - **stale memory:** a memory says otherwise.
 - **unrelated:** the correction concerns only the task of that session.
+- **before memory:** memcore saw the session only after the correction. So memcore does not know what memory held then, and no agent judges the correction. It counts as no miss.
 
 The use log decides between a retrieval miss and an application miss, not the agent. A line of `orient` is no read.
 
@@ -128,6 +129,8 @@ Three settings in the git configuration of the memory repo change a pass:
 - `memcore.sleepagent`: the agent. `claude` is the default and the only value now.
 
 The headless session of a pass is memcore's own. It runs in an empty folder, with no tools, no settings, no `CLAUDE.md` and no auto-memory, and it leaves no transcript. memcore marks it with `MEMCORE_INTERNAL`. A call of memcore from a marked session logs nothing, and starts no background work.
+
+To judge every session again, delete `.git/memcore/sleep.jsonl` of the memory repo, and run a pass. The pass then reads each transcript again, at its full cost.
 
 `memcore sleep --list` prints the corrections of every record, the newest session first: the verdict, the memory if any, your words, the rule and the reason of the judge. It runs no agent, so an agent may run it.
 
