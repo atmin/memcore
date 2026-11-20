@@ -94,9 +94,12 @@ type week struct {
 	printers         int      // the sessions with a print of orient
 	costs            []cost   // the header, then each level by its title
 	failed           int
-	errors           []ranked // the largest groups of failed calls, largest first, ties by text
-	moreErrors       int      // the groups after them
-	marks            [3]int   // the count of each mark, in the order of marks
+	errors           []ranked      // the largest groups of failed calls, largest first, ties by text
+	moreErrors       int           // the groups after them
+	marks            [3]int        // the count of each mark, in the order of marks
+	misses           verdictCounts // the verdicts of the sleep passes on the corrections of the week
+	judged           int           // the sessions that started in the week, with a record of a sleep pass
+	started          int           // the sessions with a logged start in the week
 }
 
 // runStats prints what the use log and git history say about the use of memory, per week, newest first.
@@ -128,7 +131,13 @@ func runStats(env Env, args []string) error {
 	if len(events) == 0 && broken == 0 {
 		b.WriteString("\nThe use log is empty.\n")
 	}
-	for k, w := range measure(events, facts, now) {
+	records, err := readSleep(repo)
+	if err != nil {
+		return err
+	}
+	weeks := measure(events, facts, now)
+	countMisses(weeks, events, records, now)
+	for k, w := range weeks {
 		writeWeek(&b, w, k)
 	}
 	if len(events) > 0 {
@@ -810,6 +819,10 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "\nThe 7 days to %s:\n", stamp(w.end))
 	if w.lines == 0 {
 		b.WriteString("  No call of memcore.\n")
+		// A session can go on through a week without a call, and the person can correct it there.
+		if w.misses != (verdictCounts{}) {
+			writeMisses(b, w)
+		}
 		return
 	}
 	m, o := w.memories, w.others
@@ -850,6 +863,61 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	fmt.Fprintf(b, "  Friction: %s.\n", plural(w.failed, "failed call"))
 	writeCounts(b, w.errors, w.moreErrors)
 	fmt.Fprintf(b, "  Marks: %d #again, %d #wrong, %d #stale.\n", w.marks[0], w.marks[1], w.marks[2])
+	writeMisses(b, w)
+}
+
+// writeMisses writes the misses of a week, and the sessions of the week that a sleep pass judged.
+func writeMisses(b *strings.Builder, w week) {
+	if w.judged == 0 && w.misses == (verdictCounts{}) {
+		b.WriteString("  Misses: no judged session. memcore sleep judges them.\n")
+		return
+	}
+	fmt.Fprintf(b, "  Misses: %d capture, %d retrieval, %d application, %d stale, in %s of %d.\n",
+		w.misses.capture, w.misses.retrieval, w.misses.application, w.misses.stale, plural(w.judged, "judged session"), w.started)
+}
+
+// countMisses fills the misses of each week from the records of the sleep passes. A correction counts in the
+// week of its own time. A session counts in the week of its first logged start, as started, and as judged when
+// a record holds it.
+func countMisses(weeks []week, events []Event, records []sleepRecord, now time.Time) {
+	at := func(t time.Time) (int, bool) {
+		d := now.Sub(t)
+		if d < 0 {
+			return 0, false
+		}
+		k := int(d / weekLength)
+		return k, k < len(weeks)
+	}
+	starts := map[string]time.Time{}
+	for _, e := range events {
+		if e.Command != "hook" || e.Hook != "session-start" || e.Session == "" {
+			continue
+		}
+		if first, ok := starts[e.Session]; !ok || eventTime(e).Before(first) {
+			starts[e.Session] = eventTime(e)
+		}
+	}
+	judged := map[string]bool{}
+	for _, r := range records {
+		judged[r.Session] = true
+	}
+	for session, start := range starts {
+		if k, ok := at(start); ok {
+			weeks[k].started++
+			if judged[session] {
+				weeks[k].judged++
+			}
+		}
+	}
+	for _, c := range sleepCorrections(records) {
+		t, err := time.Parse(time.RFC3339, c.Time)
+		if err != nil {
+			continue
+		}
+		if k, ok := at(t); ok {
+			weeks[k].misses.add(c.Verdict)
+		}
+	}
 }
 
 // acceptedText says how many memories the pushes accepted, and how many of these memories were mistakes.

@@ -251,6 +251,7 @@ The 7 days to 2026-12-10 10:00 UTC:
   Friction: 1 failed call.
       1  revise: <n> faults, so revise wrote nothing; memcore help revise shows the input
   Marks: 0 #again, 1 #wrong, 0 #stale.
+  Misses: no judged session. memcore sleep judges them.
 
 The 7 days to 2026-12-03 10:00 UTC:
   No call of memcore.
@@ -265,6 +266,7 @@ The 7 days to 2026-11-26 10:00 UTC:
     ~: 200 words, about 267 tokens, 12 lines of 40
   Friction: 0 failed calls.
   Marks: 0 #again, 0 #wrong, 0 #stale.
+  Misses: no judged session. memcore sleep judges them.
 
 Memories with no logged read in 30 days:
   The use log starts on 2026-11-25, so this needs 30 days of it.
@@ -872,6 +874,7 @@ func TestMeasureEndToEnd(t *testing.T) {
 		"  Friction: 1 failed call.\n" +
 		"      1  revise: parse the memory: no frontmatter: the first line is not ---; memcore help revise shows the input\n" +
 		"  Marks: 0 #again, 1 #wrong, 0 #stale.\n" +
+		"  Misses: no judged session. memcore sleep judges them.\n" +
 		"\nMemories with no logged read in 30 days:\n" +
 		"  The use log starts on " + eventTime(all[0]).Format("2006-01-02") + ", so this needs 30 days of it.\n" +
 		"The log holds reads around memcore since " + stamp(eventTime(tool)) + ".\n"
@@ -1021,4 +1024,96 @@ func TestStatsPath(t *testing.T) {
 			t.Errorf("error = %v, want the usage", err)
 		}
 	})
+}
+
+func TestMisses(t *testing.T) {
+	start := func(session string, d time.Duration) Event {
+		return Event{Time: ago(d), Session: session, Command: "hook", Hook: "session-start", Outcome: "ok"}
+	}
+	events := []Event{
+		start("this-week", 2*day),
+		start("this-week", day), // a resume counts no second session
+		start("this-week-unjudged", 3*day),
+		start("last-week", 8*day),
+		start("last-week-no-correction", 9*day),
+		{Time: ago(2 * day), Session: "no-start", Command: "show", Outcome: "ok"},
+		start("oldest", 20*day), // the log starts here, so three weeks print
+	}
+	correction := func(d time.Duration, quote, verdict string) sleepCorrection {
+		return sleepCorrection{Time: ago(d), Quote: quote, Summary: "s", Verdict: verdict}
+	}
+	records := []sleepRecord{
+		{Session: "this-week", File: "claude/p/this-week.jsonl", Blob: "b1", Corrections: []sleepCorrection{
+			correction(2*day, "a", verdictCapture), correction(2*day, "b", verdictCapture), correction(2*day, "c", verdictRetrieval), correction(2*day, "d", verdictUnrelated)}},
+		{Session: "this-week", File: "claude/p/this-week.0123abcd.jsonl", Blob: "b2", Corrections: []sleepCorrection{
+			correction(2*day, "a", verdictCapture), correction(day, "e", verdictStale)}},
+		// A session of last week that went on into this week: its late correction counts in this week.
+		{Session: "last-week", File: "claude/p/last-week.jsonl", Blob: "b3", Corrections: []sleepCorrection{
+			correction(8*day, "f", verdictApplication), correction(6*day, "g", verdictApplication), correction(-day, "after the call", verdictCapture)}},
+		{Session: "last-week-no-correction", File: "claude/p/last-week-no-correction.jsonl", Blob: "b4", Corrections: []sleepCorrection{}},
+		{Session: "no-start", File: "claude/p/no-start.jsonl", Blob: "b5", Corrections: []sleepCorrection{correction(30*day, "before the weeks", verdictCapture)}},
+	}
+	weeks := measure(events, nil, statsNow)
+	if len(weeks) != 3 {
+		t.Fatalf("%d weeks, want 3", len(weeks))
+	}
+	countMisses(weeks, events, records, statsNow)
+	type counted struct {
+		misses          verdictCounts
+		judged, started int
+	}
+	want := []counted{
+		{verdictCounts{capture: 2, retrieval: 1, application: 1, stale: 1, unrelated: 1}, 1, 2},
+		{verdictCounts{application: 1}, 2, 2},
+		{verdictCounts{}, 0, 1},
+	}
+	for k, w := range weeks {
+		if got := (counted{w.misses, w.judged, w.started}); got != want[k] {
+			t.Errorf("week %d: got %+v, want %+v", k, got, want[k])
+		}
+	}
+	// A week without a call prints its misses when it has some, and no line of misses otherwise.
+	quiet := week{end: statsNow}
+	var q strings.Builder
+	writeWeek(&q, quiet, 0)
+	if strings.Contains(q.String(), "Misses") {
+		t.Errorf("a week without a call and without a miss:\n%s", q.String())
+	}
+	quiet.misses.add(verdictStale)
+	q.Reset()
+	writeWeek(&q, quiet, 0)
+	if !strings.Contains(q.String(), "  No call of memcore.\n  Misses: 0 capture, 0 retrieval, 0 application, 1 stale, in 0 judged sessions of 0.\n") {
+		t.Errorf("a week without a call, with a miss:\n%s", q.String())
+	}
+	var b strings.Builder
+	for k, w := range weeks {
+		writeWeek(&b, w, k)
+	}
+	for _, line := range []string{
+		"  Misses: 2 capture, 1 retrieval, 1 application, 1 stale, in 1 judged session of 2.\n",
+		"  Misses: 0 capture, 0 retrieval, 1 application, 0 stale, in 2 judged sessions of 2.\n",
+		"  Misses: no judged session. memcore sleep judges them.\n",
+	} {
+		if strings.Count(b.String(), line) != 1 {
+			t.Errorf("the weeks lack %q once:\n%s", line, b.String())
+		}
+	}
+}
+
+func TestStatsReadsTheRecordsOfSleep(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	now := time.Now().UTC()
+	e := Event{Time: now.Add(-time.Hour).Format(time.RFC3339), Session: "s1", Command: "hook", Hook: "session-start", Outcome: "ok"}
+	if err := appendEvent(repo, &e); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendSleep(repo, sleepRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b1", Corrections: []sleepCorrection{
+		{Time: now.Add(-30 * time.Minute).Format(time.RFC3339), Quote: "q", Summary: "s", Verdict: verdictCapture}}}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, home, "", "stats")
+	if err != nil || !strings.Contains(out, "  Misses: 1 capture, 0 retrieval, 0 application, 0 stale, in 1 judged session of ") {
+		t.Errorf("stats: %v\n%s", err, out)
+	}
 }
