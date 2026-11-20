@@ -173,6 +173,7 @@ agent judges each correction against the memories that the session saw:
   application  the session read the memory, and acted against it
   stale        a memory says otherwise
   unrelated    the correction concerns no memory
+  before       memcore saw the session only after the correction, so no agent judges it
 
 A pass proposes no change and commits nothing. It ends at its budget, or after --sessions
 sessions, whichever comes first. The budget is in dollars at API prices, as the agent

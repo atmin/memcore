@@ -172,10 +172,10 @@ func TestSeenCommit(t *testing.T) {
 		{"the newest event before the correction", "s1", 15, "c2"},
 		{"an event at the time of the correction", "s1", 10, "c2"},
 		{"after every event", "s1", 60, "c3"},
-		{"only later events", "s1", -5, "c1"},
+		{"only later events", "s1", -5, ""},
 		{"another session", "s2", 15, "other"},
 		{"no event of the session", "s3", 15, ""},
-		{"only later events, with a start", "s4", 0, "the start"},
+		{"only later events, with a start", "s4", 0, ""},
 		{"a show before the start", "s4", 6, "a show before the start"},
 	}
 	for _, c := range cases {

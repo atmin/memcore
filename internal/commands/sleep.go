@@ -247,36 +247,27 @@ const (
 	verdictApplication = "application" // the session read the memory, and acted against it
 	verdictStale       = "stale"       // a memory says otherwise
 	verdictUnrelated   = "unrelated"   // the correction concerns no memory
+	verdictBefore      = "before"      // memcore saw the session only after the correction, so no pass judges it
 )
 
 // seenCommit returns the commit of the memory repo that a session saw at a time: the commit of its newest
-// event at or before that time. When no event is that old, it returns the commit of the first logged start of
-// the session, or of its oldest event when the log holds no start. It returns "" for a session with no commit
-// in the use log.
+// event at or before that time. It returns "" when the use log holds no such event with a commit. Then memcore
+// saw the session only after that time, and no later commit says what memory held at the time.
 func seenCommit(events []Event, session string, at time.Time) string {
-	var before, start, oldest *Event
+	var before *Event
 	for i := range events {
 		e := &events[i]
 		if e.Session != session || e.Commit == "" {
 			continue
 		}
-		t := eventTime(*e)
-		if oldest == nil || t.Before(eventTime(*oldest)) {
-			oldest = e
-		}
-		if e.Command == "hook" && e.Hook == "session-start" && (start == nil || t.Before(eventTime(*start))) {
-			start = e
-		}
-		if !t.After(at) && (before == nil || !t.Before(eventTime(*before))) {
+		if t := eventTime(*e); !t.After(at) && (before == nil || !t.Before(eventTime(*before))) {
 			before = e
 		}
 	}
-	for _, e := range []*Event{before, start, oldest} {
-		if e != nil {
-			return e.Commit
-		}
+	if before == nil {
+		return ""
 	}
-	return ""
+	return before.Commit
 }
 
 // seenMemories returns the memories on the path of a level at a commit: those of the level and of each level

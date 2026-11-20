@@ -138,6 +138,52 @@ func TestSleepPass(t *testing.T) {
 		}
 	})
 
+	t.Run("a correction before the first event of its session is before memory", func(t *testing.T) {
+		dev, repo := sleepFixture(t)
+		commit := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+		early := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second)
+		// memcore saw the session first between its two corrections.
+		transcriptT(t, repo, "claude/p1/s-early.jsonl", transcriptText("s-early", early, "you|Never push without asking.", "you|Use small commits."))
+		start := startEvent("s-early", early.Add(30*time.Second), commit)
+		if err := appendEvent(repo, &start); err != nil {
+			t.Fatal(err)
+		}
+		var judged []string
+		fakeAgent(t, func(_ int, req thinking.Request) (thinking.Reply, error) {
+			out := `{"corrections":[]}`
+			if strings.Contains(req.Input, `"session":"s-early"`) {
+				out = `{"corrections":[{"time":"","quote":"Never push without asking.","summary":"Ask before a push."},{"time":"","quote":"Use small commits.","summary":"Commit small."}]}`
+			}
+			return thinking.Reply{Output: []byte(out)}, nil
+		}, func(req thinking.Request) (thinking.Reply, error) {
+			judged = append(judged, req.Input)
+			return thinking.Reply{Output: []byte(`{"findings":[{"index":0,"kind":"none","reason":"No memory holds it."}]}`)}, nil
+		})
+		out, err := run(t, dev, "", "sleep")
+		if err != nil {
+			t.Fatalf("sleep: %v\n%s", err, out)
+		}
+		for _, want := range []string{
+			" ~/dev s-early: 2 corrections: 1 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated, 1 before memory.\n",
+			"Judged 3 sessions with 2 corrections: 1 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated, 1 before memory.\n",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the output lacks %q:\n%s", want, out)
+			}
+		}
+		if len(judged) != 1 || strings.Contains(judged[0], "Never push without asking.") || !strings.Contains(judged[0], "Use small commits.") {
+			t.Errorf("the judge got %q, want one call with only the later correction", judged)
+		}
+		records, err := readSleep(repo)
+		if err != nil || len(records) != 3 || records[0].Session != "s-early" {
+			t.Fatalf("records = %+v, %v; want s-early first of 3", records, err)
+		}
+		c := records[0].Corrections
+		if len(c) != 2 || c[0].Verdict != verdictBefore || c[0].Path != "" || c[0].Reason != "" || c[1].Verdict != verdictCapture {
+			t.Errorf("corrections = %+v, want before memory, then a capture miss", c)
+		}
+	})
+
 	t.Run("a read before the correction is an application miss", func(t *testing.T) {
 		dev, repo := sleepFixture(t)
 		at := time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Second)
@@ -331,17 +377,22 @@ func TestSleepList(t *testing.T) {
 	held := sleepCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md", Reason: "The memory says so."}
 	small := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture, Reason: "No memory holds it."}
 	later := sleepCorrection{Time: "2026-11-19T09:00:00Z", Quote: "Not that file.", Summary: "A detail.", Verdict: verdictUnrelated}
+	early := sleepCorrection{Time: "2026-11-19T07:30:00Z", Quote: "No tabs here.", Summary: "Use spaces.", Verdict: verdictBefore}
 	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{small, held}})
 	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.0123abcd.jsonl", Blob: "b2", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{held}})
 	write(sleepRecord{Session: "s-empty", File: "claude/p/s-empty.jsonl", Blob: "b3", Level: "~", Start: "2026-11-18T12:00:00Z", Corrections: []sleepCorrection{}})
-	write(sleepRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []sleepCorrection{later}})
+	write(sleepRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []sleepCorrection{later, early}})
 
 	calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
 	out, err = run(t, dev, "", "sleep", "--list")
 	if err != nil {
 		t.Fatalf("sleep --list: %v\n%s", err, out)
 	}
-	want := `3 corrections in 3 judged sessions: 1 capture, 1 retrieval, 0 application, 0 stale, 1 unrelated.
+	want := `4 corrections in 3 judged sessions: 1 capture, 1 retrieval, 0 application, 0 stale, 1 unrelated, 1 before memory.
+
+2026-11-19 07:30 ~ s-later: before memory
+  You: No tabs here.
+  Rule: Use spaces.
 
 2026-11-19 09:00 ~ s-later: unrelated to memory
   You: Not that file.

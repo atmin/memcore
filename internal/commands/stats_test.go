@@ -1044,7 +1044,8 @@ func TestMisses(t *testing.T) {
 	}
 	records := []sleepRecord{
 		{Session: "this-week", File: "claude/p/this-week.jsonl", Blob: "b1", Corrections: []sleepCorrection{
-			correction(2*day, "a", verdictCapture), correction(2*day, "b", verdictCapture), correction(2*day, "c", verdictRetrieval), correction(2*day, "d", verdictUnrelated)}},
+			correction(2*day, "a", verdictCapture), correction(2*day, "b", verdictCapture), correction(2*day, "c", verdictRetrieval), correction(2*day, "d", verdictUnrelated),
+			correction(2*day, "before memcore saw the session", verdictBefore)}},
 		{Session: "this-week", File: "claude/p/this-week.0123abcd.jsonl", Blob: "b2", Corrections: []sleepCorrection{
 			correction(2*day, "a", verdictCapture), correction(day, "e", verdictStale)}},
 		// A session of last week that went on into this week: its late correction counts in this week.
@@ -1063,7 +1064,7 @@ func TestMisses(t *testing.T) {
 		judged, started int
 	}
 	want := []counted{
-		{verdictCounts{capture: 2, retrieval: 1, application: 1, stale: 1, unrelated: 1}, 1, 2},
+		{verdictCounts{capture: 2, retrieval: 1, application: 1, stale: 1, unrelated: 1, before: 1}, 1, 2},
 		{verdictCounts{application: 1}, 2, 2},
 		{verdictCounts{}, 0, 1},
 	}

@@ -53,6 +53,18 @@ func TestHelp(t *testing.T) {
 		}
 	})
 
+	t.Run("sleep names each verdict", func(t *testing.T) {
+		help, err := run(t, home, "", "help", "sleep")
+		if err != nil {
+			t.Fatalf("help sleep: %v\n%s", err, help)
+		}
+		for _, verdict := range []string{"capture", "retrieval", "application", "stale", "unrelated", "before"} {
+			if !strings.Contains(help, "\n  "+verdict+" ") {
+				t.Errorf("the help of sleep does not name the verdict %s:\n%s", verdict, help)
+			}
+		}
+	})
+
 	t.Run("--help", func(t *testing.T) {
 		help, _ := run(t, home, "", "help", "remember")
 		for _, flag := range []string{"--help", "-h"} {

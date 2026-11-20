@@ -261,14 +261,19 @@ func (p *pass) judge(u sleepUnit) error {
 	}
 	result := make([]sleepCorrection, len(found))
 	for _, commit := range commits {
+		if commit == "" {
+			// memcore saw the session only after these corrections, so it does not know what memory held then.
+			for _, i := range groups[commit] {
+				result[i] = sleepCorrection{Time: found[i].Time, Quote: found[i].Quote, Summary: found[i].Summary, Verdict: verdictBefore}
+			}
+			continue
+		}
 		if p.budget-p.cost <= 0 {
 			return thinking.ErrBudget
 		}
-		var memories []thinking.Memory
-		if commit != "" {
-			if memories, err = seenMemories(p.repo, commit, u.Level); err != nil {
-				return err
-			}
+		memories, err := seenMemories(p.repo, commit, u.Level)
+		if err != nil {
+			return err
 		}
 		var group []thinking.Correction
 		for _, i := range groups[commit] {
@@ -310,7 +315,7 @@ func (p *pass) judge(u sleepUnit) error {
 }
 
 // verdictCounts counts the verdicts of corrections, by kind.
-type verdictCounts struct{ capture, retrieval, application, stale, unrelated int }
+type verdictCounts struct{ capture, retrieval, application, stale, unrelated, before int }
 
 func (c *verdictCounts) add(verdict string) {
 	switch verdict {
@@ -322,14 +327,21 @@ func (c *verdictCounts) add(verdict string) {
 		c.application++
 	case verdictStale:
 		c.stale++
+	case verdictBefore:
+		c.before++
 	default:
 		c.unrelated++
 	}
 }
 
-// text names the misses by kind, then the corrections that concern no memory.
+// text names the misses by kind, then the corrections that concern no memory. It names the corrections from
+// before memcore saw their session only when there are some.
 func (c verdictCounts) text() string {
-	return fmt.Sprintf("%d capture, %d retrieval, %d application, %d stale, %d unrelated", c.capture, c.retrieval, c.application, c.stale, c.unrelated)
+	text := fmt.Sprintf("%d capture, %d retrieval, %d application, %d stale, %d unrelated", c.capture, c.retrieval, c.application, c.stale, c.unrelated)
+	if c.before > 0 {
+		text += fmt.Sprintf(", %d before memory", c.before)
+	}
+	return text
 }
 
 // dollars prints an amount with two decimals.
@@ -355,6 +367,7 @@ var verdictNames = map[string]string{
 	verdictApplication: "application miss",
 	verdictStale:       "stale memory",
 	verdictUnrelated:   "unrelated to memory",
+	verdictBefore:      "before memory",
 }
 
 // listSleep prints the corrections of the records, the newest session first, and each session in the order of
