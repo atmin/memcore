@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/atmin/memcore/internal/store"
+	"github.com/atmin/memcore/internal/thinking"
 )
 
 // settled is how old the last line of a transcript must be before a sleep pass judges it.
@@ -231,4 +234,110 @@ func lastLineTime(content string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// The verdicts of a sleep pass about one correction.
+const (
+	verdictCapture     = "capture"     // no memory held the fact
+	verdictRetrieval   = "retrieval"   // a memory held the fact, and the session did not read it
+	verdictApplication = "application" // the session read the memory, and acted against it
+	verdictStale       = "stale"       // a memory says otherwise
+	verdictUnrelated   = "unrelated"   // the correction concerns no memory
+)
+
+// seenCommit returns the commit of the memory repo that a session saw at a time: the commit of its newest
+// event at or before that time. When no event is that old, it returns the commit of the first logged start of
+// the session, or of its oldest event when the log holds no start. It returns "" for a session with no commit
+// in the use log.
+func seenCommit(events []Event, session string, at time.Time) string {
+	var before, start, oldest *Event
+	for i := range events {
+		e := &events[i]
+		if e.Session != session || e.Commit == "" {
+			continue
+		}
+		t := eventTime(*e)
+		if oldest == nil || t.Before(eventTime(*oldest)) {
+			oldest = e
+		}
+		if e.Command == "hook" && e.Hook == "session-start" && (start == nil || t.Before(eventTime(*start))) {
+			start = e
+		}
+		if !t.After(at) && (before == nil || !t.Before(eventTime(*before))) {
+			before = e
+		}
+	}
+	for _, e := range []*Event{before, start, oldest} {
+		if e != nil {
+			return e.Commit
+		}
+	}
+	return ""
+}
+
+// seenMemories returns the memories on the path of a level at a commit: those of the level and of each level
+// above it, up to the root. The level is as the use log holds it, ~ or ~/<level>.
+func seenMemories(repo, commit, level string) ([]thinking.Memory, error) {
+	rel := strings.TrimPrefix(strings.TrimPrefix(level, "~"), "/")
+	var memories []thinking.Memory
+	for _, l := range store.Path(rel) {
+		folder := path.Join(store.Folder(l), "memories")
+		tree, err := store.Git(repo, "ls-tree", "-r", "-z", commit, "--", folder)
+		if err != nil {
+			return nil, fmt.Errorf("list the memories of %s at %s: %w", title(l), short(commit), err)
+		}
+		for _, entry := range strings.Split(strings.TrimRight(tree, "\x00"), "\x00") {
+			meta, p, ok := strings.Cut(entry, "\t")
+			f := strings.Fields(meta)
+			if !ok || len(f) != 3 || f[1] != "blob" || !store.IsMemory(p) {
+				continue
+			}
+			text, err := store.Git(repo, "cat-file", "blob", f[2])
+			if err != nil {
+				return nil, fmt.Errorf("read %s at %s: %w", p, short(commit), err)
+			}
+			m := thinking.Memory{Path: p, Body: text}
+			if fm, body, err := store.ParseFrontmatter(strings.NewReader(text)); err == nil {
+				m.Description, m.Body = fm.Values["description"], strings.TrimSpace(body)
+			}
+			memories = append(memories, m)
+		}
+	}
+	return memories, nil
+}
+
+// verdicts turns the findings of the judge into verdicts, one for each correction. The use log decides between
+// a retrieval miss and an application miss: the session read the memory at or before the time of the correction,
+// or it did not.
+func verdicts(corrections []thinking.Correction, findings []thinking.Finding, events []Event, session string) []sleepCorrection {
+	out := make([]sleepCorrection, len(corrections))
+	for i, c := range corrections {
+		f := findings[i]
+		v := sleepCorrection{Time: c.Time, Quote: c.Quote, Summary: c.Summary, Reason: f.Reason}
+		switch f.Kind {
+		case thinking.None:
+			v.Verdict = verdictCapture
+		case thinking.Contradicts:
+			v.Verdict, v.Path = verdictStale, f.Path
+		case thinking.Holds:
+			v.Verdict, v.Path = verdictRetrieval, f.Path
+			if at, err := time.Parse(time.RFC3339, c.Time); err == nil && readBefore(events, session, f.Path, at) {
+				v.Verdict = verdictApplication
+			}
+		default:
+			v.Verdict = verdictUnrelated
+		}
+		out[i] = v
+	}
+	return out
+}
+
+// readBefore reports whether a session read a document at or before a time.
+func readBefore(events []Event, session, p string, at time.Time) bool {
+	for _, e := range events {
+		if e.Session == session && !eventTime(e).After(at) && slices.Contains(readsOf(e), p) {
+			return true
+		}
+	}
+	return false
 }
