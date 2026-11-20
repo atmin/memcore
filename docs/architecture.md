@@ -8,9 +8,15 @@ memcore is one Go executable. It runs the installed git, so it ships no git of i
 2. **Store.** The memory repo, its indexes and the transcripts branch. memcore changes the store only through the installed git.
 3. **Readers.** One adapter, for the JSONL of Claude Code. It converts that format into one trimmed conversation format. The readers also read the auto-memory of Claude Code, and find the directory behind each of its project folders.
 4. **Guards.** Redaction, `verify`, the write lock, the confirmation behind `push`, and the check of the files that an agent pushes.
-5. **UI.** The server and the page of `memcore ui`. It imports nothing of the commands: they give it the data, and run its actions. The page embeds six vendored files, pinned by SHA-256: marked, DOMPurify, pele, Preact, the hooks of Preact and htm. Preact renders Review, Browse and the finder, with no build step. The window is a native window of glaze, which reaches AppKit and WebKitGTK through purego, with no cgo. Its loop runs on the main thread, which `main` locks, and the server runs beside it. The page talks to the server over HTTP only.
+5. **Thinking.** The work that needs judgment: a sleep pass extracts your corrections from a transcript, and judges each one. memcore ships no model. It runs your agent headless for this work, with no tools, no settings and no transcript. Only one file knows the agent, Claude Code, so another agent is one more file. The commands give thinking the text, and thinking imports nothing of them.
+6. **UI.** The server and the page of `memcore ui`. It imports nothing of the commands: they give it the data, and run its actions. The page embeds six vendored files, pinned by SHA-256: marked, DOMPurify, pele, Preact, the hooks of Preact and htm. Preact renders Review, Browse and the finder, with no build step. The window is a native window of glaze, which reaches AppKit and WebKitGTK through purego, with no cgo. Its loop runs on the main thread, which `main` locks, and the server runs beside it. The page talks to the server over HTTP only.
 
 Redaction stays local, with patterns and entropy.
+
+Thinking has three costs:
+- A sleep pass spends the limits of the plan of your agent, or its tokens.
+- Redacted text leaves your machine, for the provider of your agent.
+- With several agents, one provider can see the sessions of another.
 
 ## Git
 
@@ -18,7 +24,7 @@ memcore runs the installed git. It needs rebase with autosquash, git plumbing, a
 
 ## Concurrency
 
-Several sessions and worktrees can call memcore at the same time. Reads take no lock. Each write takes one short lock on the memory repo. `inbox` and `push` fetch at once, and rebase the review queue onto the fetched tip under the write lock. The queue of the window fetches the same way, so it takes the write lock too.
+Several sessions and worktrees can call memcore at the same time. Reads take no lock. A sleep pass writes only its records, so it takes no write lock, and one lock of its own keeps a second pass out. Each write takes one short lock on the memory repo. `inbox` and `push` fetch at once, and rebase the review queue onto the fetched tip under the write lock. The queue of the window fetches the same way, so it takes the write lock too.
 
 ## Local state
 
@@ -34,9 +40,10 @@ Several sessions and worktrees can call memcore at the same time. Reads take no 
   - the newest date of each chain of the review queue, `changed.json`, for the automatic push;
   - the record of an automatic push whose commits may still be in the queue, `autopush.pending`;
   - the lock of a running automatic push, `autopush.pushing`, and the mark of its last start, `autopush.started`;
+  - the records of the sleep passes, `sleep.jsonl`, with one line for each judged file of the transcripts branch, and the lock of a running pass, `sleep.lock`;
   - the state of the server of the window, `ui.json`, with its port and its token at mode `0600`, and its lock, `ui.lock`.
 - The tool hooks of Claude Code run after every call of `Bash`, `Read` and `Grep`. So a tool call that reads no document logs no line, and starts no git process.
-- memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. memcore never pushes these refs.
+- memcore keeps each commit that the use log names under `refs/memcore/seen/`. So no fold and no garbage collection loses a version that a session saw. A sleep pass reads the memories at these commits. memcore never pushes these refs.
 
 ## Release
 

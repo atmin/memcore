@@ -12,7 +12,7 @@ Read [README.md](README.md) first. It indexes the design docs and the skills.
 ## Code
 
 - memcore is one Go module, and it builds with `CGO_ENABLED=0`.
-- `cmd/memcore` holds the entry point. `internal/` holds one package for each part in [Architecture](docs/architecture.md): `commands`, `store`, `readers`, `guards` and `ui`.
+- `cmd/memcore` holds the entry point. `internal/` holds one package for each part in [Architecture](docs/architecture.md): `commands`, `store`, `readers`, `guards`, `thinking` and `ui`.
 - Use the standard library first. A new dependency is an open question in the plan.
 - memcore runs the installed git, and never links a git library.
 - Wrap each error with its context: `fmt.Errorf("<what failed>: %w", err)`.
@@ -21,7 +21,7 @@ Read [README.md](README.md) first. It indexes the design docs and the skills.
 
 - Write the tests of a step before its code. Use table-driven tests where cases repeat.
 - A test that needs git runs the installed git in a temporary repo from `t.TempDir()`.
-- No test calls a real agent. Tests replace the headless agent with a fake.
+- No test calls a real agent. Tests replace the headless agent, `thinking.Run`, with a fake.
 - Checks with a real agent live in `scripts/`, and run by hand. `go test` never runs them.
 - The tests of `internal/commands` set the process environment, so `t.Parallel()` cannot run them. `TestMain` runs each top-level test in its own process instead, `MEMCORE_TEST_PROCS` at a time. `MEMCORE_TEST_PROCS=1` runs them all in one process.
 - `newMemory` copies a memory repo that `TestMain` built once with `init`. A test that changes the environment before `newMemory` gets a real `init`.
