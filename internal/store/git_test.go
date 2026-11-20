@@ -1,6 +1,7 @@
 package store
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,5 +122,33 @@ func TestGitHolding(t *testing.T) {
 	}
 	if _, err := Git(dir, probe...); err == nil {
 		t.Error("Git: the git process inherited a file")
+	}
+}
+
+// TestNoTestRunsGitDirectly keeps every test on Git, which drops the repo variables.
+// A rebase exports GIT_DIR to its commands, and a direct git call in a test would then write to the repo of
+// the rebase.
+func TestNoTestRunsGitDirectly(t *testing.T) {
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "exec.Command"+`("git"`) || strings.Contains(line, "exec.CommandContext(ctx, "+`"git"`) {
+				t.Errorf("%s:%d runs git directly: use store.Git, which drops the repo variables", path, i+1)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

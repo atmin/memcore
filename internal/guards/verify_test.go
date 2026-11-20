@@ -2,10 +2,11 @@ package guards
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/atmin/memcore/internal/store"
 )
 
 func writeT(t *testing.T, dir, rel, content string) {
@@ -266,12 +267,12 @@ func TestFaultsWith(t *testing.T) {
 }
 
 // gitT runs the installed git in dir, as a test author.
+// It runs git through store.Git, which drops the variables that point git at another repo.
 func gitT(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"}, args...)...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+	args = append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"}, args...)
+	if _, err := store.Git(dir, args...); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -372,4 +373,29 @@ func TestVerifyGoneNames(t *testing.T) {
 		}
 		check(t, "warnings", r.Warnings, []string{"y.md:6: the text names gone-fact"})
 	})
+}
+
+func TestGitTIgnoresRepoVariables(t *testing.T) {
+	other := t.TempDir()
+	gitT(t, other, "init", "-q", "-b", "main")
+	// A rebase exports these variables to the commands that it runs.
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+
+	repo := t.TempDir()
+	gitT(t, repo, "init", "-q", "-b", "main")
+	writeT(t, repo, "a.md", "A fact.\n")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "add")
+
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		t.Errorf("gitT made no repo in its folder: %v", err)
+	}
+	out, err := store.Git(other, "rev-list", "--all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "" {
+		t.Errorf("gitT committed to the repo of GIT_DIR: %s", out)
+	}
 }
