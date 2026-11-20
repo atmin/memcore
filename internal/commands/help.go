@@ -159,7 +159,7 @@ memcore stats measures it. Then it lists the unpushed commits as the fold at pus
 them, for the review of the person. Each entry counts the fixups that fold into it. When the
 fold drops commits, the list ends with their count.
 `,
-	"sleep": `memcore sleep [--budget <dollars>] [--sessions <n>]
+	"sleep": `memcore sleep [--budget <dollars>] [--sessions <n>] | --list
 
 It runs one sleep pass. Only the person runs a pass, at a terminal, because a pass sends
 redacted transcripts to the provider of the agent, and spends the limits of its plan.
@@ -183,9 +183,13 @@ pass can pass its budget by one call. These settings of the memory repo change t
   git config memcore.sleepmodel sonnet   the model of the agent
   git config memcore.sleepagent claude   the agent, and claude is the only one now
 
+--list runs no pass. It prints each correction that the passes recorded, the newest
+session first, with its verdict, your words, the rule and the reason of the judge. An
+agent may run it.
+
 Example:
 
-memcore sleep --sessions 5
+memcore sleep --list
 `,
 	"stats": `memcore stats [<path>]
 

@@ -314,3 +314,61 @@ func TestSleepPass(t *testing.T) {
 		}
 	})
 }
+
+func TestSleepList(t *testing.T) {
+	dev, repo := sleepFixture(t)
+	t.Setenv("CLAUDECODE", "1") // an agent may list
+	out, err := run(t, dev, "", "sleep", "--list")
+	if err != nil || out != "No sleep pass has judged a session yet. The person runs one with memcore sleep.\n" {
+		t.Fatalf("without records: %v\n%s", err, out)
+	}
+	write := func(r sleepRecord) {
+		t.Helper()
+		if err := appendSleep(repo, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := sleepCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md", Reason: "The memory says so."}
+	small := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture, Reason: "No memory holds it."}
+	later := sleepCorrection{Time: "2026-11-19T09:00:00Z", Quote: "Not that file.", Summary: "A detail.", Verdict: verdictUnrelated}
+	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{small, held}})
+	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.0123abcd.jsonl", Blob: "b2", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{held}})
+	write(sleepRecord{Session: "s-empty", File: "claude/p/s-empty.jsonl", Blob: "b3", Level: "~", Start: "2026-11-18T12:00:00Z", Corrections: []sleepCorrection{}})
+	write(sleepRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []sleepCorrection{later}})
+
+	calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
+	out, err = run(t, dev, "", "sleep", "--list")
+	if err != nil {
+		t.Fatalf("sleep --list: %v\n%s", err, out)
+	}
+	want := `3 corrections in 3 judged sessions: 1 capture, 1 retrieval, 0 application, 0 stale, 1 unrelated.
+
+2026-11-19 09:00 ~ s-later: unrelated to memory
+  You: Not that file.
+  Rule: A detail.
+
+2026-11-18 10:02 ~/dev s-first: retrieval miss, dev/memories/ask-before-push.md
+  You: Never push without asking.
+  Rule: Ask before a push.
+  Why: The memory says so.
+
+2026-11-18 10:05 ~/dev s-first: capture miss
+  You: Use small commits.
+  Rule: Commit small.
+  Why: No memory holds it.
+`
+	if out != want {
+		t.Errorf("sleep --list:\n got %s\nwant %s", out, want)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("--list called the agent %d times", len(*calls))
+	}
+	if records, _ := readSleep(repo); len(records) != 4 {
+		t.Errorf("--list changed the records: %d, want 4", len(records))
+	}
+	for _, args := range [][]string{{"--list", "--budget", "1"}, {"--list", "--sessions", "2"}, {"--list", "--budget="}, {"--sessions=", "--list"}} {
+		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep --list") {
+			t.Errorf("sleep %v: %v, want a usage error", args, err)
+		}
+	}
+}

@@ -95,12 +95,21 @@ func runSleep(env Env, args []string) error {
 	flags.SetOutput(io.Discard)
 	budgetFlag := flags.String("budget", "", "the budget of the pass, in dollars at API prices")
 	sessionsFlag := flags.String("sessions", "", "the most sessions that the pass judges")
+	list := flags.Bool("list", false, "list the corrections of the records, and run no pass")
 	pos, err := parseInterleaved(flags, args)
 	if err != nil {
 		return usageErr(err.Error())
 	}
 	if len(pos) != 0 {
-		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>]")
+		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>] | --list")
+	}
+	if *list {
+		given := false // also an empty value, as in --budget=
+		flags.Visit(func(f *flag.Flag) { given = given || f.Name == "budget" || f.Name == "sessions" })
+		if given {
+			return usageErr("usage: memcore sleep --list takes no --budget and no --sessions, because it runs no pass")
+		}
+		return listSleep(env)
 	}
 	limit := 0 // no limit
 	if *sessionsFlag != "" {
@@ -337,4 +346,71 @@ func waits(n int) string {
 		return "1 session waits"
 	}
 	return fmt.Sprintf("%d sessions wait", n)
+}
+
+// verdictNames names each verdict for a reader.
+var verdictNames = map[string]string{
+	verdictCapture:     "capture miss",
+	verdictRetrieval:   "retrieval miss",
+	verdictApplication: "application miss",
+	verdictStale:       "stale memory",
+	verdictUnrelated:   "unrelated to memory",
+}
+
+// listSleep prints the corrections of the records, the newest session first, and each session in the order of
+// its corrections. It runs no agent and writes nothing, so an agent may run it too.
+func listSleep(env Env) error {
+	repo, err := openRepo()
+	if err != nil {
+		return err
+	}
+	records, err := readSleep(repo)
+	if err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		fmt.Fprintln(env.Out, "No sleep pass has judged a session yet. The person runs one with memcore sleep.")
+		return nil
+	}
+	corrections := sleepCorrections(records)
+	sort.SliceStable(corrections, func(i, j int) bool {
+		a, b := corrections[i], corrections[j]
+		if a.Record.Start != b.Record.Start {
+			return a.Record.Start > b.Record.Start
+		}
+		if a.Record.Session != b.Record.Session {
+			return a.Record.Session < b.Record.Session
+		}
+		return a.Time < b.Time
+	})
+	sessions := map[string]bool{}
+	for _, r := range records {
+		sessions[r.Session] = true
+	}
+	var counts verdictCounts
+	for _, c := range corrections {
+		counts.add(c.Verdict)
+	}
+	fmt.Fprintf(env.Out, "%s in %s: %s.\n", plural(len(corrections), "correction"), plural(len(sessions), "judged session"), counts.text())
+	for _, c := range corrections {
+		when := c.Time
+		if t, err := time.Parse(time.RFC3339, c.Time); err == nil {
+			when = t.UTC().Format("2006-01-02 15:04")
+		}
+		name := verdictNames[c.Verdict]
+		if name == "" {
+			name = c.Verdict
+		}
+		head := fmt.Sprintf("\n%s %s %s: %s", when, c.Record.Level, short(c.Record.Session), name)
+		if c.Path != "" {
+			head += ", " + c.Path
+		}
+		fmt.Fprintln(env.Out, head)
+		fmt.Fprintf(env.Out, "  You: %s\n", strings.Join(strings.Fields(c.Quote), " "))
+		fmt.Fprintf(env.Out, "  Rule: %s\n", c.Summary)
+		if c.Reason != "" {
+			fmt.Fprintf(env.Out, "  Why: %s\n", c.Reason)
+		}
+	}
+	return nil
 }
