@@ -45,6 +45,13 @@ The person may ask for more fixes. Make them as fixup commits.
 
 Push only when the person says so. Before the first push, fold the fixups into their commits with `git rebase --autosquash <base>`. Never rewrite pushed history, and never push with `--force`. After the first push, a fix is a plain commit.
 
+Check the fold:
+1. Compare `git rev-parse 'HEAD^{tree}'` before and after the fold. The fold must not change the tree.
+2. When the trees are equal, the full checks of the final commit still hold. Do not run them again.
+3. Build each folded commit, without its tests, in a throwaway worktree.
+
+Never run a check with `git rebase --exec`. A rebase exports `GIT_DIR` to its commands, and a git call in a test then writes to the repo of the rebase.
+
 ## Resume
 
 `git worktree list` shows the worktree. Walk `git log --oneline <base>..`, and continue from the first step whose review or answers are missing.
