@@ -228,3 +228,56 @@ func TestKeptRefs(t *testing.T) {
 		t.Errorf("the remote holds kept refs: %s", out)
 	}
 }
+
+func TestInternalSessionLogsNothing(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	if out, err := run(t, dev, memoryText("small-commits", "Read before you commit: one change per commit.", "Commit one change."), "remember"); err != nil {
+		t.Fatalf("remember: %v\n%s", err, out)
+	}
+	before := len(events(t, repo))
+	started := 0
+	prev := startBackground
+	t.Cleanup(func() { startBackground = prev })
+	startBackground = func(string, ...string) error { started++; return nil }
+	// A snapshot is due, so a call outside a sleep pass would start one.
+	os.Remove(filepath.Join(store.StateDir(repo), "snapshot.json"))
+	os.Remove(filepath.Join(store.StateDir(repo), "snapshot.started"))
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("MEMCORE_INTERNAL", "1")
+	out, err := run(t, dev, "", "show", "dev/memories/small-commits.md")
+	if err != nil || !strings.Contains(out, "Commit one change.") {
+		t.Fatalf("show: %v\n%s", err, out)
+	}
+	if _, err := run(t, dev, "", "show", "dev/memories/absent.md"); err == nil {
+		t.Error("show of an absent path: no error")
+	}
+	for _, hook := range []string{"session-start", "prompt", "session-end", "tool"} {
+		in := `{"session_id":"s-internal","cwd":"` + dev + `","source":"startup","prompt":"#again","hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"` + filepath.Join(repo, "dev/memories/small-commits.md") + `"}}`
+		out, err := run(t, dev, in, "hook", hook)
+		if err != nil || out != "" {
+			t.Errorf("hook %s: %v, output %q, want none", hook, err, out)
+		}
+	}
+	if after := len(events(t, repo)); after != before {
+		t.Errorf("the use log grew from %d to %d events", before, after)
+	}
+	if started != 0 {
+		t.Errorf("background work started %d times, want 0", started)
+	}
+
+	t.Setenv("MEMCORE_INTERNAL", "")
+	if _, err := run(t, dev, "", "show", "dev/memories/small-commits.md"); err != nil {
+		t.Fatal(err)
+	}
+	if after := len(events(t, repo)); after != before+1 {
+		t.Errorf("without the variable, the use log holds %d events, want %d", after, before+1)
+	}
+	if started == 0 {
+		t.Error("without the variable, no snapshot started")
+	}
+}

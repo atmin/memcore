@@ -97,6 +97,13 @@ func Run(env Env, name string, args []string) error {
 		locate(e, env.Dir, repo, rerr == nil)
 		warnings = io.Discard
 	}
+	if internal() {
+		// A session of a sleep pass is memcore's own work, so it logs nothing and starts no background work.
+		if late {
+			return nil
+		}
+		return err
+	}
 	e.Time = time.Now().UTC().Format(time.RFC3339)
 	e.Outcome = "ok"
 	if err != nil {
@@ -125,6 +132,14 @@ func Run(env Env, name string, args []string) error {
 		return nil
 	}
 	return err
+}
+
+// internalEnv marks a headless session that memcore started itself, for a sleep pass.
+const internalEnv = "MEMCORE_INTERNAL"
+
+// internal reports whether a session of memcore's own runs this call.
+func internal() bool {
+	return os.Getenv(internalEnv) != ""
 }
 
 // locate fills the level of the working directory, when the event has none, and the commits of the memory repo.
