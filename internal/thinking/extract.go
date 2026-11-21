@@ -23,7 +23,6 @@ type Correction struct {
 type ExtractRequest struct {
 	Transcript string
 	Model      string
-	Budget     float64 // in dollars at API prices; 0 sets no limit
 }
 
 const extractPrompt = `Standard input holds the transcript of one session between a person and a coding agent, as JSON lines.
@@ -55,7 +54,7 @@ type line struct {
 
 // Extract returns the corrections of a transcript, and the cost of its calls. It keeps a correction only when
 // its quote matches the text of one line of the person. The correction then takes the time of that line and the
-// words as the line spells them, so nothing of the agent's own wording reaches the record. On ErrBudget it
+// words as the line spells them, so nothing of the agent's own wording reaches the record. On an error it
 // returns no correction, with the cost so far.
 func Extract(req ExtractRequest) ([]Correction, float64, error) {
 	var yours []line
@@ -72,13 +71,7 @@ func Extract(req ExtractRequest) ([]Correction, float64, error) {
 	var found []Correction
 	seen := map[[2]string]bool{}
 	for _, part := range parts(req.Transcript, partBytes) {
-		budget := req.Budget
-		if req.Budget > 0 {
-			if budget = req.Budget - cost; budget <= 0 {
-				return nil, cost, ErrBudget
-			}
-		}
-		reply, err := Run(Request{Prompt: extractPrompt, Input: part, Schema: extractSchema, Model: req.Model, Budget: budget})
+		reply, err := Run(Request{Prompt: extractPrompt, Input: part, Schema: extractSchema, Model: req.Model})
 		cost += reply.Cost
 		if err != nil {
 			return nil, cost, err

@@ -20,8 +20,8 @@ func TestCommandFor(t *testing.T) {
 		{"plain", Request{Prompt: "List them.", Schema: `{"type":"object"}`},
 			[]string{"-p", "List them.", "--output-format", "json", "--json-schema", `{"type":"object"}`, "--no-session-persistence", "--tools", "", "--safe-mode", "--setting-sources", "", "--strict-mcp-config"},
 			[]string{"--model", "--max-budget-usd"}},
-		{"model and budget", Request{Prompt: "p", Schema: "{}", Model: "sonnet", Budget: 1.5},
-			[]string{"--max-budget-usd", "1.5000", "--model", "sonnet"}, nil},
+		{"model", Request{Prompt: "p", Schema: "{}", Model: "sonnet"},
+			[]string{"--model", "sonnet"}, []string{"--max-budget-usd"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -62,18 +62,17 @@ func TestParseReply(t *testing.T) {
 		out     string
 		output  string
 		cost    float64
-		budget  bool
 		wantErr string
 	}{
-		{"success", `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.25,"structured_output":{"a":[1]}}` + "\n", `{"a":[1]}`, 0.25, false, ""},
-		{"no cost", `{"subtype":"success","structured_output":{"a":1}}`, `{"a":1}`, 0, false, ""},
-		{"budget", `{"subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.5,"errors":["Reached maximum budget ($0.5)"]}`, "", 0.5, true, "budget"},
-		{"agent error", `{"subtype":"error_during_execution","is_error":true,"total_cost_usd":0.1,"errors":["Not logged in"]}`, "", 0.1, false, "Not logged in"},
-		{"error in the result", `{"subtype":"success","is_error":true,"result":"Invalid API key\nmore"}`, "", 0, false, "Invalid API key"},
-		{"no structured output", `{"subtype":"success","is_error":false,"result":"hello"}`, "", 0, false, "no structured output"},
-		{"null output", `{"subtype":"success","structured_output":null}`, "", 0, false, "no structured output"},
-		{"not JSON", `claude: command failed`, "", 0, false, "read the reply"},
-		{"empty", ``, "", 0, false, "read the reply"},
+		{"success", `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.25,"structured_output":{"a":[1]}}` + "\n", `{"a":[1]}`, 0.25, ""},
+		{"no cost", `{"subtype":"success","structured_output":{"a":1}}`, `{"a":1}`, 0, ""},
+		{"budget", `{"subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.5,"errors":["Reached maximum budget ($0.5)"]}`, "", 0.5, "the agent reports an error: Reached maximum budget ($0.5)"},
+		{"agent error", `{"subtype":"error_during_execution","is_error":true,"total_cost_usd":0.1,"errors":["Not logged in"]}`, "", 0.1, "Not logged in"},
+		{"error in the result", `{"subtype":"success","is_error":true,"result":"Invalid API key\nmore"}`, "", 0, "Invalid API key"},
+		{"no structured output", `{"subtype":"success","is_error":false,"result":"hello"}`, "", 0, "no structured output"},
+		{"null output", `{"subtype":"success","structured_output":null}`, "", 0, "no structured output"},
+		{"not JSON", `claude: command failed`, "", 0, "read the reply"},
+		{"empty", ``, "", 0, "read the reply"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -83,9 +82,6 @@ func TestParseReply(t *testing.T) {
 			}
 			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
 				t.Fatalf("err = %v, want one with %q", err, c.wantErr)
-			}
-			if errors.Is(err, ErrBudget) != c.budget {
-				t.Errorf("ErrBudget = %v, want %v", errors.Is(err, ErrBudget), c.budget)
 			}
 			if string(reply.Output) != c.output || reply.Cost != c.cost {
 				t.Errorf("reply = %q, %v; want %q, %v", reply.Output, reply.Cost, c.output, c.cost)
@@ -104,14 +100,13 @@ func TestFinish(t *testing.T) {
 		runErr  error
 		output  string
 		cost    float64
-		budget  bool
 		wantErr string
 	}{
-		{"success", ok, "", nil, `{"a":1}`, 0.2, false, ""},
-		{"budget with an exit status", `{"subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.5}`, "", exit, "", 0.5, true, "budget"},
-		{"agent error with an exit status", `{"subtype":"error_during_execution","is_error":true,"total_cost_usd":0.1,"errors":["Not logged in"]}`, "", exit, "", 0.1, false, "Not logged in"},
-		{"exit status with a good reply", ok, "boom", exit, "", 0.2, false, "exit status 1: boom"},
-		{"exit status with no reply", "", "claude: bad flag\nmore", exit, "", 0, false, "exit status 1: claude: bad flag"},
+		{"success", ok, "", nil, `{"a":1}`, 0.2, ""},
+		{"budget with an exit status", `{"subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.5}`, "", exit, "", 0.5, "the agent reports an error: error_max_budget_usd"},
+		{"agent error with an exit status", `{"subtype":"error_during_execution","is_error":true,"total_cost_usd":0.1,"errors":["Not logged in"]}`, "", exit, "", 0.1, "Not logged in"},
+		{"exit status with a good reply", ok, "boom", exit, "", 0.2, "exit status 1: boom"},
+		{"exit status with no reply", "", "claude: bad flag\nmore", exit, "", 0, "exit status 1: claude: bad flag"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -121,9 +116,6 @@ func TestFinish(t *testing.T) {
 			}
 			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
 				t.Fatalf("err = %v, want one with %q", err, c.wantErr)
-			}
-			if errors.Is(err, ErrBudget) != c.budget {
-				t.Errorf("ErrBudget = %v, want %v", errors.Is(err, ErrBudget), c.budget)
 			}
 			if string(reply.Output) != c.output || reply.Cost != c.cost {
 				t.Errorf("reply = %q, %v; want %q, %v", reply.Output, reply.Cost, c.output, c.cost)

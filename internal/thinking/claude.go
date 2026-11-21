@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -23,6 +22,7 @@ type claudeReply struct {
 
 // commandFor returns the command of one call of Claude Code, with its arguments and its environment.
 // The session has no tools, no settings, no context of its own and no transcript, so it only reads the input.
+// A call gets no limit of its cost: it is one turn, so the size of its input bounds it.
 func commandFor(req Request, environ []string) (name string, args, env []string) {
 	args = []string{
 		"-p", req.Prompt,
@@ -33,9 +33,6 @@ func commandFor(req Request, environ []string) (name string, args, env []string)
 		"--safe-mode",
 		"--setting-sources", "",
 		"--strict-mcp-config",
-	}
-	if req.Budget > 0 {
-		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.Budget, 'f', 4, 64))
 	}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
@@ -75,11 +72,11 @@ func runClaude(req Request) (Reply, error) {
 	return finish(stdout.Bytes(), stderr.String(), runErr)
 }
 
-// finish turns the output and the exit of Claude Code into a reply. A call that stops at its budget, or that
-// reports an error, exits with a status and still prints its reply. So the reply names the cause and the cost.
+// finish turns the output and the exit of Claude Code into a reply. A call that reports an error exits
+// with a status and still prints its reply. So the reply names the cause and the cost.
 func finish(stdout []byte, stderr string, runErr error) (Reply, error) {
 	reply, err := parseReply(stdout)
-	if runErr == nil || errors.Is(err, ErrBudget) || errors.Is(err, errReported) {
+	if runErr == nil || errors.Is(err, errReported) {
 		return reply, err
 	}
 	// The exit is an error even when the output parses.
@@ -97,8 +94,6 @@ func parseReply(out []byte) (Reply, error) {
 	}
 	reply := Reply{Cost: r.Cost}
 	switch {
-	case r.Subtype == "error_max_budget_usd":
-		return reply, ErrBudget
 	case r.IsError:
 		cause := strings.Join(r.Errors, "; ")
 		if cause == "" {

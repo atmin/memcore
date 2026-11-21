@@ -2,7 +2,6 @@ package thinking
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 )
@@ -37,7 +36,7 @@ func TestJudge(t *testing.T) {
 			{"index":9,"kind":"none","reason":"No such correction."},
 			{"kind":"none","reason":"No index."}
 		]}`, 0.3))
-		got, cost, err := Judge(JudgeRequest{Corrections: corrections, Memories: memories, Model: "sonnet", Budget: 1})
+		got, cost, err := Judge(JudgeRequest{Corrections: corrections, Memories: memories, Model: "sonnet"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +57,7 @@ func TestJudge(t *testing.T) {
 			t.Errorf("cost = %v, want 0.3", cost)
 		}
 		req := (*calls)[0]
-		if req.Model != "sonnet" || req.Budget != 1 || req.Schema != judgeSchema || req.Prompt != judgePrompt {
+		if req.Model != "sonnet" || req.Schema != judgeSchema || req.Prompt != judgePrompt {
 			t.Errorf("request = %+v", req)
 		}
 		var in struct {
@@ -89,13 +88,6 @@ func TestJudge(t *testing.T) {
 		fakeRun(t)
 		if got, cost, err := Judge(JudgeRequest{Memories: memories}); err != nil || got != nil || cost != 0 {
 			t.Errorf("got %v, %v, %v; want nothing and no call", got, cost, err)
-		}
-	})
-
-	t.Run("budget error", func(t *testing.T) {
-		fakeRun(t, func(Request) (Reply, error) { return Reply{Cost: 0.2}, ErrBudget })
-		if got, cost, err := Judge(JudgeRequest{Corrections: corrections}); !errors.Is(err, ErrBudget) || got != nil || cost != 0.2 {
-			t.Errorf("got %v, %v, %v; want ErrBudget with the cost", got, cost, err)
 		}
 	})
 }

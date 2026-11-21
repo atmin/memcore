@@ -95,9 +95,6 @@ func TestSleepPass(t *testing.T) {
 			if req.Model != "sonnet" {
 				t.Errorf("call %d uses the model %q, want sonnet", i, req.Model)
 			}
-			if req.Budget != 0 {
-				t.Errorf("call %d has the budget %v, want no limit of one call", i, req.Budget)
-			}
 		}
 		if in := (*calls)[1].Input; !strings.Contains(in, "Push only when the person asks.") || !strings.Contains(in, "dev/memories/ask-before-push.md") {
 			t.Errorf("the judge does not see the memory of the session:\n%s", in)
@@ -233,11 +230,6 @@ func TestSleepPass(t *testing.T) {
 		}
 		if len(*calls) != 2 {
 			t.Errorf("%d calls, want 2: the extraction and the judge of the first session", len(*calls))
-		}
-		for i, req := range *calls {
-			if req.Budget != 0 {
-				t.Errorf("call %d has the budget %v, want no limit of one call", i, req.Budget)
-			}
 		}
 	})
 

@@ -1,7 +1,6 @@
 package thinking
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -60,7 +59,7 @@ func TestExtract(t *testing.T) {
 			{"time":"not a time","quote":"Use small commits.","summary":"The earliest line."},
 			{"time":"2026-11-18T10:02:00Z","quote":"  ","summary":"Empty."}
 		]}`, 0.25))
-		got, cost, err := Extract(ExtractRequest{Transcript: tr, Model: "sonnet", Budget: 2})
+		got, cost, err := Extract(ExtractRequest{Transcript: tr, Model: "sonnet"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +76,7 @@ func TestExtract(t *testing.T) {
 			t.Errorf("cost = %v, want 0.25", cost)
 		}
 		req := (*calls)[0]
-		if req.Input != tr || req.Model != "sonnet" || req.Budget != 2 || req.Schema != extractSchema || req.Prompt != extractPrompt {
+		if req.Input != tr || req.Model != "sonnet" || req.Schema != extractSchema || req.Prompt != extractPrompt {
 			t.Errorf("request = %+v", req)
 		}
 	})
@@ -87,14 +86,6 @@ func TestExtract(t *testing.T) {
 		got, cost, err := Extract(ExtractRequest{Transcript: transcript("2026-11-18T10:01:00Z|agent|Done.")})
 		if err != nil || len(got) != 0 || cost != 0 {
 			t.Errorf("got %v, %v, %v; want nothing and no call", got, cost, err)
-		}
-	})
-
-	t.Run("budget error", func(t *testing.T) {
-		fakeRun(t, func(Request) (Reply, error) { return Reply{Cost: 0.5}, ErrBudget })
-		got, cost, err := Extract(ExtractRequest{Transcript: tr, Budget: 0.5})
-		if !errors.Is(err, ErrBudget) || got != nil || cost != 0.5 {
-			t.Errorf("got %v, %v, %v; want ErrBudget with the cost", got, cost, err)
 		}
 	})
 
@@ -138,7 +129,7 @@ func TestExtractParts(t *testing.T) {
 		t.Errorf("a small transcript gives %d parts, want 1", len(small))
 	}
 
-	// Each part is one call, with the rest of the budget.
+	// Each part is one call, and no cost stops the calls between two parts.
 	replies := []func(Request) (Reply, error){
 		answer(`{"corrections":[{"time":"2026-11-18T10:00:00Z","quote":"rule 0.","summary":"Rule 0."}]}`, 0.4),
 		answer(`{"corrections":[]}`, 0.4),
@@ -146,7 +137,7 @@ func TestExtractParts(t *testing.T) {
 		answer(`{"corrections":[{"time":"2026-11-18T11:00:00Z","quote":"last rule.","summary":"Last."}]}`, 0.4),
 	}
 	calls := fakeRun(t, replies...)
-	found, cost, err := Extract(ExtractRequest{Transcript: tr, Budget: 2})
+	found, cost, err := Extract(ExtractRequest{Transcript: tr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,17 +148,11 @@ func TestExtractParts(t *testing.T) {
 		t.Errorf("cost = %v, want 1.6", cost)
 	}
 	for i, req := range *calls {
-		if want := 2 - 0.4*float64(i); req.Budget < want-0.001 || req.Budget > want+0.001 {
-			t.Errorf("call %d has the budget %v, want %v", i, req.Budget, want)
-		}
 		if req.Input != got[i] {
 			t.Errorf("call %d does not read part %d", i, i)
 		}
 	}
-
-	// A pass stops between two parts when the budget is spent.
-	fakeRun(t, answer(`{"corrections":[]}`, 1.0))
-	if _, cost, err := Extract(ExtractRequest{Transcript: tr, Budget: 1}); !errors.Is(err, ErrBudget) || cost != 1 {
-		t.Errorf("err = %v, cost %v; want ErrBudget after one call", err, cost)
+	if len(*calls) != len(got) {
+		t.Errorf("%d calls, want one for each of the %d parts", len(*calls), len(got))
 	}
 }
