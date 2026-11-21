@@ -118,7 +118,7 @@ memcore turns each answer into a verdict:
 The use log decides between a retrieval miss and an application miss, not the agent. A line of `orient` is no read.
 
 A pass has two limits, and ends at the first:
-- **The budget**, 2 dollars unless `--budget` or the setting `memcore.sleepbudget` says otherwise. The cost is what the agent reports, at API prices. On a subscription, a pass spends the limits of the plan and no money. A pass checks the budget between two calls of the agent, so it can pass the budget by one call. A call that the agent stops at the budget leaves its session for the next pass.
+- **The budget**, 2 dollars unless `--budget` or the setting `memcore.sleepbudget` says otherwise. The cost is what the agent reports, at API prices. On a subscription, a pass spends the limits of the plan and no money. A pass compares its cost with the budget before it starts a session. It finishes each session that it starts, so it can pass the budget by one session. No call of the agent gets a limit of its own.
 - **`--sessions <n>`**, the most sessions of one pass. It needs no price, so it also limits an agent that reports no cost.
 
 A pass prints one line for each session, then the totals: the judged sessions, the corrections by verdict, the cost and the sessions that wait. An error of the agent ends the pass with its cause, and the finished sessions stay recorded. A second pass refuses to run beside the first.

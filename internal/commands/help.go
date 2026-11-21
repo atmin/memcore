@@ -178,7 +178,9 @@ agent judges each correction against the memories that the session saw:
 A pass proposes no change and commits nothing. It ends at its budget, or after --sessions
 sessions, whichever comes first. The budget is in dollars at API prices, as the agent
 reports them: on a subscription, a pass spends the limits of the plan, and no money. A
-pass can pass its budget by one call. These settings of the memory repo change the defaults:
+pass starts a session only while its cost is below the budget, and it finishes each
+session that it starts. So a pass can pass its budget by one session. These settings of
+the memory repo change the defaults:
 
   git config memcore.sleepbudget 2       the budget of a pass
   git config memcore.sleepmodel sonnet   the model of the agent

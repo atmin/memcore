@@ -63,6 +63,9 @@ func TestHelp(t *testing.T) {
 				t.Errorf("the help of sleep does not name the verdict %s:\n%s", verdict, help)
 			}
 		}
+		if !strings.Contains(help, "by one session") {
+			t.Errorf("the help of sleep does not say how far a pass can pass its budget:\n%s", help)
+		}
 	})
 
 	t.Run("--help", func(t *testing.T) {
