@@ -95,12 +95,9 @@ func TestSleepPass(t *testing.T) {
 			if req.Model != "sonnet" {
 				t.Errorf("call %d uses the model %q, want sonnet", i, req.Model)
 			}
-		}
-		if b := (*calls)[0].Budget; b != 2 {
-			t.Errorf("the first call has the budget %v, want 2", b)
-		}
-		if b := (*calls)[1].Budget; b < 1.899 || b > 1.901 {
-			t.Errorf("the judge has the budget %v, want the rest, 1.9", b)
+			if req.Budget != 0 {
+				t.Errorf("call %d has the budget %v, want no limit of one call", i, req.Budget)
+			}
 		}
 		if in := (*calls)[1].Input; !strings.Contains(in, "Push only when the person asks.") || !strings.Contains(in, "dev/memories/ask-before-push.md") {
 			t.Errorf("the judge does not see the memory of the session:\n%s", in)
@@ -203,11 +200,11 @@ func TestSleepPass(t *testing.T) {
 	t.Run("the budget ends the pass", func(t *testing.T) {
 		dev, repo := sleepFixture(t)
 		fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
-		out, err := run(t, dev, "", "sleep", "--budget", "0.30")
+		out, err := run(t, dev, "", "sleep", "--budget", "0.25")
 		if err != nil {
 			t.Fatalf("sleep: %v\n%s", err, out)
 		}
-		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.27 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.30 dollars.\n"} {
+		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.27 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.25 dollars.\n"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
@@ -217,20 +214,99 @@ func TestSleepPass(t *testing.T) {
 		}
 	})
 
-	t.Run("a call that reaches the budget leaves its session", func(t *testing.T) {
+	t.Run("a pass finishes the session that it started", func(t *testing.T) {
 		dev, repo := sleepFixture(t)
-		fakeAgent(t, twoCorrections(0.10), func(thinking.Request) (thinking.Reply, error) { return thinking.Reply{Cost: 0.40}, thinking.ErrBudget })
-		out, err := run(t, dev, "", "sleep", "--budget", "0.50")
+		// The extraction alone passes the budget, and the judge of the same session still runs.
+		calls := fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
+		out, err := run(t, dev, "", "sleep", "--budget", "0.15")
 		if err != nil {
 			t.Fatalf("sleep: %v\n%s", err, out)
 		}
-		for _, want := range []string{"Judged 0 sessions with 0 corrections", "about 0.50 dollars at API prices. 2 sessions wait.\n", "The pass stopped at its budget of 0.50 dollars.\n"} {
+		for _, want := range []string{" ~/dev s-first: 2 corrections: 1 capture, 1 retrieval,", "Judged 1 session with 2 corrections", "about 0.27 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.15 dollars.\n"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
 		}
-		if records, _ := readSleep(repo); len(records) != 0 {
-			t.Errorf("%d records, want none", len(records))
+		records, _ := readSleep(repo)
+		if len(records) != 1 || records[0].Session != "s-first" || len(records[0].Corrections) != 2 {
+			t.Errorf("records = %+v, want the first session with both corrections", records)
+		}
+		if len(*calls) != 2 {
+			t.Errorf("%d calls, want 2: the extraction and the judge of the first session", len(*calls))
+		}
+		for i, req := range *calls {
+			if req.Budget != 0 {
+				t.Errorf("call %d has the budget %v, want no limit of one call", i, req.Budget)
+			}
+		}
+	})
+
+	t.Run("a cost equal to the budget ends the pass", func(t *testing.T) {
+		dev, repo := sleepFixture(t)
+		fakeAgent(t, twoCorrections(0.25), heldAndNone(0.25)) // two costs that add up to 0.5 exactly
+		out, err := run(t, dev, "", "sleep", "--budget", "0.50")
+		if err != nil {
+			t.Fatalf("sleep: %v\n%s", err, out)
+		}
+		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.50 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.50 dollars.\n"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the output lacks %q:\n%s", want, out)
+			}
+		}
+		if records, _ := readSleep(repo); len(records) != 1 {
+			t.Errorf("%d records, want 1", len(records))
+		}
+	})
+
+	t.Run("a cost below the budget starts the next session", func(t *testing.T) {
+		dev, repo := sleepFixture(t)
+		fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
+		out, err := run(t, dev, "", "sleep", "--budget", "0.30")
+		if err != nil {
+			t.Fatalf("sleep: %v\n%s", err, out)
+		}
+		for _, want := range []string{"Judged 2 sessions with 2 corrections", "about 0.47 dollars at API prices. No session waits.\n"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the output lacks %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "The pass stopped") {
+			t.Errorf("the pass names a stop, and it judged every session:\n%s", out)
+		}
+		if records, _ := readSleep(repo); len(records) != 2 {
+			t.Errorf("%d records, want 2", len(records))
+		}
+	})
+
+	t.Run("the budget never splits the files of one session", func(t *testing.T) {
+		dev, repo := sleepFixture(t)
+		events, _, err := readLog(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var old time.Time
+		for _, e := range events {
+			if e.Session == "s-first" && e.Hook == "session-start" {
+				old = eventTime(e)
+			}
+		}
+		transcriptT(t, repo, "claude/p1/s-first.0123abcd.jsonl", transcriptText("s-first", old, "you|Add a retry.", "you|Never push without asking.", "you|Use small commits.", "you|A version beside."))
+		calls := fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
+		// The first file of the session passes the budget, and the pass still reads the second file.
+		out, err := run(t, dev, "", "sleep", "--budget", "0.15")
+		if err != nil {
+			t.Fatalf("sleep: %v\n%s", err, out)
+		}
+		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.54 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.15 dollars.\n"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the output lacks %q:\n%s", want, out)
+			}
+		}
+		if records, _ := readSleep(repo); len(records) != 2 || records[0].Session != "s-first" || records[1].Session != "s-first" {
+			t.Errorf("records = %+v, want both files of the first session", records)
+		}
+		if len(*calls) != 4 {
+			t.Errorf("%d calls, want 4: an extraction and a judge for each file of the session", len(*calls))
 		}
 	})
 
@@ -238,12 +314,17 @@ func TestSleepPass(t *testing.T) {
 		dev, repo := sleepFixture(t)
 		gitT(t, repo, "config", "memcore.sleepbudget", "0.75")
 		gitT(t, repo, "config", "memcore.sleepmodel", "haiku")
-		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
-		if out, err := run(t, dev, "", "sleep"); err != nil {
+		// The first session costs 0.80 dollars: more than the setting, and less than the default of 2 dollars.
+		calls := fakeAgent(t, twoCorrections(0.50), heldAndNone(0.30))
+		out, err := run(t, dev, "", "sleep")
+		if err != nil {
 			t.Fatalf("sleep: %v\n%s", err, out)
 		}
-		if req := (*calls)[0]; req.Budget != 0.75 || req.Model != "haiku" {
-			t.Errorf("request = budget %v, model %q; want 0.75 and haiku", req.Budget, req.Model)
+		if !strings.Contains(out, "The pass stopped at its budget of 0.75 dollars.\n") || !strings.Contains(out, "1 session waits.\n") {
+			t.Errorf("the pass does not stop at the budget of the setting:\n%s", out)
+		}
+		if req := (*calls)[0]; req.Model != "haiku" {
+			t.Errorf("request = model %q, want haiku", req.Model)
 		}
 		gitT(t, repo, "config", "memcore.sleepbudget", "much")
 		if _, err := run(t, dev, "", "sleep"); err == nil || !strings.Contains(err.Error(), "memcore.sleepbudget") {

@@ -28,8 +28,6 @@ const (
 	sleepAgent  = "claude"
 	sleepModel  = "sonnet"
 
-	// sleepFloor is the least budget that a pass starts a session with.
-	sleepFloor = 0.05
 	// sleepLock is the file of the local state that a running pass locks.
 	sleepLock = "sleep.lock"
 )
@@ -170,7 +168,9 @@ func runSleep(env Env, args []string) error {
 			stopped = fmt.Sprintf("The pass stopped after %s, as --sessions says.", plural(limit, "session"))
 			break
 		}
-		if p.budget-p.cost < sleepFloor {
+		// The budget decides only whether the pass starts one more session. A session that the pass started
+		// always ends, so the pass loses no paid work.
+		if !sessions[u.Session] && p.cost >= p.budget {
 			stopped = fmt.Sprintf("The pass stopped at its budget of %s dollars.", dollars(p.budget))
 			break
 		}
@@ -178,10 +178,7 @@ func runSleep(env Env, args []string) error {
 			p.flush()
 		}
 		sessions[u.Session] = true
-		if err := p.judge(u); errors.Is(err, thinking.ErrBudget) {
-			stopped = fmt.Sprintf("The pass stopped at its budget of %s dollars.", dollars(p.budget))
-			break
-		} else if err != nil {
+		if err := p.judge(u); err != nil {
 			failure = err
 			break
 		}
@@ -211,7 +208,7 @@ type pass struct {
 	model  string
 	budget float64
 
-	cost        float64            // of every call, also of a session that the pass did not finish
+	cost        float64            // of every call, also of a session that failed; the pass compares it with the budget only before a new session
 	judged      map[string]bool    // the sessions with a record of this pass
 	seen        map[[3]string]bool // the corrections that count already, by session, time and quote
 	corrections int
@@ -236,13 +233,14 @@ func (p *pass) flush() {
 }
 
 // judge extracts and judges one file of the transcripts branch, appends its record, and prints its line.
-// On an error it writes no record, so the next pass reads the file again.
+// No call gets a limit of its cost: the size of its input bounds it. On an error it writes no record, so the
+// next pass reads the file again.
 func (p *pass) judge(u sleepUnit) error {
 	transcript, err := store.Git(p.repo, "cat-file", "blob", u.Blob)
 	if err != nil {
 		return fmt.Errorf("read %s on the transcripts branch: %w", u.File, err)
 	}
-	found, cost, err := thinking.Extract(thinking.ExtractRequest{Transcript: transcript, Model: p.model, Budget: p.budget - p.cost})
+	found, cost, err := thinking.Extract(thinking.ExtractRequest{Transcript: transcript, Model: p.model})
 	p.cost += cost
 	unitCost := cost
 	if err != nil {
@@ -268,9 +266,6 @@ func (p *pass) judge(u sleepUnit) error {
 			}
 			continue
 		}
-		if p.budget-p.cost <= 0 {
-			return thinking.ErrBudget
-		}
 		memories, err := seenMemories(p.repo, commit, u.Level)
 		if err != nil {
 			return err
@@ -279,7 +274,7 @@ func (p *pass) judge(u sleepUnit) error {
 		for _, i := range groups[commit] {
 			group = append(group, found[i])
 		}
-		findings, cost, err := thinking.Judge(thinking.JudgeRequest{Corrections: group, Memories: memories, Model: p.model, Budget: p.budget - p.cost})
+		findings, cost, err := thinking.Judge(thinking.JudgeRequest{Corrections: group, Memories: memories, Model: p.model})
 		p.cost += cost
 		unitCost += cost
 		if err != nil {
