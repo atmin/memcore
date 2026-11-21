@@ -45,7 +45,7 @@ func Table() []Command {
 		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits as the fold at push leaves them.", Run: runInbox},
 		{Name: "stats", Args: "[<path>]", Does: "Measures whether memory helps, per week, from the use log and git history. With a path, it counts the reads of each document under it.", Run: runStats},
-		{Name: "sleep", Args: "[--budget <dollars>] [--sessions <n>] | --list", Does: "Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the corrections.", Run: runSleep},
+		{Name: "sleep", Args: "[--budget <dollars>] [--sessions <n>] | --list | --answer <id>[,<id>] [--with <path>] [--reason <text>]", Does: "Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the corrections, and --answer records what happened to one.", Run: runSleep},
 		{Name: "push", Does: "Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.", Run: runPush},
 		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},
 		{Name: "drop", Args: "<commit> [--reason <text>]", Does: "Removes a commit of the review queue, with its fixups, after the person confirms.", Yours: true, Run: runDrop},

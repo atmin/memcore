@@ -5,8 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
+	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,17 +98,30 @@ func runSleep(env Env, args []string) error {
 	budgetFlag := flags.String("budget", "", "the budget of the pass, in dollars at API prices")
 	sessionsFlag := flags.String("sessions", "", "the most sessions that the pass judges")
 	list := flags.Bool("list", false, "list the corrections of the records, and run no pass")
+	answerFlag := flags.String("answer", "", "record what happened to these corrections, and run no pass")
+	withFlag := flags.String("with", "", "the document that now holds the rule of an answered correction")
+	reasonFlag := flags.String("reason", "", "the reason of an answer")
 	pos, err := parseInterleaved(flags, args)
 	if err != nil {
 		return usageErr(err.Error())
 	}
 	if len(pos) != 0 {
-		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>] | --list")
+		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>] | --list | --answer <id>[,<id>] [--with <path>] [--reason <text>]")
+	}
+	given := map[string]bool{} // also a flag with an empty value, as in --budget=
+	flags.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	// An answer and a list run no agent and no pass, so an agent may run them too.
+	if given["answer"] {
+		if given["budget"] || given["sessions"] || given["list"] {
+			return usageErr("usage: memcore sleep --answer takes only --with and --reason, because it runs no pass and prints no list")
+		}
+		return answerSleep(env, *answerFlag, *withFlag, *reasonFlag)
+	}
+	if given["with"] || given["reason"] {
+		return usageErr("usage: memcore sleep --with and --reason belong to --answer <id>[,<id>]")
 	}
 	if *list {
-		given := false // also an empty value, as in --budget=
-		flags.Visit(func(f *flag.Flag) { given = given || f.Name == "budget" || f.Name == "sessions" })
-		if given {
+		if given["budget"] || given["sessions"] {
 			return usageErr("usage: memcore sleep --list takes no --budget and no --sessions, because it runs no pass")
 		}
 		return listSleep(env)
@@ -366,7 +383,7 @@ var verdictNames = map[string]string{
 }
 
 // listSleep prints the corrections of the records, the newest session first, and each session in the order of
-// its corrections. It runs no agent and writes nothing, so an agent may run it too.
+// its corrections. Each one starts with its short id, which sleep --answer takes. It runs no agent and writes nothing, so an agent may run it too.
 func listSleep(env Env) error {
 	repo, err := openRepo()
 	if err != nil {
@@ -400,6 +417,7 @@ func listSleep(env Env) error {
 		counts.add(c.Verdict)
 	}
 	fmt.Fprintf(env.Out, "%s in %s: %s.\n", plural(len(corrections), "correction"), plural(len(sessions), "judged session"), counts.text())
+	ids := shortIDs(correctionIDs(corrections))
 	for _, c := range corrections {
 		when := c.Time
 		if t, err := time.Parse(time.RFC3339, c.Time); err == nil {
@@ -409,7 +427,7 @@ func listSleep(env Env) error {
 		if name == "" {
 			name = c.Verdict
 		}
-		head := fmt.Sprintf("\n%s %s %s: %s", when, c.Record.Level, short(c.Record.Session), name)
+		head := fmt.Sprintf("\n%s %s %s %s: %s", ids[c.id()], when, c.Record.Level, short(c.Record.Session), name)
 		if c.Path != "" {
 			head += ", " + c.Path
 		}
@@ -419,6 +437,92 @@ func listSleep(env Env) error {
 		if c.Reason != "" {
 			fmt.Fprintf(env.Out, "  Why: %s\n", c.Reason)
 		}
+	}
+	return nil
+}
+
+// answerSleep records what happened to corrections: the document that now holds their rule, the reason, or
+// both. It runs no agent and changes no document, so an agent may run it too. It writes every answer of a call,
+// or none.
+func answerSleep(env Env, idList, with, reason string) error {
+	reason = strings.Join(strings.Fields(reason), " ")
+	if with == "" && reason == "" {
+		return inputErrf("an answer needs --with <path>, --reason <text> or both: --with names the document that now holds the rule")
+	}
+	repo, err := openRepo()
+	if err != nil {
+		return err
+	}
+	p := ""
+	if with != "" {
+		p = path.Clean(filepath.ToSlash(with))
+		// A file system that ignores case also opens .GIT, so the test of the git directory ignores case too.
+		first, _, _ := strings.Cut(p, "/")
+		if path.IsAbs(p) || first == ".." || strings.EqualFold(first, ".git") {
+			return inputErrf("--with: %s is not a path in the memory repo", with)
+		}
+		if err := noSymlink(repo, p); err != nil {
+			return fmt.Errorf("--with: %w", err)
+		}
+		if info, err := os.Stat(filepath.Join(repo, filepath.FromSlash(p))); errors.Is(err, fs.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
+			return inputErrf("--with: no document at %s: an answer after forget takes only --reason", p)
+		} else if err != nil {
+			return fmt.Errorf("--with: read %s: %w", p, err)
+		}
+	}
+	records, err := readSleep(repo)
+	if err != nil {
+		return err
+	}
+	corrections := sleepCorrections(records)
+	all := correctionIDs(corrections)
+	now := time.Now().UTC().Format(time.RFC3339)
+	var answers []sleepAnswer
+	chosen := map[string]bool{}
+	for _, prefix := range strings.Split(idList, ",") {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix == "" {
+			return usageErr("usage: memcore sleep --answer <id>[,<id>] takes one id or more, with a comma between two")
+		}
+		if len(prefix) < shortDigits {
+			return inputErrf("--answer: the id %s is too short: give 7 digits or more, as memcore sleep --list prints them", prefix)
+		}
+		var fits []int
+		for i, id := range all {
+			if strings.HasPrefix(id, prefix) {
+				fits = append(fits, i)
+			}
+		}
+		switch len(fits) {
+		case 0:
+			return inputErrf("--answer: no recorded correction has the id %s: memcore sleep --list prints the ids", prefix)
+		case 1:
+		default:
+			var ids []string
+			for _, i := range fits {
+				ids = append(ids, all[i])
+			}
+			return inputErrf("--answer: the id %s fits %d corrections: give more digits of one of %s", prefix, len(fits), strings.Join(ids, ", "))
+		}
+		c := corrections[fits[0]]
+		if id := all[fits[0]]; !chosen[id] {
+			chosen[id] = true
+			answers = append(answers, sleepAnswer{ID: id, Session: c.Record.Session, Time: c.Time, Path: p, Reason: reason, Answered: now})
+		}
+	}
+	if err := appendAnswers(repo, answers); err != nil {
+		return err
+	}
+	shorts := shortIDs(all)
+	for _, a := range answers {
+		text := "Answered " + shorts[a.ID]
+		if a.Path != "" {
+			text += " with " + a.Path
+		}
+		if a.Reason != "" {
+			text += ": " + strings.TrimRight(a.Reason, ".")
+		}
+		fmt.Fprintln(env.Out, text+".")
 	}
 	return nil
 }

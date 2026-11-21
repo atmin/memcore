@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -463,24 +464,27 @@ func TestSleepList(t *testing.T) {
 	}
 	want := `4 corrections in 3 judged sessions: 1 capture, 1 retrieval, 0 application, 0 stale, 1 unrelated, 1 before memory.
 
-2026-11-19 07:30 ~ s-later: before memory
+{early} 2026-11-19 07:30 ~ s-later: before memory
   You: No tabs here.
   Rule: Use spaces.
 
-2026-11-19 09:00 ~ s-later: unrelated to memory
+{later} 2026-11-19 09:00 ~ s-later: unrelated to memory
   You: Not that file.
   Rule: A detail.
 
-2026-11-18 10:02 ~/dev s-first: retrieval miss, dev/memories/ask-before-push.md
+{held} 2026-11-18 10:02 ~/dev s-first: retrieval miss, dev/memories/ask-before-push.md
   You: Never push without asking.
   Rule: Ask before a push.
   Why: The memory says so.
 
-2026-11-18 10:05 ~/dev s-first: capture miss
+{small} 2026-11-18 10:05 ~/dev s-first: capture miss
   You: Use small commits.
   Rule: Commit small.
   Why: No memory holds it.
 `
+	// Each head line starts with the short id of its correction.
+	id := func(session string, c sleepCorrection) string { return short(correctionID(session, c.Time, c.Quote)) }
+	want = strings.NewReplacer("{early}", id("s-later", early), "{later}", id("s-later", later), "{held}", id("s-first", held), "{small}", id("s-first", small)).Replace(want)
 	if out != want {
 		t.Errorf("sleep --list:\n got %s\nwant %s", out, want)
 	}
@@ -494,5 +498,133 @@ func TestSleepList(t *testing.T) {
 		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep --list") {
 			t.Errorf("sleep %v: %v, want a usage error", args, err)
 		}
+	}
+}
+
+func TestSleepAnswer(t *testing.T) {
+	dev, repo := sleepFixture(t)
+	t.Setenv("CLAUDECODE", "1") // an agent may answer
+	held := sleepCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md"}
+	small := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture}
+	// The ids of these two quotes share their first 7 digits, 1d2633e.
+	twinA := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use rule 12272.", Summary: "Rule A.", Verdict: verdictCapture}
+	twinB := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use rule 15967.", Summary: "Rule B.", Verdict: verdictCapture}
+	if err := appendSleep(repo, sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{held, small, twinA, twinB}}); err != nil {
+		t.Fatal(err)
+	}
+	full := func(c sleepCorrection) string { return correctionID("s-first", c.Time, c.Quote) }
+	heldID, smallID := full(held), full(small)
+	if a, b := full(twinA), full(twinB); a[:7] != "1d2633e" || b[:7] != "1d2633e" || a == b {
+		t.Fatalf("the twins have the ids %s and %s, want two ids that share 1d2633e", a, b)
+	}
+	const memory = "dev/memories/ask-before-push.md"
+	calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
+
+	good := []struct {
+		name string
+		args []string
+		out  string
+		want map[string]sleepAnswer // by id; the test compares the path and the reason
+	}{
+		{"a path", []string{"--answer", heldID[:7], "--with", memory},
+			"Answered " + heldID[:7] + " with " + memory + ".\n",
+			map[string]sleepAnswer{heldID: {Path: memory}}},
+		{"a reason only", []string{"--answer", smallID, "--reason", "It concerns only its task."},
+			"Answered " + smallID[:7] + ": It concerns only its task.\n",
+			map[string]sleepAnswer{heldID: {Path: memory}, smallID: {Reason: "It concerns only its task."}}},
+		{"two ids, and a second answer replaces the first", []string{"--answer", heldID[:9] + ", " + smallID[:7], "--with", memory, "--reason", "One memory holds both rules"},
+			"Answered " + heldID[:7] + " with " + memory + ": One memory holds both rules.\nAnswered " + smallID[:7] + " with " + memory + ": One memory holds both rules.\n",
+			map[string]sleepAnswer{heldID: {Path: memory, Reason: "One memory holds both rules"}, smallID: {Path: memory, Reason: "One memory holds both rules"}}},
+		// A new answer replaces the whole older one, so it keeps no path and no reason of it.
+		{"a reason replaces a path and a reason", []string{"--answer", heldID, "--reason", "The memory went."},
+			"Answered " + heldID[:7] + ": The memory went.\n",
+			map[string]sleepAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory, Reason: "One memory holds both rules"}}},
+		{"a path replaces a path and a reason", []string{"--answer", smallID, "--with", memory},
+			"Answered " + smallID[:7] + " with " + memory + ".\n",
+			map[string]sleepAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}}},
+		// Two ids share 7 digits, so the list prints 8 digits of each, and an answer takes them.
+		{"the longer short id of a twin", []string{"--answer", full(twinA)[:8] + "," + full(twinB)[:8], "--reason", "Both concern only their task."},
+			"Answered " + full(twinA)[:8] + ": Both concern only their task.\nAnswered " + full(twinB)[:8] + ": Both concern only their task.\n",
+			map[string]sleepAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}, full(twinA): {Reason: "Both concern only their task."}, full(twinB): {Reason: "Both concern only their task."}}},
+	}
+	if list, err := run(t, dev, "", "sleep", "--list"); err != nil || !strings.Contains(list, "\n"+full(twinA)[:8]+" 2026-11-18 10:05 ") || !strings.Contains(list, "\n"+full(twinB)[:8]+" 2026-11-18 10:05 ") {
+		t.Errorf("sleep --list does not print 8 digits of each twin: %v\n%s", err, list)
+	}
+	for _, c := range good {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := run(t, dev, "", append([]string{"sleep"}, c.args...)...)
+			if err != nil || out != c.out {
+				t.Fatalf("sleep %v: %v\n got %q\nwant %q", c.args, err, out, c.out)
+			}
+			answers, err := readAnswers(repo)
+			if err != nil || len(answers) != len(c.want) {
+				t.Fatalf("answers = %+v, %v; want %d", answers, err, len(c.want))
+			}
+			for id, want := range c.want {
+				got := answers[id]
+				if got.ID != id || got.Path != want.Path || got.Reason != want.Reason || got.Session != "s-first" || got.Time == "" || got.Answered == "" {
+					t.Errorf("the answer of %s = %+v, want the path %q and the reason %q", id[:7], got, want.Path, want.Reason)
+				}
+			}
+		})
+	}
+
+	before, err := readAnswers(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := []struct {
+		name string
+		args []string
+		want []string // each must be in the error
+	}{
+		{"an unknown id", []string{"--answer", "0123456789", "--reason", "r"}, []string{"0123456789", "memcore sleep --list", "memcore help sleep"}},
+		{"an unknown id beside a known one", []string{"--answer", smallID + ",0123456789", "--reason", "r"}, []string{"0123456789", "memcore sleep --list"}},
+		{"a short prefix", []string{"--answer", heldID[:6], "--reason", "r"}, []string{heldID[:6], "7 digits"}},
+		{"an empty id", []string{"--answer", heldID + ",", "--reason", "r"}, []string{"usage: memcore sleep --answer"}},
+		{"a prefix that fits two corrections", []string{"--answer", "1d2633e", "--reason", "r"}, []string{full(twinA), full(twinB)}},
+		{"a path that is no document", []string{"--answer", heldID, "--with", "dev/memories/none.md"}, []string{"--with", "dev/memories/none.md"}},
+		{"a folder", []string{"--answer", heldID, "--with", "dev/memories"}, []string{"--with", "dev/memories"}},
+		{"the git directory", []string{"--answer", heldID, "--with", ".git/config"}, []string{"--with", "not a path in the memory repo"}},
+		{"the git directory in capitals", []string{"--answer", heldID, "--with", ".GIT/config"}, []string{"--with", "not a path in the memory repo"}},
+		{"a path outside the memory repo", []string{"--answer", heldID, "--with", "../memory/dev/memories/ask-before-push.md"}, []string{"--with", "not a path in the memory repo"}},
+		{"no --with and no --reason", []string{"--answer", heldID}, []string{"--with <path>", "--reason <text>"}},
+		{"an empty reason alone", []string{"--answer", heldID, "--reason", " "}, []string{"--with <path>", "--reason <text>"}},
+		{"--answer beside --budget", []string{"--answer", heldID, "--reason", "r", "--budget", "1"}, []string{"usage: memcore sleep --answer"}},
+		{"--answer beside --sessions", []string{"--answer", heldID, "--reason", "r", "--sessions", "1"}, []string{"usage: memcore sleep --answer"}},
+		{"--answer beside --list", []string{"--list", "--answer", heldID, "--reason", "r"}, []string{"usage: memcore sleep --answer"}},
+	}
+	for _, c := range bad {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := run(t, dev, "", append([]string{"sleep"}, c.args...)...)
+			if err == nil {
+				t.Fatalf("sleep %v: no error\n%s", c.args, out)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("sleep %v: the error lacks %q: %v", c.args, want, err)
+				}
+			}
+			if strings.Contains(out, "Answered") {
+				t.Errorf("sleep %v printed an answer: %s", c.args, out)
+			}
+		})
+	}
+	if after, err := readAnswers(repo); err != nil || !reflect.DeepEqual(after, before) {
+		t.Errorf("a refused call changed the answers: %+v, %v", after, err)
+	}
+
+	// --with or --reason without --answer starts no pass, also for the person at a terminal.
+	t.Setenv("CLAUDECODE", "")
+	for _, args := range [][]string{{"--with", memory}, {"--reason", "r"}, {"--reason", "r", "--sessions", "1"}, {"--list", "--with", memory}} {
+		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep") || !strings.Contains(err.Error(), "--answer") {
+			t.Errorf("sleep %v: %v, want a usage error that names --answer", args, err)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Errorf("the agent got %d calls, want none", len(*calls))
+	}
+	if records, _ := readSleep(repo); len(records) != 1 {
+		t.Errorf("%d records, want the one of the fixture: no call may start a pass", len(records))
 	}
 }

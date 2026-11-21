@@ -2,6 +2,8 @@ package commands
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,6 +146,123 @@ func sleepCorrections(records []sleepRecord) []judged {
 		}
 	}
 	return out
+}
+
+// id returns the id of the correction.
+func (j judged) id() string {
+	return correctionID(j.Record.Session, j.Time, j.Quote)
+}
+
+// correctionID returns the id of a correction: the SHA-256 of its session, its time and its quote, as 64
+// hexadecimal digits. A zero byte joins the three values. The id holds nothing of a pass, so it stays the same
+// when a later pass finds the same words.
+func correctionID(session, at, quote string) string {
+	sum := sha256.Sum256([]byte(session + "\x00" + at + "\x00" + quote))
+	return hex.EncodeToString(sum[:])
+}
+
+// shortDigits is the least count of digits of an id that a print shows, and that an answer takes.
+const shortDigits = 7
+
+// shortIDs returns the short form of each id: its first shortDigits digits, and more while another id of the
+// list shares them.
+func shortIDs(ids []string) map[string]string {
+	out := map[string]string{}
+	for _, id := range ids {
+		n := min(shortDigits, len(id))
+		for ; n < len(id); n++ {
+			shared := false
+			for _, other := range ids {
+				if other != id && strings.HasPrefix(other, id[:n]) {
+					shared = true
+					break
+				}
+			}
+			if !shared {
+				break
+			}
+		}
+		out[id] = id[:n]
+	}
+	return out
+}
+
+// correctionIDs returns the ids of corrections, in their order.
+func correctionIDs(corrections []judged) []string {
+	ids := make([]string, len(corrections))
+	for i, c := range corrections {
+		ids[i] = c.id()
+	}
+	return ids
+}
+
+// sleepAnswer is one line of answers.jsonl: what happened to one correction.
+type sleepAnswer struct {
+	ID       string `json:"id"`               // the whole id of the correction
+	Session  string `json:"session"`          // the session of the correction
+	Time     string `json:"time"`             // the time of the correction
+	Path     string `json:"path,omitempty"`   // the document that now holds the rule
+	Reason   string `json:"reason,omitempty"` // why, also for no change and for a removed document
+	Answered string `json:"answered"`         // the time of the answer
+}
+
+// answersPath is the file of the answers, in the local state.
+func answersPath(repo string) string {
+	return filepath.Join(store.StateDir(repo), "answers.jsonl")
+}
+
+// readAnswers returns the answers by the id of their correction. The newest answer of an id replaces the older
+// ones. A missing file holds no answer.
+func readAnswers(repo string) (map[string]sleepAnswer, error) {
+	answers := map[string]sleepAnswer{}
+	f, err := os.Open(answersPath(repo))
+	if errors.Is(err, fs.ErrNotExist) {
+		return answers, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the answers of sleep: %w", err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1<<20), 1<<28)
+	for n := 1; sc.Scan(); n++ {
+		if strings.TrimSpace(sc.Text()) == "" {
+			continue
+		}
+		var a sleepAnswer
+		if err := json.Unmarshal(sc.Bytes(), &a); err != nil {
+			return nil, fmt.Errorf("read the answers of sleep: line %d: %w", n, err)
+		}
+		answers[a.ID] = a
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("read the answers of sleep: %w", err)
+	}
+	return answers, nil
+}
+
+// appendAnswers appends answers to the file of the answers, in one write.
+func appendAnswers(repo string, answers []sleepAnswer) error {
+	var lines []byte
+	for _, a := range answers {
+		line, err := json.Marshal(a)
+		if err != nil {
+			return fmt.Errorf("write an answer of sleep: %w", err)
+		}
+		lines = append(append(lines, line...), '\n')
+	}
+	f, err := os.OpenFile(answersPath(repo), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("write an answer of sleep: %w", err)
+	}
+	if _, err := f.Write(lines); err != nil {
+		f.Close()
+		return fmt.Errorf("write an answer of sleep: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("write an answer of sleep: %w", err)
+	}
+	return nil
 }
 
 // sessionOf returns the session of a path on the transcripts branch, and false for any file that is no transcript

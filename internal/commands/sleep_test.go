@@ -287,3 +287,30 @@ func TestVerdicts(t *testing.T) {
 		}
 	}
 }
+
+func TestCorrectionID(t *testing.T) {
+	id := correctionID("s-first", "2026-11-18T10:05:00Z", "Use small commits.")
+	if len(id) != 64 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Errorf("id = %q, want 64 hexadecimal digits", id)
+	}
+	if again := correctionID("s-first", "2026-11-18T10:05:00Z", "Use small commits."); again != id {
+		t.Errorf("the id is not stable: %q, then %q", id, again)
+	}
+	for name, other := range map[string]string{
+		"quote":            correctionID("s-first", "2026-11-18T10:05:00Z", "Use small commits!"),
+		"time":             correctionID("s-first", "2026-11-18T10:05:01Z", "Use small commits."),
+		"session":          correctionID("s-second", "2026-11-18T10:05:00Z", "Use small commits."),
+		"a moved boundary": correctionID("s-first2026", "-11-18T10:05:00Z", "Use small commits."),
+	} {
+		if other == id {
+			t.Errorf("another %s gives the same id", name)
+		}
+	}
+
+	// The short id has 7 digits, and more while another recorded correction shares them.
+	a, b, c := "abcdef1"+strings.Repeat("0", 57), "abcdef1"+"23"+strings.Repeat("0", 55), "1234567"+strings.Repeat("0", 57)
+	got := shortIDs([]string{a, b, c, a})
+	if got[a] != "abcdef10" || got[b] != "abcdef12" || got[c] != "1234567" {
+		t.Errorf("short ids = %v, want abcdef10, abcdef12 and 1234567", got)
+	}
+}

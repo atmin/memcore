@@ -159,7 +159,7 @@ memcore stats measures it. Then it lists the unpushed commits as the fold at pus
 them, for the review of the person. Each entry counts the fixups that fold into it. When the
 fold drops commits, the list ends with their count.
 `,
-	"sleep": `memcore sleep [--budget <dollars>] [--sessions <n>] | --list
+	"sleep": `memcore sleep [--budget <dollars>] [--sessions <n>] | --list | --answer <id>[,<id>] [--with <path>] [--reason <text>]
 
 It runs one sleep pass. Only the person runs a pass, at a terminal, because a pass sends
 redacted transcripts to the provider of the agent, and spends the limits of its plan.
@@ -187,12 +187,23 @@ the memory repo change the defaults:
   git config memcore.sleepagent claude   the agent, and claude is the only one now
 
 --list runs no pass. It prints each correction that the passes recorded, the newest
-session first, with its verdict, your words, the rule and the reason of the judge. An
-agent may run it.
+session first, with its id, its verdict, your words, the rule and the reason of the
+judge. An agent may run it.
 
-Example:
+--answer runs no pass either, and an agent may run it. It records what happened to a
+correction, by the id that --list prints, or by its first 7 digits or more:
+
+  --with <path>    the document of the memory repo that now holds the rule
+  --reason <text>  why: for no change, or after forget removed the document
+
+An answer needs --with, --reason or both. A second answer replaces the first. An answer
+changes no document: it is a line of the local state, in .git/memcore/answers.jsonl.
+
+Examples:
 
 memcore sleep --list
+memcore sleep --answer 3f9c2ab --with dev/memories/ask-before-push.md
+memcore sleep --answer 3f9c2ab,80d41e7 --reason "It concerns only its task."
 `,
 	"stats": `memcore stats [<path>]
 

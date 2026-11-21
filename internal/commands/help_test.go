@@ -63,6 +63,11 @@ func TestHelp(t *testing.T) {
 				t.Errorf("the help of sleep does not name the verdict %s:\n%s", verdict, help)
 			}
 		}
+		for _, want := range []string{"memcore sleep [--budget <dollars>] [--sessions <n>] | --list | --answer <id>[,<id>] [--with <path>] [--reason <text>]\n", "memcore sleep --answer 3f9c2ab --with "} {
+			if !strings.Contains(help, want) {
+				t.Errorf("the help of sleep lacks %q:\n%s", want, help)
+			}
+		}
 		if !strings.Contains(help, "by one session") {
 			t.Errorf("the help of sleep does not say how far a pass can pass its budget:\n%s", help)
 		}
