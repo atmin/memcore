@@ -452,52 +452,76 @@ func TestSleepList(t *testing.T) {
 	small := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture, Reason: "No memory holds it."}
 	later := sleepCorrection{Time: "2026-11-19T09:00:00Z", Quote: "Not that file.", Summary: "A detail.", Verdict: verdictUnrelated}
 	early := sleepCorrection{Time: "2026-11-19T07:30:00Z", Quote: "No tabs here.", Summary: "Use spaces.", Verdict: verdictBefore}
+	applied := sleepCorrection{Time: "2026-11-19T09:10:00Z", Quote: "I said: ask first.", Summary: "Ask before a push.", Verdict: verdictApplication, Path: "dev/memories/ask-before-push.md", Reason: "The session read it."}
+	stale := sleepCorrection{Time: "2026-11-19T09:20:00Z", Quote: "We use tabs now.", Summary: "Use tabs.", Verdict: verdictStale, Path: "dev/memories/spaces.md", Reason: "The memory says spaces."}
 	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{small, held}})
 	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.0123abcd.jsonl", Blob: "b2", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{held}})
 	write(sleepRecord{Session: "s-empty", File: "claude/p/s-empty.jsonl", Blob: "b3", Level: "~", Start: "2026-11-18T12:00:00Z", Corrections: []sleepCorrection{}})
-	write(sleepRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []sleepCorrection{later, early}})
+	write(sleepRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []sleepCorrection{later, early, applied, stale}})
 
-	calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
-	out, err = run(t, dev, "", "sleep", "--list")
-	if err != nil {
-		t.Fatalf("sleep --list: %v\n%s", err, out)
-	}
-	want := `4 corrections in 3 judged sessions: 1 capture, 1 retrieval, 0 application, 0 stale, 1 unrelated, 1 before memory.
-
-{early} 2026-11-19 07:30 ~ s-later: before memory
-  You: No tabs here.
-  Rule: Use spaces.
-
-{later} 2026-11-19 09:00 ~ s-later: unrelated to memory
-  You: Not that file.
-  Rule: A detail.
-
-{held} 2026-11-18 10:02 ~/dev s-first: retrieval miss, dev/memories/ask-before-push.md
-  You: Never push without asking.
-  Rule: Ask before a push.
-  Why: The memory says so.
-
-{small} 2026-11-18 10:05 ~/dev s-first: capture miss
-  You: Use small commits.
-  Rule: Commit small.
-  Why: No memory holds it.
-`
 	// Each head line starts with the short id of its correction.
 	id := func(session string, c sleepCorrection) string { return short(correctionID(session, c.Time, c.Quote)) }
-	want = strings.NewReplacer("{early}", id("s-later", early), "{later}", id("s-later", later), "{held}", id("s-first", held), "{small}", id("s-first", small)).Replace(want)
-	if out != want {
-		t.Errorf("sleep --list:\n got %s\nwant %s", out, want)
+	fill := strings.NewReplacer("{early}", id("s-later", early), "{later}", id("s-later", later), "{applied}", id("s-later", applied), "{stale}", id("s-later", stale), "{held}", id("s-first", held), "{small}", id("s-first", small))
+	const (
+		totals      = "6 corrections in 3 judged sessions: 1 capture, 1 retrieval, 1 application, 1 stale, 1 unrelated, 1 before memory."
+		earlyText   = "\n{early} 2026-11-19 07:30 ~ s-later: before memory\n  You: No tabs here.\n  Rule: Use spaces.\n"
+		laterText   = "\n{later} 2026-11-19 09:00 ~ s-later: unrelated to memory\n  You: Not that file.\n  Rule: A detail.\n"
+		appliedText = "\n{applied} 2026-11-19 09:10 ~ s-later: application miss, dev/memories/ask-before-push.md\n  You: I said: ask first.\n  Rule: Ask before a push.\n  Why: The session read it.\n"
+		staleText   = "\n{stale} 2026-11-19 09:20 ~ s-later: stale memory, dev/memories/spaces.md\n  You: We use tabs now.\n  Rule: Use tabs.\n  Why: The memory says spaces.\n"
+		heldText    = "\n{held} 2026-11-18 10:02 ~/dev s-first: retrieval miss, dev/memories/ask-before-push.md\n  You: Never push without asking.\n  Rule: Ask before a push.\n  Why: The memory says so.\n"
+		smallText   = "\n{small} 2026-11-18 10:05 ~/dev s-first: capture miss\n  You: Use small commits.\n  Rule: Commit small.\n  Why: No memory holds it.\n"
+	)
+	calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
+	list := func(want string, args ...string) {
+		t.Helper()
+		out, err := run(t, dev, "", append([]string{"sleep"}, args...)...)
+		if want = fill.Replace(want); err != nil || out != want {
+			t.Errorf("sleep %v: %v\n got %s\nwant %s", args, err, out, want)
+		}
 	}
+	// A miss with no answer is open. The list prints no other correction, and --all prints each one.
+	list(totals+" 4 open.\n"+appliedText+staleText+heldText+smallText, "--list")
+	list(totals+" 4 open.\n"+earlyText+laterText+appliedText+staleText+heldText+smallText, "--list", "--all")
+	list(totals+" 4 open.\n"+earlyText+laterText+appliedText+staleText+heldText+smallText, "--all", "--list")
+
+	const memory = "dev/memories/ask-before-push.md"
+	answer := func(c sleepCorrection, session string, args ...string) {
+		t.Helper()
+		if out, err := run(t, dev, "", append([]string{"sleep", "--answer", correctionID(session, c.Time, c.Quote)}, args...)...); err != nil {
+			t.Fatalf("sleep --answer: %v\n%s", err, out)
+		}
+	}
+	answer(small, "s-first", "--reason", "It concerns only its task.")
+	list(totals+" 3 open.\n"+appliedText+staleText+heldText, "--list")
+	list(totals+" 3 open.\n"+earlyText+laterText+appliedText+staleText+heldText+smallText+"  Answer: It concerns only its task.\n", "--list", "--all")
+
+	// An answer shows its path, its reason, or both. With every miss answered, no correction is open.
+	answer(held, "s-first", "--with", memory)
+	answer(applied, "s-later", "--with", memory, "--reason", "The body states the rule first.")
+	answer(stale, "s-later", "--reason", "The memory went")
+	list(totals+" 0 open.\nNo correction is open.\n", "--list")
+	list(totals+" 0 open.\n"+earlyText+laterText+appliedText+"  Answer: "+memory+": The body states the rule first.\n"+staleText+"  Answer: The memory went\n"+heldText+"  Answer: "+memory+"\n"+smallText+"  Answer: It concerns only its task.\n", "--list", "--all")
+
 	if len(*calls) != 0 {
 		t.Errorf("--list called the agent %d times", len(*calls))
 	}
 	if records, _ := readSleep(repo); len(records) != 4 {
 		t.Errorf("--list changed the records: %d, want 4", len(records))
 	}
-	for _, args := range [][]string{{"--list", "--budget", "1"}, {"--list", "--sessions", "2"}, {"--list", "--budget="}, {"--sessions=", "--list"}} {
+	for _, args := range [][]string{{"--list", "--budget", "1"}, {"--list", "--sessions", "2"}, {"--list", "--budget="}, {"--sessions=", "--list"}, {"--list", "--all", "--budget", "1"}} {
 		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep --list") {
 			t.Errorf("sleep %v: %v, want a usage error", args, err)
 		}
+	}
+	// --all without --list starts no pass, also for the person at a terminal.
+	t.Setenv("CLAUDECODE", "")
+	for _, args := range [][]string{{"--all"}, {"--all", "--sessions", "1"}, {"--answer", id("s-first", small), "--reason", "r", "--all"}} {
+		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep") || !strings.Contains(err.Error(), "--all") {
+			t.Errorf("sleep %v: %v, want a usage error that names --all", args, err)
+		}
+	}
+	if records, _ := readSleep(repo); len(*calls) != 0 || len(records) != 4 {
+		t.Errorf("%d calls and %d records, want no call and 4 records: --all may start no pass", len(*calls), len(records))
 	}
 }
 

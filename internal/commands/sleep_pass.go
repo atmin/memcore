@@ -98,6 +98,7 @@ func runSleep(env Env, args []string) error {
 	budgetFlag := flags.String("budget", "", "the budget of the pass, in dollars at API prices")
 	sessionsFlag := flags.String("sessions", "", "the most sessions that the pass judges")
 	list := flags.Bool("list", false, "list the corrections of the records, and run no pass")
+	all := flags.Bool("all", false, "with --list: also the corrections that are not open")
 	answerFlag := flags.String("answer", "", "record what happened to these corrections, and run no pass")
 	withFlag := flags.String("with", "", "the document that now holds the rule of an answered correction")
 	reasonFlag := flags.String("reason", "", "the reason of an answer")
@@ -106,25 +107,28 @@ func runSleep(env Env, args []string) error {
 		return usageErr(err.Error())
 	}
 	if len(pos) != 0 {
-		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>] | --list | --answer <id>[,<id>] [--with <path>] [--reason <text>]")
+		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]")
 	}
 	given := map[string]bool{} // also a flag with an empty value, as in --budget=
 	flags.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	// An answer and a list run no agent and no pass, so an agent may run them too.
 	if given["answer"] {
-		if given["budget"] || given["sessions"] || given["list"] {
-			return usageErr("usage: memcore sleep --answer takes only --with and --reason, because it runs no pass and prints no list")
+		if given["budget"] || given["sessions"] || given["list"] || given["all"] {
+			return usageErr("usage: memcore sleep --answer takes only --with and --reason: no --budget, --sessions, --list or --all")
 		}
 		return answerSleep(env, *answerFlag, *withFlag, *reasonFlag)
 	}
 	if given["with"] || given["reason"] {
 		return usageErr("usage: memcore sleep --with and --reason belong to --answer <id>[,<id>]")
 	}
+	if given["all"] && !*list {
+		return usageErr("usage: memcore sleep --all belongs to --list")
+	}
 	if *list {
 		if given["budget"] || given["sessions"] {
 			return usageErr("usage: memcore sleep --list takes no --budget and no --sessions, because it runs no pass")
 		}
-		return listSleep(env)
+		return listSleep(env, *all)
 	}
 	limit := 0 // no limit
 	if *sessionsFlag != "" {
@@ -382,9 +386,20 @@ var verdictNames = map[string]string{
 	verdictBefore:      "before memory",
 }
 
-// listSleep prints the corrections of the records, the newest session first, and each session in the order of
-// its corrections. Each one starts with its short id, which sleep --answer takes. It runs no agent and writes nothing, so an agent may run it too.
-func listSleep(env Env) error {
+// openCorrection reports whether a correction is open: it is a miss or a stale memory, and it has no answer.
+func openCorrection(c judged, answers map[string]sleepAnswer) bool {
+	switch c.Verdict {
+	case verdictCapture, verdictRetrieval, verdictApplication, verdictStale:
+		_, answered := answers[c.id()]
+		return !answered
+	}
+	return false
+}
+
+// listSleep prints the open corrections of the records, or every correction with all. The newest session comes
+// first, and each session in the order of its corrections. Each one starts with its short id, which sleep
+// --answer takes. The first line counts every correction. It runs no agent and writes nothing, so an agent may run it too.
+func listSleep(env Env, all bool) error {
 	repo, err := openRepo()
 	if err != nil {
 		return err
@@ -412,13 +427,28 @@ func listSleep(env Env) error {
 	for _, r := range records {
 		sessions[r.Session] = true
 	}
+	answers, err := readAnswers(repo)
+	if err != nil {
+		return err
+	}
 	var counts verdictCounts
+	open := 0
 	for _, c := range corrections {
 		counts.add(c.Verdict)
+		if openCorrection(c, answers) {
+			open++
+		}
 	}
-	fmt.Fprintf(env.Out, "%s in %s: %s.\n", plural(len(corrections), "correction"), plural(len(sessions), "judged session"), counts.text())
+	fmt.Fprintf(env.Out, "%s in %s: %s. %d open.\n", plural(len(corrections), "correction"), plural(len(sessions), "judged session"), counts.text(), open)
+	if open == 0 && !all {
+		fmt.Fprintln(env.Out, "No correction is open.")
+		return nil
+	}
 	ids := shortIDs(correctionIDs(corrections))
 	for _, c := range corrections {
+		if !all && !openCorrection(c, answers) {
+			continue
+		}
 		when := c.Time
 		if t, err := time.Parse(time.RFC3339, c.Time); err == nil {
 			when = t.UTC().Format("2006-01-02 15:04")
@@ -436,6 +466,13 @@ func listSleep(env Env) error {
 		fmt.Fprintf(env.Out, "  Rule: %s\n", c.Summary)
 		if c.Reason != "" {
 			fmt.Fprintf(env.Out, "  Why: %s\n", c.Reason)
+		}
+		if a, ok := answers[c.id()]; ok {
+			text := a.Path
+			if a.Path != "" && a.Reason != "" {
+				text += ": "
+			}
+			fmt.Fprintf(env.Out, "  Answer: %s\n", text+a.Reason)
 		}
 	}
 	return nil
