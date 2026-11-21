@@ -22,6 +22,8 @@ The docs use each term below with one meaning only.
 - **correction**: your words in a session that tell the agent it did wrong, or how to do it differently.
 - **verdict**: what a sleep pass says about a correction: a miss of one kind, a stale memory, unrelated to memory, or before memory. Before memory means that memcore saw the session only after the correction.
 - **miss**: a correction that memory should have prevented. A capture miss means that no memory held the fact. A retrieval miss means that a memory held it, and the session did not read it. An application miss means that the session read the memory, and acted against it.
+- **answer**: what happened to a correction: the document that now holds its rule, or the reason. The reason stands alone for no change, and for a removed document.
+- **open correction**: a miss or a stale memory with no answer.
 - **mark**: a word that you add to a prompt, `#again`, `#wrong` or `#stale`, to say that memory failed you.
 - **accepted history**: the pushed commits of the memory repo, as the remote-tracking branch holds them after the last fetch. An automatic push accepts a commit without a review.
 - **review queue**: the commits of the memory repo after the accepted history, which are not yet pushed.
