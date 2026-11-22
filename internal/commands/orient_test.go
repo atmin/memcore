@@ -229,8 +229,8 @@ func TestOrientExact(t *testing.T) {
 	want := `memcore keeps the long-term memory of your agents, in ~/memory. Touch it only through these commands:
 
   memcore orient               Shows these commands, the voice and the indexes from the working directory up to the root.
-  memcore show <path>          Prints a document by its path in the memory repo. It prints a skill as the person accepted it.
-  memcore remember [--new] [--at <dir>] [--topic <topic>] Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.
+  memcore show <path>          Prints a document by its path in the memory repo.
+  memcore remember [--new] [--at <dir>] [--topic <topic>] Places, checks, indexes and commits a memory that it reads from standard input.
   memcore revise <path or name> --reason <text> Replaces a document with the one on standard input, checks it, and commits it with the reason.
   memcore forget <path or name> --reason <text> Removes a document, or the folder of a skill, and commits the removal with the reason.
   memcore move <path or name> <new name or path> --reason <text> Renames a memory, a note or a plan, or moves it to a topic folder or another level, and rewrites every link to it in the same commit.
@@ -238,17 +238,13 @@ func TestOrientExact(t *testing.T) {
   memcore verify <path>        Checks a document, or every document under a path, for dead references and forbidden words.
   memcore snapshot [--from <dir>] Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.
   memcore inbox                Fetches, then lists the unpushed commits as the fold at push leaves them.
-  memcore stats [<path>]       Measures whether memory helps, per week, from the use log and git history. With a path, it counts the reads of each document under it.
-  memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>] Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.
-  memcore push                 Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.
-  memcore recover              Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.
-  memcore drop <commit> [--reason <text>] Removes a commit of the review queue, with its fixups, after the person confirms.
-  memcore ui                   Opens a window to review, push, browse and search the memory repo.
+  memcore stats [<path>]       Measures whether memory helps, per week, from the use log and git history.
+  memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>] Finds the corrections in new transcripts, and judges each one against memory.
+  memcore push                 Fetches, folds and pushes the unpushed commits.
   memcore help [<command>]     Shows the input of a command, with an example.
   memcore version              Prints the version of memcore and the commit that it was built from.
-  memcore init [--dry-run] <remote> | --undo Sets up the memory repo, ~/memory or $MEMCORE_REPO, and Claude Code: its transcripts, its auto-memory, its hooks and its permissions.
 
-Only the person runs recover, drop, ui and init.
+Only the person runs recover, drop, ui and init, and a sleep pass.
 Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.
 Before you first use a command, run memcore help <command>: it shows the input, with an example.
 
@@ -283,10 +279,41 @@ The indexes, from the working directory to the root. Each line says when to read
 		t.Errorf("output =\n%s\nwant\n%s", out, want)
 	}
 	e := last(t, repo)
-	wantWords := map[string]int{"header": 565, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantWords := map[string]int{"header": 419, "~/dev/app": 34, "~/dev": 30, "~": 7}
 	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
 	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
 		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)
+	}
+}
+
+func TestOrientCommands(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	_, _, app := exactHome(t)
+	out, err := run(t, app, "", "orient")
+	if err != nil {
+		t.Fatalf("orient: %v\n%s", err, out)
+	}
+	start := strings.Index(out, "\n  memcore ")
+	if start < 0 {
+		t.Fatalf("orient lists no command:\n%s", out)
+	}
+	rows, _, ok := strings.Cut(out[start+1:], "\n\n")
+	if !ok {
+		t.Fatalf("the list of the commands has no blank line after it:\n%s", out)
+	}
+	rows += "\n"
+	if len(rows) > 2000 {
+		t.Errorf("the list of the commands is %d bytes, want at most 2,000:\n%s", len(rows), rows)
+	}
+	for _, row := range strings.SplitAfter(rows, "\n") {
+		for _, name := range []string{"recover", "drop", "ui", "init"} {
+			if strings.HasPrefix(row, "  memcore "+name+" ") {
+				t.Errorf("orient lists %s, which only the person runs: %q", name, row)
+			}
+		}
+		if strings.HasPrefix(row, "  memcore sleep ") && strings.Contains(row, "Only the person runs a pass") {
+			t.Errorf("the row of sleep holds its rule of the person: %q", row)
+		}
 	}
 }
 

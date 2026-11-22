@@ -76,12 +76,13 @@ func orientation(repo, dir string) (orientText, error) {
 		if c.Hidden {
 			continue
 		}
-		fmt.Fprintf(&w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Text())
 		if c.Yours {
 			yours = append(yours, c.Name)
+			continue
 		}
+		fmt.Fprintf(&w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
 	}
-	fmt.Fprintf(&w, "\nOnly the person runs %s.\n", series(yours))
+	fmt.Fprintf(&w, "\nOnly the person runs %s, and a sleep pass.\n", series(yours))
 	fmt.Fprintln(&w, "Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.")
 	fmt.Fprintln(&w, "Before you first use a command, run memcore help <command>: it shows the input, with an example.")
 	fmt.Fprintln(&w)
