@@ -6,7 +6,7 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 
 | | Command | Does |
 | --- | --- | --- |
-| read | `orient` | Shows the indexes from the working directory up to the root. At each level it prints the memories, skills, scripts, conventions and glossary, and the plans and notes as counts. It prints no sibling level. |
+| read | `orient` | Shows the indexes from the working directory up to the root. At each level it prints the memories, skills, scripts, conventions and glossary, and the plans and notes as counts. It prints no sibling level. Before the indexes, it lists the commands that an agent runs, with one sentence each. It names the commands that only you run in one line. |
 | | `show <path>` | Prints a document by its path. It prints a skill as you accepted it, and refuses a path through a symlink. |
 | | `help [<command>]` | Shows the input of a command, with one valid example. `memcore <command> --help` does the same. |
 | | `version` | Prints the version of memcore, and the commit that it was built from when the build records one. A build from source prints `dev` as its version. |
@@ -161,7 +161,7 @@ The hooks read only this simple form, so `stats` calls these reads "around memco
 - `~user`, `cd -` and a `cd` of several words resolve to nothing, as does a later relative path;
 - the hooks cannot tell which side of `&&` or `||` ran, so they count both.
 
-**Any agent.** The whole integration is one instruction in `AGENTS.md`<sup>[1](#sources)</sup>. It says: run `memcore orient` at the start of every session and follow it. The output of `orient` teaches the rest: the commands, the rules, the indexes and the skill descriptions.
+**Any agent.** The whole integration is one instruction in `AGENTS.md`<sup>[1](#sources)</sup>. It says: run `memcore orient` at the start of every session and follow it. The output of `orient` teaches the rest: the commands, the rules, the indexes and the skill descriptions. `memcore help <command>` holds the full text and the input of a command.
 
 **Claude Code.** Claude Code needs no instruction, because `init` adds five hooks to its settings:
 - The `SessionStart` hook runs `orient` for the directory of the session, at every start, resume, clear, compaction and fork. Claude Code adds the output to the context, so a session sees `orient` without an instruction. The hook also logs the start of the session. The line in the use log holds the words that the hook printed, and the levels that it shortened. Claude Code passes a hook output over 10,000 characters only as a file and a preview. So the hook prints at most 9,500 bytes:
