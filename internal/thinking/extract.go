@@ -23,6 +23,11 @@ type Correction struct {
 type ExtractRequest struct {
 	Transcript string
 	Model      string
+	Endpoint   string // the base URL of a local model server, or "" for Claude Code
+	PartBytes  int    // the most that one call reads, or 0 for partBytes
+	// Unmatched, when it is not nil, gets each correction of the agent whose quote matches no line of the person,
+	// with the time and the quote as the agent gave them.
+	Unmatched func(Correction)
 }
 
 const extractPrompt = `Standard input holds the transcript of one session between a person and a coding agent, as JSON lines.
@@ -54,8 +59,9 @@ type line struct {
 
 // Extract returns the corrections of a transcript, and the cost of its calls. It keeps a correction only when
 // its quote matches the text of one line of the person. The correction then takes the time of that line and the
-// words as the line spells them, so nothing of the agent's own wording reaches the record. On an error it
-// returns no correction, with the cost so far.
+// words as the line spells them, so nothing of the agent's own wording reaches the record. It passes each
+// correction whose quote matches no line to req.Unmatched, when that is not nil. On an error it returns no
+// correction, with the cost so far, and req.Unmatched may already have got the corrections of earlier parts.
 func Extract(req ExtractRequest) ([]Correction, float64, error) {
 	var yours []line
 	for _, raw := range strings.Split(req.Transcript, "\n") {
@@ -67,11 +73,15 @@ func Extract(req ExtractRequest) ([]Correction, float64, error) {
 	if len(yours) == 0 {
 		return nil, 0, nil // a session without a word of the person holds no correction
 	}
+	size := req.PartBytes
+	if size == 0 {
+		size = partBytes
+	}
 	var cost float64
 	var found []Correction
 	seen := map[[2]string]bool{}
-	for _, part := range parts(req.Transcript, partBytes) {
-		reply, err := Run(Request{Prompt: extractPrompt, Input: part, Schema: extractSchema, Model: req.Model})
+	for _, part := range parts(req.Transcript, size) {
+		reply, err := Run(Request{Prompt: extractPrompt, Input: part, Schema: extractSchema, Model: req.Model, Endpoint: req.Endpoint})
 		cost += reply.Cost
 		if err != nil {
 			return nil, cost, err
@@ -87,10 +97,17 @@ func Extract(req ExtractRequest) ([]Correction, float64, error) {
 			return nil, cost, fmt.Errorf("read the corrections of the agent: %w", err)
 		}
 		for _, c := range out.Corrections {
+			summary := strings.Join(strings.Fields(c.Summary), " ")
 			l, quote, ok := match(yours, c.Quote, c.Time)
-			if key := [2]string{l.Time, quote}; ok && !seen[key] {
+			if !ok {
+				if req.Unmatched != nil {
+					req.Unmatched(Correction{Time: c.Time, Quote: c.Quote, Summary: summary})
+				}
+				continue
+			}
+			if key := [2]string{l.Time, quote}; !seen[key] {
 				seen[key] = true
-				found = append(found, Correction{Time: l.Time, Quote: quote, Summary: strings.Join(strings.Fields(c.Summary), " ")})
+				found = append(found, Correction{Time: l.Time, Quote: quote, Summary: summary})
 			}
 		}
 	}

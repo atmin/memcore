@@ -33,6 +33,7 @@ type JudgeRequest struct {
 	Corrections []Correction
 	Memories    []Memory
 	Model       string
+	Endpoint    string // the base URL of a local model server, or "" for Claude Code
 }
 
 const judgePrompt = `Standard input holds one JSON object. "corrections" lists what a person corrected in a session with a coding agent:
@@ -76,7 +77,7 @@ func Judge(req JudgeRequest) ([]Finding, float64, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("write the input of the judge: %w", err)
 	}
-	reply, err := Run(Request{Prompt: judgePrompt, Input: string(input), Schema: judgeSchema, Model: req.Model})
+	reply, err := Run(Request{Prompt: judgePrompt, Input: string(input), Schema: judgeSchema, Model: req.Model, Endpoint: req.Endpoint})
 	if err != nil {
 		return nil, reply.Cost, err
 	}

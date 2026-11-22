@@ -156,3 +156,46 @@ func TestExtractParts(t *testing.T) {
 		t.Errorf("%d calls, want one for each of the %d parts", len(*calls), len(got))
 	}
 }
+
+func TestExtractPartBytes(t *testing.T) {
+	tr := transcript(
+		"2026-11-18T10:00:00Z|you|"+strings.Repeat("a", 100)+" Use small commits.",
+		"2026-11-18T10:01:00Z|you|"+strings.Repeat("b", 100)+" Never push.",
+	)
+	calls := fakeRun(t, answer(`{"corrections":[]}`, 0), answer(`{"corrections":[]}`, 0))
+	if _, _, err := Extract(ExtractRequest{Transcript: tr, Model: "small", Endpoint: "http://127.0.0.1:0", PartBytes: len(tr) - 10}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("%d calls, want 2", len(*calls))
+	}
+	for i, req := range *calls {
+		if req.Endpoint != "http://127.0.0.1:0" || req.Model != "small" {
+			t.Errorf("call %d: endpoint %q, model %q", i, req.Endpoint, req.Model)
+		}
+	}
+}
+
+func TestExtractUnmatched(t *testing.T) {
+	tr := transcript(
+		"2026-11-18T10:00:00Z|you|Add a retry to the fetch.",
+		"2026-11-18T10:02:00Z|you|Never push without asking.",
+	)
+	fakeRun(t, answer(`{"corrections":[
+		{"time":"2026-11-18T10:02:00Z","quote":"Never push without asking.","summary":"Ask before a push."},
+		{"time":"2026-11-18T10:02:00Z","quote":"Never push without asking.","summary":"The same again."},
+		{"time":"2026-11-18T10:01:00Z","quote":"Never force  push.","summary":"Ask  before\n a force push."}
+	]}`, 0))
+	var unmatched []Correction
+	found, _, err := Extract(ExtractRequest{Transcript: tr, Unmatched: func(c Correction) { unmatched = append(unmatched, c) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Correction{{"2026-11-18T10:02:00Z", "Never push without asking.", "Ask before a push."}}; !reflect.DeepEqual(found, want) {
+		t.Errorf("corrections:\n got %q\nwant %q", found, want)
+	}
+	want := []Correction{{"2026-11-18T10:01:00Z", "Never force  push.", "Ask before a force push."}}
+	if !reflect.DeepEqual(unmatched, want) {
+		t.Errorf("unmatched:\n got %q\nwant %q", unmatched, want)
+	}
+}

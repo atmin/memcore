@@ -91,3 +91,13 @@ func TestJudge(t *testing.T) {
 		}
 	})
 }
+
+func TestJudgeEndpoint(t *testing.T) {
+	calls := fakeRun(t, answer(`{"findings":[]}`, 0))
+	if _, _, err := Judge(JudgeRequest{Corrections: []Correction{{"t0", "Never push.", "Ask before a push."}}, Model: "small", Endpoint: "http://127.0.0.1:0"}); err != nil {
+		t.Fatal(err)
+	}
+	if req := (*calls)[0]; req.Endpoint != "http://127.0.0.1:0" || req.Model != "small" {
+		t.Errorf("endpoint %q, model %q", req.Endpoint, req.Model)
+	}
+}
