@@ -49,6 +49,18 @@ type sleepRecord struct {
 	Corrections []sleepCorrection `json:"corrections"`
 }
 
+// where names the place of the session of a record: its level, else its directory, else "outside home".
+// A session outside home has no level, and its directory tells the reader where it ran.
+func (r sleepRecord) where() string {
+	switch {
+	case r.Level != "":
+		return r.Level
+	case r.Dir != "":
+		return tilde(r.Dir)
+	}
+	return "outside home"
+}
+
 // sleepUnit is one file of the transcripts branch that a sleep pass judges.
 type sleepUnit struct {
 	Session string

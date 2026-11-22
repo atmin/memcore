@@ -316,7 +316,7 @@ func (p *pass) judge(u sleepUnit) error {
 		return err
 	}
 	p.judged[u.Session] = true
-	p.line, p.lineWritten = fmt.Sprintf("%s %s %s", u.Start.UTC().Format("2006-01-02"), u.Level, short(u.Session)), true
+	p.line, p.lineWritten = fmt.Sprintf("%s %s %s", u.Start.UTC().Format("2006-01-02"), record.where(), short(u.Session)), true
 	// A version beside a transcript repeats the start of its session, so a correction counts once.
 	for _, c := range result {
 		if key := [3]string{u.Session, c.Time, c.Quote}; !p.seen[key] {
@@ -457,7 +457,7 @@ func listSleep(env Env, all bool) error {
 		if name == "" {
 			name = c.Verdict
 		}
-		head := fmt.Sprintf("\n%s %s %s %s: %s", ids[c.id()], when, c.Record.Level, short(c.Record.Session), name)
+		head := fmt.Sprintf("\n%s %s %s %s: %s", ids[c.id()], when, c.Record.where(), short(c.Record.Session), name)
 		if c.Path != "" {
 			head += ", " + c.Path
 		}

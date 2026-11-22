@@ -398,6 +398,26 @@ func TestSleepPass(t *testing.T) {
 		}
 	})
 
+	t.Run("the line of a session outside home names its directory", func(t *testing.T) {
+		dev, repo := sleepFixture(t)
+		commit := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+		old := time.Now().Add(-50 * time.Hour).UTC().Truncate(time.Second)
+		transcriptT(t, repo, "claude/p2/s-away.jsonl", transcriptText("s-away", old, "you|Run the checks."))
+		start := startEvent("s-away", old, commit)
+		start.Level, start.Dir = "", "/tmp/work/checks"
+		if err := appendEvent(repo, &start); err != nil {
+			t.Fatal(err)
+		}
+		fakeAgent(t, twoCorrections(0), heldAndNone(0))
+		out, err := run(t, dev, "", "sleep")
+		if err != nil {
+			t.Fatalf("sleep: %v\n%s", err, out)
+		}
+		if want := " /tmp/work/checks s-away: 0 corrections.\n"; !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+	})
+
 	t.Run("refuses an agent", func(t *testing.T) {
 		dev, repo := sleepFixture(t)
 		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
@@ -522,6 +542,25 @@ func TestSleepList(t *testing.T) {
 	}
 	if records, _ := readSleep(repo); len(*calls) != 0 || len(records) != 4 {
 		t.Errorf("%d calls and %d records, want no call and 4 records: --all may start no pass", len(*calls), len(records))
+	}
+
+	// A session outside home has no level. Its head line names its directory, or says that it ran outside home.
+	away := sleepCorrection{Time: "2026-11-20T10:00:00Z", Quote: "Run the checks first.", Summary: "Run the checks first.", Verdict: verdictCapture}
+	nowhere := sleepCorrection{Time: "2026-11-20T11:00:00Z", Quote: "Keep the log.", Summary: "Keep the log.", Verdict: verdictCapture}
+	write(sleepRecord{Session: "s-away", File: "claude/p/s-away.jsonl", Blob: "b5", Dir: "/tmp/work/checks", Start: "2026-11-20T09:00:00Z", Corrections: []sleepCorrection{away}})
+	write(sleepRecord{Session: "s-nowhere", File: "claude/p/s-nowhere.jsonl", Blob: "b6", Start: "2026-11-20T10:30:00Z", Corrections: []sleepCorrection{nowhere}})
+	t.Setenv("CLAUDECODE", "1")
+	out, err = run(t, dev, "", "sleep", "--list")
+	if err != nil {
+		t.Fatalf("sleep --list: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"\n" + id("s-away", away) + " 2026-11-20 10:00 /tmp/work/checks s-away: capture miss\n",
+		"\n" + id("s-nowhere", nowhere) + " 2026-11-20 11:00 outside home s-nowhe: capture miss\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sleep --list lacks %q:\n%s", want, out)
+		}
 	}
 }
 
