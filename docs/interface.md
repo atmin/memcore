@@ -121,7 +121,7 @@ A pass has two limits, and ends at the first:
 - **The budget**, 2 dollars unless `--budget` or the setting `memcore.sleepbudget` says otherwise. The cost is what the agent reports, at API prices. On a subscription, a pass spends the limits of the plan and no money. A pass compares its cost with the budget before it starts a session. It finishes each session that it starts, so it can pass the budget by one session. No call of the agent gets a limit of its own.
 - **`--sessions <n>`**, the most sessions of one pass. It needs no price, so it also limits an agent that reports no cost.
 
-A pass prints one line for each session, then the totals: the judged sessions, the corrections by verdict, the cost and the sessions that wait. An error of the agent ends the pass with its cause, and the finished sessions stay recorded. A second pass refuses to run beside the first.
+A pass prints one line for each session, with its level or its directory. Then it prints the totals: the judged sessions, the corrections by verdict, the cost and the sessions that wait. An error of the agent ends the pass with its cause, and the finished sessions stay recorded. A second pass refuses to run beside the first.
 
 Three settings in the git configuration of the memory repo change a pass:
 - `memcore.sleepbudget`: the budget in dollars.
@@ -134,15 +134,19 @@ To judge every session again, delete `.git/memcore/sleep.jsonl` of the memory re
 
 Each correction has an id: the SHA-256 of its session, its time and its quote. So the id stays the same when a later pass finds the same words. A print shows the first 7 digits of an id, and more while two recorded corrections share them.
 
-A correction is open when it is a miss or a stale memory, and it has no answer. `memcore sleep --list` prints the open corrections, the newest session first: the id, the verdict, the memory if any, your words, the rule and the reason of the judge. Its first line counts every correction, and the open ones. `memcore sleep --list --all` prints every correction, and the answer of each answered one.
+A correction is open when it is a miss or a stale memory, and it has no answer. `memcore sleep --list` prints the open corrections, the newest session first. Each one has these lines:
+- a head line: the id, the time, the level of the session, the verdict and the memory if any;
+- your words, the rule and the reason of the judge, one line each.
+
+A session outside home has no level, so the list shows its directory instead, such as `/tmp/work/checks`. The first line of the list counts every correction, and the open ones. `memcore sleep --list --all` prints every correction, and the answer of each answered one. The answer of a moved document shows the path that the document has now.
 
 `memcore sleep --answer <id>[,<id>]` records an answer: what happened to a correction. It takes an id, or its first 7 digits or more.
 - `--with <path>` names the document of the memory repo that now holds the rule.
 - `--reason <text>` says why. It stands alone for no change, and after `forget` removed the document.
 
-An answer needs `--with`, `--reason` or both, and a second answer of a correction replaces the first. An answer changes no document. It is a line of the local state, `.git/memcore/answers.jsonl`. It still holds after you delete `sleep.jsonl`, when the next pass finds the same words. `--list` and `--answer` run no agent, so an agent may run them.
+An answer needs `--with`, `--reason` or both, and a second answer of a correction replaces the first. An answer changes no document. It is a line of the local state, `.git/memcore/answers.jsonl`. It still holds after you delete `sleep.jsonl`, when the next pass finds the same words. Its print follows each later `move` of its document, so a move needs no second answer. `--list` and `--answer` run no agent, so an agent may run them.
 
-**Learn.** memcore ships the [learn](../skills/learn/SKILL.md) skill. An agent follows it in a session with you, after a pass. It checks each open correction against memory as it is now. Then it makes the change that fits the verdict, with `remember`, `revise` or `forget`, and records the answer. A correction that concerns only its task gets a reason and no memory. The skill makes at most ten changes in one session, and each change lands in the review queue.
+**Learn.** memcore ships the [learn](../skills/learn/SKILL.md) skill, which an agent follows in a session with you after a pass. The agent checks each open correction against memory as it is now. Then it makes the change that fits the verdict, with `remember`, `revise` or `forget`, and records the answer. A correction that concerns only its task gets a reason and no memory. The skill makes at most ten changes in one session, and each change lands in the review queue. When `remember` warns about the bytes of `orient`, the skill adds no more memories at the top of that level.
 
 **Reads around memcore.** The `PostToolUse` and `PostToolUseFailure` hooks log the documents that a call of `Bash`, `Read` or `Grep` reads. So the reads also count what an agent reads around `memcore show`. A document is a regular file of the working tree, outside any `.git` folder, with no symlink on its path. The hooks find the documents by these rules:
 - `Read` reads its `file_path`, and `Grep` reads its `path` when the path is a file. A relative path starts at `cwd`.
@@ -174,7 +178,7 @@ Each hook runs memcore by its full path, so it does not depend on the `PATH` of 
 
 **Voice.** memcore ships the [voice](../skills/voice/SKILL.md) skill, which sets how agents talk to you and write. An agent never thinks to look up how to write, because it writes all the time. So `orient` pins the skill's "Always" and "Talking" parts, and the "Writing" part loads when an agent writes a document.
 
-**Cleanup.** memcore also ships the [cleanup](../skills/cleanup/SKILL.md) skill. It tidies one level of the memory repo while you watch: names, descriptions, topic folders, levels and sizes. It proposes every change before it applies one, and records its findings in a note at the level.
+**Cleanup.** memcore also ships the [cleanup](../skills/cleanup/SKILL.md) skill. It tidies one level of the memory repo while you watch: names, descriptions, topic folders, levels and sizes. It proposes every change before it applies one, and records its findings in a note at the level. Its survey counts the lines of the level in `orient`, and the bytes of the whole print. A print can pass the 9,500 bytes of the `SessionStart` hook far under the budget of 40 lines.
 
 **Building.** memcore also ships three skills for changes to code: [plan](../skills/plan/SKILL.md), [build](../skills/build/SKILL.md) and [review](../skills/review/SKILL.md). The plan skill turns a task into small steps that an agent with no context can build. After you approve the plan, the build skill builds every step in a worktree. Each step gets one commit and one review. The review skill prefers an agent from another provider as the reviewer.
 
