@@ -444,6 +444,10 @@ func listSleep(env Env, all bool) error {
 		fmt.Fprintln(env.Out, "No correction is open.")
 		return nil
 	}
+	follow, err := answerFollower(repo, answers)
+	if err != nil {
+		return err
+	}
 	ids := shortIDs(correctionIDs(corrections))
 	for _, c := range corrections {
 		if !all && !openCorrection(c, answers) {
@@ -468,7 +472,7 @@ func listSleep(env Env, all bool) error {
 			fmt.Fprintf(env.Out, "  Why: %s\n", c.Reason)
 		}
 		if a, ok := answers[c.id()]; ok {
-			text := a.Path
+			text := follow(a)
 			if a.Path != "" && a.Reason != "" {
 				text += ": "
 			}
@@ -476,6 +480,39 @@ func listSleep(env Env, all bool) error {
 		}
 	}
 	return nil
+}
+
+// answerFollower returns the path that the document of an answer has now. It follows each move of the use log
+// after the answer, and it undoes a dropped move, as the reads of stats do. Each answer gets a line of its own
+// among the lines of the log, after a line in the same second. These lines stay here, and never reach the use
+// log. An answer with no path, or with a time that does not parse, keeps its path as recorded.
+func answerFollower(repo string, answers map[string]sleepAnswer) (func(sleepAnswer) string, error) {
+	events, _, err := readLog(repo)
+	if err != nil {
+		return nil, err
+	}
+	logged := len(events)
+	var ids []string
+	for id, a := range answers {
+		if _, err := time.Parse(time.RFC3339, a.Answered); a.Path != "" && err == nil {
+			ids = append(ids, id)
+			events = append(events, Event{Time: a.Answered})
+		}
+	}
+	lines := ordered(events)
+	places := map[string]int{}
+	for _, l := range lines {
+		if l.index >= logged {
+			places[ids[l.index-logged]] = l.place
+		}
+	}
+	follow := follower(lines, clock().UTC())
+	return func(a sleepAnswer) string {
+		if place, ok := places[a.ID]; ok {
+			return follow(a.Path, place)
+		}
+		return a.Path
+	}, nil
 }
 
 // answerSleep records what happened to corrections: the document that now holds their rule, the reason, or

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -562,6 +563,137 @@ func TestSleepList(t *testing.T) {
 			t.Errorf("sleep --list lacks %q:\n%s", want, out)
 		}
 	}
+}
+
+func TestSleepListFollowsMoves(t *testing.T) {
+	const (
+		memory = "dev/memories/ask-before-push.md"
+		topic  = "dev/memories/git/ask-before-push.md"
+		newest = "dev/memories/review/ask-before-push.md"
+	)
+	base := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
+	at := func(d time.Duration) string { return base.Add(d).Format(time.RFC3339) }
+	writeEvents := func(t *testing.T, repo string, events []Event) {
+		t.Helper()
+		var lines []string
+		for _, e := range events {
+			line, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines = append(lines, string(line))
+		}
+		writeLog(t, repo, lines...)
+	}
+
+	// moved makes the fixture and moves its memory with a real memcore move, once for each target. Then it gives
+	// the moves the times base, base+1h and so on in the use log, so each answer has a known place among them.
+	moved := func(t *testing.T, targets ...string) (dev, repo string, moves []Event) {
+		t.Helper()
+		dev, repo = sleepFixture(t)
+		for _, topic := range []string{"memories/git", "memories/review"} {
+			if out, err := run(t, dev, "", "draft", "topic", topic, "--description", "Read when you test a move."); err != nil {
+				t.Fatalf("draft topic: %v\n%s", err, out)
+			}
+		}
+		from := memory
+		for _, to := range targets {
+			if out, err := run(t, dev, "", "move", from, to, "--reason", "It belongs there."); err != nil {
+				t.Fatalf("move: %v\n%s", err, out)
+			}
+			from = to
+		}
+		events, _, err := readLog(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range events {
+			if events[i].Command == "move" && events[i].Outcome == "ok" {
+				events[i].Time = at(time.Duration(len(moves)) * time.Hour)
+				moves = append(moves, events[i])
+			}
+		}
+		if len(moves) != len(targets) {
+			t.Fatalf("%d moves in the use log, want %d", len(moves), len(targets))
+		}
+		writeEvents(t, repo, events)
+		return dev, repo, moves
+	}
+
+	// answered records one correction for each answer, and the answer with its path and time. It returns the
+	// print of sleep --list --all.
+	type answer struct{ quote, path, answered string }
+	answered := func(t *testing.T, dev, repo string, answers ...answer) string {
+		t.Helper()
+		var corrections []sleepCorrection
+		var records []sleepAnswer
+		for i, a := range answers {
+			c := sleepCorrection{Time: at(time.Duration(i-48) * time.Minute), Quote: a.quote, Summary: a.quote, Verdict: verdictCapture}
+			corrections = append(corrections, c)
+			records = append(records, sleepAnswer{ID: correctionID("s-first", c.Time, c.Quote), Session: "s-first", Time: c.Time, Path: a.path, Answered: a.answered})
+		}
+		if err := appendSleep(repo, sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: at(-time.Hour), Corrections: corrections}); err != nil {
+			t.Fatal(err)
+		}
+		if err := appendAnswers(repo, records); err != nil {
+			t.Fatal(err)
+		}
+		out, err := run(t, dev, "", "sleep", "--list", "--all")
+		if err != nil {
+			t.Fatalf("sleep --list --all: %v\n%s", err, out)
+		}
+		return out
+	}
+	shows := func(t *testing.T, out, quote, want string) {
+		t.Helper()
+		if text := "  You: " + quote + "\n  Rule: " + quote + "\n  Answer: " + want + "\n"; !strings.Contains(out, text) {
+			t.Errorf("the answer of %q is not %s:\n%s", quote, want, out)
+		}
+	}
+
+	t.Run("a move carries an answer from before it", func(t *testing.T) {
+		dev, repo, _ := moved(t, topic)
+		out := answered(t, dev, repo,
+			answer{"Answered before the move.", memory, at(-time.Hour)},
+			answer{"Answered after the move.", topic, at(30 * time.Minute)},
+			answer{"Answered in the second of the move.", topic, at(0)},
+			answer{"Answered at no readable time.", memory, "yesterday"})
+		shows(t, out, "Answered before the move.", topic)
+		shows(t, out, "Answered after the move.", topic)
+		shows(t, out, "Answered in the second of the move.", topic)
+		shows(t, out, "Answered at no readable time.", memory)
+	})
+
+	t.Run("a second move carries the answer on", func(t *testing.T) {
+		dev, repo, _ := moved(t, topic, newest)
+		out := answered(t, dev, repo,
+			answer{"Answered before both moves.", memory, at(-time.Hour)},
+			answer{"Answered between the moves.", topic, at(30 * time.Minute)},
+			answer{"Answered after both moves.", newest, at(2 * time.Hour)})
+		shows(t, out, "Answered before both moves.", newest)
+		shows(t, out, "Answered between the moves.", newest)
+		shows(t, out, "Answered after both moves.", newest)
+	})
+
+	t.Run("an answer older than the first line of the use log", func(t *testing.T) {
+		dev, repo, moves := moved(t, topic)
+		writeEvents(t, repo, moves) // the move is the only line of the use log
+		out := answered(t, dev, repo, answer{"Answered before the log began.", memory, at(-time.Hour)})
+		shows(t, out, "Answered before the log began.", topic)
+	})
+
+	t.Run("a dropped move gives the answer its old path back", func(t *testing.T) {
+		dev, repo, moves := moved(t, topic)
+		drop := Event{Time: at(time.Hour), Command: "drop", Outcome: "ok", Dropped: []string{moves[0].Made[0]}}
+		if err := appendEvent(repo, &drop); err != nil {
+			t.Fatal(err)
+		}
+		out := answered(t, dev, repo,
+			answer{"Answered before the move.", memory, at(-time.Hour)},
+			answer{"Answered between the move and the drop.", topic, at(30 * time.Minute)})
+		shows(t, out, "Answered before the move.", memory)
+		shows(t, out, "Answered between the move and the drop.", memory)
+	})
 }
 
 func TestSleepAnswer(t *testing.T) {

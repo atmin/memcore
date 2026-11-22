@@ -403,11 +403,12 @@ func measure(events []Event, facts map[string]fact, now time.Time) []week {
 	return weeks
 }
 
-// ordered returns the lines of the log in the order of time, each with its place in that order.
+// ordered returns the lines of the log in the order of time, each with its place in that order. Lines with the
+// same time keep the order of events.
 func ordered(events []Event) []logLine {
 	lines := make([]logLine, len(events))
 	for i, e := range events {
-		lines[i] = logLine{Event: e, at: eventTime(e)}
+		lines[i] = logLine{Event: e, at: eventTime(e), index: i}
 	}
 	sort.SliceStable(lines, func(a, b int) bool { return lines[a].at.Before(lines[b].at) })
 	for i := range lines {
@@ -469,6 +470,7 @@ type logLine struct {
 	Event
 	at    time.Time
 	place int
+	index int // the index of the line in the events that ordered got
 }
 
 // add counts the lines of a week, oldest first. changed holds the committed revise and forget lines of each
