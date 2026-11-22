@@ -4,6 +4,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,7 @@ func main() {
 		}
 	}
 	if len(os.Args) < 2 {
-		usage()
+		usage(os.Stderr)
 		os.Exit(2)
 	}
 	name, args := os.Args[1], os.Args[2:]
@@ -37,7 +38,7 @@ func main() {
 	err = commands.Run(env, name, args)
 	if errors.Is(err, commands.ErrUnknown) {
 		fmt.Fprintf(os.Stderr, "memcore: unknown command %q\n", name)
-		usage()
+		usage(os.Stderr)
 		os.Exit(2)
 	}
 	if err != nil {
@@ -59,11 +60,12 @@ func workingDir(name string, args []string, getwd func() (string, error)) (strin
 	return dir, nil
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: memcore <command> [arguments]")
+// usage writes the form of memcore and the list of its commands to w.
+func usage(w io.Writer) {
+	fmt.Fprintln(w, "usage: memcore <command> [arguments]")
 	for _, c := range commands.Table() {
 		if !c.Hidden {
-			fmt.Fprintf(os.Stderr, "  %-18s %s\n", c.Name+" "+c.Args, c.Does)
+			fmt.Fprintf(w, "  %-18s %s\n", c.Name+" "+c.Args, c.Text())
 		}
 	}
 }

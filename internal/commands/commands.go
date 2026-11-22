@@ -24,19 +24,28 @@ type Env struct {
 type Command struct {
 	Name   string
 	Args   string
-	Does   string
+	Does   string // the first sentence of the text, which orient prints
+	More   string // the sentences after the first, which help and the usage print and orient leaves out
 	Yours  bool   // only the person runs it
 	Hidden bool   // only a hook of an agent runs it, so orient, help and the usage leave it out
 	Help   string // unused: helps, in help.go, holds the help of each command
 	Run    func(env Env, args []string) error
 }
 
+// Text returns the whole text of a command: Does, then More when it is not empty.
+func (c Command) Text() string {
+	if c.More == "" {
+		return c.Does
+	}
+	return c.Does + " " + c.More
+}
+
 // Table returns the commands in the order that the usage and orient print them.
 func Table() []Command {
 	return []Command{
 		{Name: "orient", Does: "Shows these commands, the voice and the indexes from the working directory up to the root.", Run: runOrient},
-		{Name: "show", Args: "<path>", Does: "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.", Run: runShow},
-		{Name: "remember", Args: "[--new] [--at <dir>] [--topic <topic>]", Does: "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
+		{Name: "show", Args: "<path>", Does: "Prints a document by its path in the memory repo.", More: "It prints a skill as the person accepted it.", Run: runShow},
+		{Name: "remember", Args: "[--new] [--at <dir>] [--topic <topic>]", Does: "Places, checks, indexes and commits a memory that it reads from standard input.", More: "It lists near-duplicates and writes nothing, unless --new.", Run: runRemember},
 		{Name: "revise", Args: "<path or name> --reason <text>", Does: "Replaces a document with the one on standard input, checks it, and commits it with the reason.", Run: runRevise},
 		{Name: "forget", Args: "<path or name> --reason <text>", Does: "Removes a document, or the folder of a skill, and commits the removal with the reason.", Run: runForget},
 		{Name: "move", Args: "<path or name> <new name or path> --reason <text>", Does: "Renames a memory, a note or a plan, or moves it to a topic folder or another level, and rewrites every link to it in the same commit.", Run: runMove},
@@ -44,9 +53,9 @@ func Table() []Command {
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
 		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits as the fold at push leaves them.", Run: runInbox},
-		{Name: "stats", Args: "[<path>]", Does: "Measures whether memory helps, per week, from the use log and git history. With a path, it counts the reads of each document under it.", Run: runStats},
-		{Name: "sleep", Args: "[--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]", Does: "Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.", Run: runSleep},
-		{Name: "push", Does: "Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.", Run: runPush},
+		{Name: "stats", Args: "[<path>]", Does: "Measures whether memory helps, per week, from the use log and git history.", More: "With a path, it counts the reads of each document under it.", Run: runStats},
+		{Name: "sleep", Args: "[--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]", Does: "Finds the corrections in new transcripts, and judges each one against memory.", More: "Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.", Run: runSleep},
+		{Name: "push", Does: "Fetches, folds and pushes the unpushed commits.", More: "The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.", Run: runPush},
 		{Name: "recover", Does: "Drops the accepted commits that the remote lost, and moves the queue onto the remote, after the person confirms.", Yours: true, Run: runRecover},
 		{Name: "drop", Args: "<commit> [--reason <text>]", Does: "Removes a commit of the review queue, with its fixups, after the person confirms.", Yours: true, Run: runDrop},
 		{Name: "ui", Does: "Opens a window to review, push, browse and search the memory repo.", Yours: true, Run: runUI},

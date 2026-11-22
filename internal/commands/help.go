@@ -301,7 +301,7 @@ func help(c Command) string {
 	if h, ok := helps[c.Name]; ok {
 		return h
 	}
-	return fmt.Sprintf("memcore %s\n\n%s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+	return fmt.Sprintf("memcore %s\n\n%s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Text())
 }
 
 // runHelp lists the commands, or prints the help of one.
@@ -319,7 +319,7 @@ func runHelp(env Env, args []string) error {
 	}
 	for _, c := range Table() {
 		if !c.Hidden {
-			fmt.Fprintf(env.Out, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+			fmt.Fprintf(env.Out, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Text())
 		}
 	}
 	fmt.Fprintln(env.Out, "\nmemcore help <command> shows the input of a command, with an example.")

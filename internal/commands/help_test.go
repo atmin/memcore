@@ -155,3 +155,36 @@ Every other commit waits for the person. memcore inbox shows the state of each c
 		}
 	})
 }
+
+func TestTableDoes(t *testing.T) {
+	for _, c := range Table() {
+		if !strings.HasSuffix(c.Does, ".") || strings.Contains(c.Does, ". ") {
+			t.Errorf("the Does of %s is not one sentence: %q", c.Name, c.Does)
+		}
+	}
+}
+
+func TestTableText(t *testing.T) {
+	want := map[string]string{
+		"show":     "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.",
+		"remember": "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.",
+		"stats":    "Measures whether memory helps, per week, from the use log and git history. With a path, it counts the reads of each document under it.",
+		"sleep":    "Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.",
+		"push":     "Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.",
+	}
+	seen := map[string]bool{}
+	for _, c := range Table() {
+		if text, ok := want[c.Name]; ok {
+			seen[c.Name] = true
+			if c.Text() != text {
+				t.Errorf("the text of %s = %q, want %q", c.Name, c.Text(), text)
+			}
+		}
+		if c.Name == "orient" && c.Text() != c.Does {
+			t.Errorf("the text of orient = %q, want its Does %q", c.Text(), c.Does)
+		}
+	}
+	if len(seen) != len(want) {
+		t.Errorf("the table holds %d of the %d commands with more than one sentence", len(seen), len(want))
+	}
+}

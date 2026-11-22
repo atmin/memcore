@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -108,5 +109,33 @@ func TestBundleLog(t *testing.T) {
 	log, err := os.ReadFile(filepath.Join(home, "Library", "Logs", "memcore.log"))
 	if err != nil || !strings.Contains(string(log), "memcore ui:") || !strings.Contains(string(log), "CLAUDECODE") {
 		t.Errorf("memcore.log = %q, %v, want the refusal of ui", log, err)
+	}
+}
+
+func TestUsage(t *testing.T) {
+	var b bytes.Buffer
+	usage(&b)
+	out := b.String()
+	if !strings.HasPrefix(out, "usage: memcore <command> [arguments]\n") {
+		t.Errorf("usage = %q, want the line of the form first", out)
+	}
+	show := false
+	for _, row := range strings.Split(out, "\n") {
+		f := strings.Fields(row)
+		if len(f) == 0 {
+			continue
+		}
+		if f[0] == "hook" {
+			t.Errorf("the usage names hook: %q", row)
+		}
+		if f[0] == "show" {
+			show = true
+			if !strings.Contains(row, "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.") {
+				t.Errorf("the row of show = %q, want both of its sentences", row)
+			}
+		}
+	}
+	if !show {
+		t.Errorf("the usage has no row of show:\n%s", out)
 	}
 }

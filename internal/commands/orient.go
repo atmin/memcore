@@ -76,7 +76,7 @@ func orientation(repo, dir string) (orientText, error) {
 		if c.Hidden {
 			continue
 		}
-		fmt.Fprintf(&w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Does)
+		fmt.Fprintf(&w, "  memcore %-20s %s\n", strings.TrimSpace(c.Name+" "+c.Args), c.Text())
 		if c.Yours {
 			yours = append(yours, c.Name)
 		}
