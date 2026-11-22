@@ -97,8 +97,8 @@ type week struct {
 	errors           []ranked      // the largest groups of failed calls, largest first, ties by text
 	moreErrors       int           // the groups after them
 	marks            [3]int        // the count of each mark, in the order of marks
-	misses           verdictCounts // the verdicts of the sleep passes on the corrections of the week
-	judged           int           // the sessions that started in the week, with a record of a sleep pass
+	misses           verdictCounts // the verdicts of the reflect passes on the corrections of the week
+	judged           int           // the sessions that started in the week, with a record of a reflect pass
 	started          int           // the sessions with a logged start in the week
 }
 
@@ -868,17 +868,17 @@ func writeWeek(b *strings.Builder, w week, k int) {
 	writeMisses(b, w)
 }
 
-// writeMisses writes the misses of a week, and the sessions of the week that a sleep pass judged.
+// writeMisses writes the misses of a week, and the sessions of the week that a reflect pass judged.
 func writeMisses(b *strings.Builder, w week) {
 	if w.judged == 0 && w.misses == (verdictCounts{}) {
-		b.WriteString("  Misses: no judged session. memcore sleep judges them.\n")
+		b.WriteString("  Misses: no judged session. memcore reflect judges them.\n")
 		return
 	}
 	fmt.Fprintf(b, "  Misses: %d capture, %d retrieval, %d application, %d stale, in %s of %d.\n",
 		w.misses.capture, w.misses.retrieval, w.misses.application, w.misses.stale, plural(w.judged, "judged session"), w.started)
 }
 
-// countMisses fills the misses of each week from the records of the sleep passes. A correction counts in the
+// countMisses fills the misses of each week from the records of the reflect passes. A correction counts in the
 // week of its own time. A session counts in the week of its first logged start, as started, and as judged when
 // a record holds it.
 func countMisses(weeks []week, events []Event, records []reflectRecord, now time.Time) {

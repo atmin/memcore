@@ -241,7 +241,7 @@ func TestInternalSessionLogsNothing(t *testing.T) {
 	prev := startBackground
 	t.Cleanup(func() { startBackground = prev })
 	startBackground = func(string, ...string) error { started++; return nil }
-	// A snapshot is due, so a call outside a sleep pass would start one.
+	// A snapshot is due, so a call outside a reflect pass would start one.
 	os.Remove(filepath.Join(store.StateDir(repo), "snapshot.json"))
 	os.Remove(filepath.Join(store.StateDir(repo), "snapshot.started"))
 	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o755); err != nil {

@@ -159,9 +159,9 @@ memcore stats measures it. Then it lists the unpushed commits as the fold at pus
 them, for the review of the person. Each entry counts the fixups that fold into it. When the
 fold drops commits, the list ends with their count.
 `,
-	"sleep": `memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]
+	"reflect": `memcore reflect [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]
 
-It runs one sleep pass. Only the person runs a pass, at a terminal, because a pass sends
+It runs one reflect pass. Only the person runs a pass, at a terminal, because a pass sends
 redacted transcripts to the provider of the agent, and spends the limits of its plan.
 
 A pass reads each transcript of the transcripts branch that it has not judged yet, of a
@@ -182,9 +182,9 @@ pass starts a session only while its cost is below the budget, and it finishes e
 session that it starts. So a pass can pass its budget by one session. These settings of
 the memory repo change the defaults:
 
-  git config memcore.sleepbudget 2       the budget of a pass
-  git config memcore.sleepmodel sonnet   the model of the agent
-  git config memcore.sleepagent claude   the agent, and claude is the only one now
+  git config memcore.reflectbudget 2       the budget of a pass
+  git config memcore.reflectmodel sonnet   the model of the agent
+  git config memcore.reflectagent claude   the agent, and claude is the only one now
 
 --list runs no pass, and an agent may run it. It prints the open corrections, the newest
 session first, each with its id, its verdict, your words, the rule and the reason of the
@@ -203,10 +203,10 @@ changes no document: it is a line of the local state, in .git/memcore/answers.js
 
 Examples:
 
-memcore sleep --list
-memcore sleep --list --all
-memcore sleep --answer 3f9c2ab --with dev/memories/ask-before-push.md
-memcore sleep --answer 3f9c2ab,80d41e7 --reason "It concerns only its task."
+memcore reflect --list
+memcore reflect --list --all
+memcore reflect --answer 3f9c2ab --with dev/memories/ask-before-push.md
+memcore reflect --answer 3f9c2ab,80d41e7 --reason "It concerns only its task."
 `,
 	"stats": `memcore stats [<path>]
 

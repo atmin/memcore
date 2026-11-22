@@ -98,7 +98,7 @@ func Run(env Env, name string, args []string) error {
 		warnings = io.Discard
 	}
 	if internal() {
-		// A session of a sleep pass is memcore's own work, so it logs nothing and starts no background work.
+		// A session of a reflect pass is memcore's own work, so it logs nothing and starts no background work.
 		if late {
 			return nil
 		}
@@ -134,7 +134,7 @@ func Run(env Env, name string, args []string) error {
 	return err
 }
 
-// internalEnv marks a headless session that memcore started itself, for a sleep pass.
+// internalEnv marks a headless session that memcore started itself, for a reflect pass.
 const internalEnv = "MEMCORE_INTERNAL"
 
 // internal reports whether a session of memcore's own runs this call.

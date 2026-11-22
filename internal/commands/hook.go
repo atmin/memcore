@@ -53,7 +53,7 @@ func runHook(env Env, args []string) error {
 		return usageErr("usage: memcore hook session-start|prompt|session-end|tool < input.json")
 	}
 	if internal() {
-		return nil // a session of a sleep pass prints no orient, logs no mark and starts no snapshot
+		return nil // a session of a reflect pass prints no orient, logs no mark and starts no snapshot
 	}
 	env.event().Hook = args[0]
 	raw, err := io.ReadAll(env.In)

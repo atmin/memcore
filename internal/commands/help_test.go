@@ -48,28 +48,28 @@ func TestHelp(t *testing.T) {
 		if err != nil {
 			t.Fatalf("help drop: %v\n%s", err, help)
 		}
-		if !strings.Contains(help, "and records the reason.\n") || strings.Contains(help, "sleep") {
+		if !strings.Contains(help, "and records the reason.\n") || strings.Contains(help, "reflect") {
 			t.Errorf("help drop = %q", help)
 		}
 	})
 
-	t.Run("sleep names each verdict", func(t *testing.T) {
-		help, err := run(t, home, "", "help", "sleep")
+	t.Run("reflect names each verdict", func(t *testing.T) {
+		help, err := run(t, home, "", "help", "reflect")
 		if err != nil {
-			t.Fatalf("help sleep: %v\n%s", err, help)
+			t.Fatalf("help reflect: %v\n%s", err, help)
 		}
 		for _, verdict := range []string{"capture", "retrieval", "application", "stale", "unrelated", "before"} {
 			if !strings.Contains(help, "\n  "+verdict+" ") {
-				t.Errorf("the help of sleep does not name the verdict %s:\n%s", verdict, help)
+				t.Errorf("the help of reflect does not name the verdict %s:\n%s", verdict, help)
 			}
 		}
-		for _, want := range []string{"memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]\n", "memcore sleep --answer 3f9c2ab --with "} {
+		for _, want := range []string{"memcore reflect [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]\n", "memcore reflect --answer 3f9c2ab --with "} {
 			if !strings.Contains(help, want) {
-				t.Errorf("the help of sleep lacks %q:\n%s", want, help)
+				t.Errorf("the help of reflect lacks %q:\n%s", want, help)
 			}
 		}
 		if !strings.Contains(help, "by one session") {
-			t.Errorf("the help of sleep does not say how far a pass can pass its budget:\n%s", help)
+			t.Errorf("the help of reflect does not say how far a pass can pass its budget:\n%s", help)
 		}
 	})
 
@@ -169,7 +169,7 @@ func TestTableText(t *testing.T) {
 		"show":     "Prints a document by its path in the memory repo. It prints a skill as the person accepted it.",
 		"remember": "Places, checks, indexes and commits a memory that it reads from standard input. It lists near-duplicates and writes nothing, unless --new.",
 		"stats":    "Measures whether memory helps, per week, from the use log and git history. With a path, it counts the reads of each document under it.",
-		"sleep":    "Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.",
+		"reflect":  "Finds the corrections in new transcripts, and judges each one against memory. Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.",
 		"push":     "Fetches, folds and pushes the unpushed commits. The person confirms at the terminal. An agent runs it only when the person asks, and pushes only memories, notes, plans and indexes.",
 	}
 	seen := map[string]bool{}

@@ -251,7 +251,7 @@ The 7 days to 2026-12-10 10:00 UTC:
   Friction: 1 failed call.
       1  revise: <n> faults, so revise wrote nothing; memcore help revise shows the input
   Marks: 0 #again, 1 #wrong, 0 #stale.
-  Misses: no judged session. memcore sleep judges them.
+  Misses: no judged session. memcore reflect judges them.
 
 The 7 days to 2026-12-03 10:00 UTC:
   No call of memcore.
@@ -266,7 +266,7 @@ The 7 days to 2026-11-26 10:00 UTC:
     ~: 200 words, about 267 tokens, 12 lines of 40
   Friction: 0 failed calls.
   Marks: 0 #again, 0 #wrong, 0 #stale.
-  Misses: no judged session. memcore sleep judges them.
+  Misses: no judged session. memcore reflect judges them.
 
 Memories with no logged read in 30 days:
   The use log starts on 2026-11-25, so this needs 30 days of it.
@@ -874,7 +874,7 @@ func TestMeasureEndToEnd(t *testing.T) {
 		"  Friction: 1 failed call.\n" +
 		"      1  revise: parse the memory: no frontmatter: the first line is not ---; memcore help revise shows the input\n" +
 		"  Marks: 0 #again, 1 #wrong, 0 #stale.\n" +
-		"  Misses: no judged session. memcore sleep judges them.\n" +
+		"  Misses: no judged session. memcore reflect judges them.\n" +
 		"\nMemories with no logged read in 30 days:\n" +
 		"  The use log starts on " + eventTime(all[0]).Format("2006-01-02") + ", so this needs 30 days of it.\n" +
 		"The log holds reads around memcore since " + stamp(eventTime(tool)) + ".\n"
@@ -1093,7 +1093,7 @@ func TestMisses(t *testing.T) {
 	for _, line := range []string{
 		"  Misses: 2 capture, 1 retrieval, 1 application, 1 stale, in 1 judged session of 2.\n",
 		"  Misses: 0 capture, 0 retrieval, 1 application, 0 stale, in 2 judged sessions of 2.\n",
-		"  Misses: no judged session. memcore sleep judges them.\n",
+		"  Misses: no judged session. memcore reflect judges them.\n",
 	} {
 		if strings.Count(b.String(), line) != 1 {
 			t.Errorf("the weeks lack %q once:\n%s", line, b.String())

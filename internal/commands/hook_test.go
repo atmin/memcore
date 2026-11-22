@@ -195,7 +195,7 @@ func TestHook(t *testing.T) {
 		if _, err := run(t, home, "not json", "hook", "prompt"); err == nil {
 			t.Error("hook with input that is not JSON succeeded")
 		}
-		if _, err := run(t, home, "{}", "hook", "sleep"); err == nil {
+		if _, err := run(t, home, "{}", "hook", "reflect"); err == nil {
 			t.Error("hook with an unknown event succeeded")
 		}
 	})

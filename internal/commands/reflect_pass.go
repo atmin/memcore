@@ -21,22 +21,22 @@ import (
 	"github.com/atmin/memcore/internal/thinking"
 )
 
-// The settings of a sleep pass, in the git configuration of the memory repo, and their first values.
+// The settings of a reflect pass, in the git configuration of the memory repo, and their first values.
 // Real passes will show whether these values fit, so each one lives only here.
 const (
-	reflectBudgetKey = "memcore.sleepbudget" // the budget of a pass, in dollars at API prices
-	reflectAgentKey  = "memcore.sleepagent"  // the agent that thinks
-	reflectModelKey  = "memcore.sleepmodel"  // the model of that agent
+	reflectBudgetKey = "memcore.reflectbudget" // the budget of a pass, in dollars at API prices
+	reflectAgentKey  = "memcore.reflectagent"  // the agent that thinks
+	reflectModelKey  = "memcore.reflectmodel"  // the model of that agent
 
 	reflectBudget = 2.0
 	reflectAgent  = "claude"
 	reflectModel  = "sonnet"
 
-	// sleepLock is the file of the local state that a running pass locks.
-	reflectLock = "sleep.lock"
+	// reflectLock is the file of the local state that a running pass locks.
+	reflectLock = "reflect.lock"
 )
 
-// sleepAgents are the agents that a sleep pass can run.
+// reflectAgents are the agents that a reflect pass can run.
 var reflectAgents = []string{"claude"}
 
 // setting reads a key of the git configuration of the memory repo, and returns false when it is unset.
@@ -53,7 +53,7 @@ func setting(repo, key string) (string, bool, error) {
 	return strings.TrimSpace(out), true, nil
 }
 
-// sleepSettings returns the budget, the agent and the model of a pass. A budget of the command line wins over
+// reflectSettings returns the budget, the agent and the model of a pass. A budget of the command line wins over
 // the setting.
 func reflectSettings(repo, budgetFlag string) (budget float64, agent, model string, err error) {
 	budget, agent, model = reflectBudget, reflectAgent, reflectModel
@@ -90,10 +90,10 @@ func reflectSettings(repo, budgetFlag string) (budget float64, agent, model stri
 	return budget, agent, model, nil
 }
 
-// runSleep runs one sleep pass: it extracts the corrections of each new transcript, and judges each one.
+// runReflect runs one reflect pass: it extracts the corrections of each new transcript, and judges each one.
 // A pass proposes no change, commits nothing and writes only the records of the local state.
 func runReflect(env Env, args []string) error {
-	flags := flag.NewFlagSet("sleep", flag.ContinueOnError)
+	flags := flag.NewFlagSet("reflect", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	budgetFlag := flags.String("budget", "", "the budget of the pass, in dollars at API prices")
 	sessionsFlag := flags.String("sessions", "", "the most sessions that the pass judges")
@@ -107,26 +107,26 @@ func runReflect(env Env, args []string) error {
 		return usageErr(err.Error())
 	}
 	if len(pos) != 0 {
-		return usageErr("usage: memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]")
+		return usageErr("usage: memcore reflect [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]")
 	}
 	given := map[string]bool{} // also a flag with an empty value, as in --budget=
 	flags.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	// An answer and a list run no agent and no pass, so an agent may run them too.
 	if given["answer"] {
 		if given["budget"] || given["sessions"] || given["list"] || given["all"] {
-			return usageErr("usage: memcore sleep --answer takes only --with and --reason: no --budget, --sessions, --list or --all")
+			return usageErr("usage: memcore reflect --answer takes only --with and --reason: no --budget, --sessions, --list or --all")
 		}
 		return answerReflect(env, *answerFlag, *withFlag, *reasonFlag)
 	}
 	if given["with"] || given["reason"] {
-		return usageErr("usage: memcore sleep --with and --reason belong to --answer <id>[,<id>]")
+		return usageErr("usage: memcore reflect --with and --reason belong to --answer <id>[,<id>]")
 	}
 	if given["all"] && !*list {
-		return usageErr("usage: memcore sleep --all belongs to --list")
+		return usageErr("usage: memcore reflect --all belongs to --list")
 	}
 	if *list {
 		if given["budget"] || given["sessions"] {
-			return usageErr("usage: memcore sleep --list takes no --budget and no --sessions, because it runs no pass")
+			return usageErr("usage: memcore reflect --list takes no --budget and no --sessions, because it runs no pass")
 		}
 		return listReflect(env, *all)
 	}
@@ -138,7 +138,7 @@ func runReflect(env Env, args []string) error {
 	}
 	// A pass spends the limits of the plan of the person, and sends redacted transcripts to the provider.
 	if err := guards.Agent(); err != nil {
-		return fmt.Errorf("only the person runs a sleep pass, at a terminal: %w", err)
+		return fmt.Errorf("only the person runs a reflect pass, at a terminal: %w", err)
 	}
 	repo, err := openRepo()
 	if err != nil {
@@ -153,7 +153,7 @@ func runReflect(env Env, args []string) error {
 		return err
 	}
 	if !ok {
-		return errors.New("a sleep pass already runs: wait until it ends")
+		return errors.New("a reflect pass already runs: wait until it ends")
 	}
 	defer unlock()
 
@@ -170,7 +170,7 @@ func runReflect(env Env, args []string) error {
 		return err
 	}
 	if len(units) == 0 {
-		fmt.Fprintln(env.Out, "No session waits for a sleep pass.")
+		fmt.Fprintln(env.Out, "No session waits for a reflect pass.")
 		return nil
 	}
 
@@ -215,12 +215,12 @@ func runReflect(env Env, args []string) error {
 		fmt.Fprintln(env.Out, stopped)
 	}
 	if failure != nil {
-		return fmt.Errorf("the sleep pass stopped, and it keeps the sessions that it finished: %w", failure)
+		return fmt.Errorf("the reflect pass stopped, and it keeps the sessions that it finished: %w", failure)
 	}
 	return nil
 }
 
-// pass is the state of one running sleep pass.
+// pass is the state of one running reflect pass.
 type pass struct {
 	env    Env
 	repo   string
@@ -396,8 +396,8 @@ func openCorrection(c judged, answers map[string]reflectAnswer) bool {
 	return false
 }
 
-// listSleep prints the open corrections of the records, or every correction with all. The newest session comes
-// first, and each session in the order of its corrections. Each one starts with its short id, which sleep
+// listReflect prints the open corrections of the records, or every correction with all. The newest session comes
+// first, and each session in the order of its corrections. Each one starts with its short id, which reflect
 // --answer takes. The first line counts every correction. It runs no agent and writes nothing, so an agent may run it too.
 func listReflect(env Env, all bool) error {
 	repo, err := openRepo()
@@ -409,7 +409,7 @@ func listReflect(env Env, all bool) error {
 		return err
 	}
 	if len(records) == 0 {
-		fmt.Fprintln(env.Out, "No sleep pass has judged a session yet. The person runs one with memcore sleep.")
+		fmt.Fprintln(env.Out, "No reflect pass has judged a session yet. The person runs one with memcore reflect.")
 		return nil
 	}
 	corrections := reflectCorrections(records)
@@ -515,7 +515,7 @@ func answerFollower(repo string, answers map[string]reflectAnswer) (func(reflect
 	}, nil
 }
 
-// answerSleep records what happened to corrections: the document that now holds their rule, the reason, or
+// answerReflect records what happened to corrections: the document that now holds their rule, the reason, or
 // both. It runs no agent and changes no document, so an agent may run it too. It writes every answer of a call,
 // or none.
 func answerReflect(env Env, idList, with, reason string) error {
@@ -556,10 +556,10 @@ func answerReflect(env Env, idList, with, reason string) error {
 	for _, prefix := range strings.Split(idList, ",") {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
 		if prefix == "" {
-			return usageErr("usage: memcore sleep --answer <id>[,<id>] takes one id or more, with a comma between two")
+			return usageErr("usage: memcore reflect --answer <id>[,<id>] takes one id or more, with a comma between two")
 		}
 		if len(prefix) < shortDigits {
-			return inputErrf("--answer: the id %s is too short: give 7 digits or more, as memcore sleep --list prints them", prefix)
+			return inputErrf("--answer: the id %s is too short: give 7 digits or more, as memcore reflect --list prints them", prefix)
 		}
 		var fits []int
 		for i, id := range all {
@@ -569,7 +569,7 @@ func answerReflect(env Env, idList, with, reason string) error {
 		}
 		switch len(fits) {
 		case 0:
-			return inputErrf("--answer: no recorded correction has the id %s: memcore sleep --list prints the ids", prefix)
+			return inputErrf("--answer: no recorded correction has the id %s: memcore reflect --list prints the ids", prefix)
 		case 1:
 		default:
 			var ids []string

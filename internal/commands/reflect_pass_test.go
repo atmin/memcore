@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -32,7 +33,7 @@ func fakeAgent(t *testing.T, extract func(n int, req thinking.Request) (thinking
 	return &calls
 }
 
-// sleepFixture makes a memory repo with one memory at ~/dev, and two old sessions there: s-first with two
+// reflectFixture makes a memory repo with one memory at ~/dev, and two old sessions there: s-first with two
 // corrections, and s-second with none. It returns the directory ~/dev and the repo.
 func reflectFixture(t *testing.T) (dev, repo string) {
 	t.Helper()
@@ -76,9 +77,9 @@ func TestReflectPass(t *testing.T) {
 	t.Run("judges and records each session", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
 		calls := fakeAgent(t, twoCorrections(0.10), heldAndNone(0.05))
-		out, err := run(t, dev, "", "sleep")
+		out, err := run(t, dev, "", "reflect")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{
 			" ~/dev s-first: 2 corrections: 1 capture, 1 retrieval, 0 application, 0 stale, 0 unrelated.\n",
@@ -101,6 +102,9 @@ func TestReflectPass(t *testing.T) {
 		if in := (*calls)[1].Input; !strings.Contains(in, "Push only when the person asks.") || !strings.Contains(in, "dev/memories/ask-before-push.md") {
 			t.Errorf("the judge does not see the memory of the session:\n%s", in)
 		}
+		if _, err := os.Stat(filepath.Join(store.StateDir(repo), "reflect.jsonl")); err != nil {
+			t.Errorf("the pass wrote no reflect.jsonl in the local state: %v", err)
+		}
 		records, err := readReflect(repo)
 		if err != nil || len(records) != 2 {
 			t.Fatalf("records = %+v, %v; want 2", records, err)
@@ -119,8 +123,8 @@ func TestReflectPass(t *testing.T) {
 		if second := records[1]; second.Session != "s-second" || second.Corrections == nil || len(second.Corrections) != 0 {
 			t.Errorf("record of the session without a correction = %+v", second)
 		}
-		if e := last(t, repo); e.Command != "sleep" || e.Outcome != "ok" {
-			t.Errorf("event = %+v, want an ok sleep", e)
+		if e := last(t, repo); e.Command != "reflect" || e.Outcome != "ok" {
+			t.Errorf("event = %+v, want an ok reflect", e)
 		}
 
 		// A second pass judges nothing new.
@@ -128,8 +132,8 @@ func TestReflectPass(t *testing.T) {
 			t.Error("a second pass calls the agent")
 			return thinking.Reply{}, nil
 		}, nil)
-		out, err = run(t, dev, "", "sleep")
-		if err != nil || out != "No session waits for a sleep pass.\n" {
+		out, err = run(t, dev, "", "reflect")
+		if err != nil || out != "No session waits for a reflect pass.\n" {
 			t.Errorf("second pass: %v\n%s", err, out)
 		}
 	})
@@ -155,9 +159,9 @@ func TestReflectPass(t *testing.T) {
 			judged = append(judged, req.Input)
 			return thinking.Reply{Output: []byte(`{"findings":[{"index":0,"kind":"none","reason":"No memory holds it."}]}`)}, nil
 		})
-		out, err := run(t, dev, "", "sleep")
+		out, err := run(t, dev, "", "reflect")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{
 			" ~/dev s-early: 2 corrections: 1 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated, 1 before memory.\n",
@@ -187,9 +191,9 @@ func TestReflectPass(t *testing.T) {
 			t.Fatal(err)
 		}
 		fakeAgent(t, twoCorrections(0), heldAndNone(0))
-		out, err := run(t, dev, "", "sleep")
+		out, err := run(t, dev, "", "reflect")
 		if err != nil || !strings.Contains(out, "1 capture, 0 retrieval, 1 application") {
-			t.Errorf("sleep: %v\n%s", err, out)
+			t.Errorf("reflect: %v\n%s", err, out)
 		}
 		if !strings.Contains(out, "The pass cost about 0.00 dollars at API prices.") {
 			t.Errorf("an agent that reports no cost:\n%s", out)
@@ -199,9 +203,9 @@ func TestReflectPass(t *testing.T) {
 	t.Run("the budget ends the pass", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
 		fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
-		out, err := run(t, dev, "", "sleep", "--budget", "0.25")
+		out, err := run(t, dev, "", "reflect", "--budget", "0.25")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.27 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.25 dollars.\n"} {
 			if !strings.Contains(out, want) {
@@ -217,9 +221,9 @@ func TestReflectPass(t *testing.T) {
 		dev, repo := reflectFixture(t)
 		// The extraction alone passes the budget, and the judge of the same session still runs.
 		calls := fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
-		out, err := run(t, dev, "", "sleep", "--budget", "0.15")
+		out, err := run(t, dev, "", "reflect", "--budget", "0.15")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{" ~/dev s-first: 2 corrections: 1 capture, 1 retrieval,", "Judged 1 session with 2 corrections", "about 0.27 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.15 dollars.\n"} {
 			if !strings.Contains(out, want) {
@@ -238,9 +242,9 @@ func TestReflectPass(t *testing.T) {
 	t.Run("a cost equal to the budget ends the pass", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
 		fakeAgent(t, twoCorrections(0.25), heldAndNone(0.25)) // two costs that add up to 0.5 exactly
-		out, err := run(t, dev, "", "sleep", "--budget", "0.50")
+		out, err := run(t, dev, "", "reflect", "--budget", "0.50")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.50 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.50 dollars.\n"} {
 			if !strings.Contains(out, want) {
@@ -255,9 +259,9 @@ func TestReflectPass(t *testing.T) {
 	t.Run("a cost below the budget starts the next session", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
 		fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
-		out, err := run(t, dev, "", "sleep", "--budget", "0.30")
+		out, err := run(t, dev, "", "reflect", "--budget", "0.30")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{"Judged 2 sessions with 2 corrections", "about 0.47 dollars at API prices. No session waits.\n"} {
 			if !strings.Contains(out, want) {
@@ -287,9 +291,9 @@ func TestReflectPass(t *testing.T) {
 		transcriptT(t, repo, "claude/p1/s-first.0123abcd.jsonl", transcriptText("s-first", old, "you|Add a retry.", "you|Never push without asking.", "you|Use small commits.", "you|A version beside."))
 		calls := fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
 		// The first file of the session passes the budget, and the pass still reads the second file.
-		out, err := run(t, dev, "", "sleep", "--budget", "0.15")
+		out, err := run(t, dev, "", "reflect", "--budget", "0.15")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		for _, want := range []string{"Judged 1 session with 2 corrections", "about 0.54 dollars at API prices. 1 session waits.\n", "The pass stopped at its budget of 0.15 dollars.\n"} {
 			if !strings.Contains(out, want) {
@@ -306,13 +310,13 @@ func TestReflectPass(t *testing.T) {
 
 	t.Run("the setting of the budget and of the model", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
-		gitT(t, repo, "config", "memcore.sleepbudget", "0.75")
-		gitT(t, repo, "config", "memcore.sleepmodel", "haiku")
+		gitT(t, repo, "config", "memcore.reflectbudget", "0.75")
+		gitT(t, repo, "config", "memcore.reflectmodel", "haiku")
 		// The first session costs 0.80 dollars: more than the setting, and less than the default of 2 dollars.
 		calls := fakeAgent(t, twoCorrections(0.50), heldAndNone(0.30))
-		out, err := run(t, dev, "", "sleep")
+		out, err := run(t, dev, "", "reflect")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		if !strings.Contains(out, "The pass stopped at its budget of 0.75 dollars.\n") || !strings.Contains(out, "1 session waits.\n") {
 			t.Errorf("the pass does not stop at the budget of the setting:\n%s", out)
@@ -320,16 +324,16 @@ func TestReflectPass(t *testing.T) {
 		if req := (*calls)[0]; req.Model != "haiku" {
 			t.Errorf("request = model %q, want haiku", req.Model)
 		}
-		gitT(t, repo, "config", "memcore.sleepbudget", "much")
-		if _, err := run(t, dev, "", "sleep"); err == nil || !strings.Contains(err.Error(), "memcore.sleepbudget") {
+		gitT(t, repo, "config", "memcore.reflectbudget", "much")
+		if _, err := run(t, dev, "", "reflect"); err == nil || !strings.Contains(err.Error(), "memcore.reflectbudget") {
 			t.Errorf("a budget that is no number: %v", err)
 		}
 		for _, bad := range []string{"NaN", "Inf", "-Inf", "0", "-1"} {
-			gitT(t, repo, "config", "memcore.sleepbudget", bad)
-			if _, err := run(t, dev, "", "sleep"); err == nil || !strings.Contains(err.Error(), "memcore.sleepbudget") {
+			gitT(t, repo, "config", "memcore.reflectbudget", bad)
+			if _, err := run(t, dev, "", "reflect"); err == nil || !strings.Contains(err.Error(), "memcore.reflectbudget") {
 				t.Errorf("the setting %s: %v, want an error", bad, err)
 			}
-			if _, err := run(t, dev, "", "sleep", "--budget", bad); err == nil || !strings.Contains(err.Error(), "--budget") {
+			if _, err := run(t, dev, "", "reflect", "--budget", bad); err == nil || !strings.Contains(err.Error(), "--budget") {
 				t.Errorf("--budget %s: %v, want an error", bad, err)
 			}
 		}
@@ -351,9 +355,9 @@ func TestReflectPass(t *testing.T) {
 		}
 		transcriptT(t, repo, "claude/p1/s-first.0123abcd.jsonl", transcriptText("s-first", old, "you|Add a retry.", "you|Never push without asking.", "you|Use small commits.", "you|A version beside."))
 		calls := fakeAgent(t, twoCorrections(0.10), heldAndNone(0.05))
-		out, err := run(t, dev, "", "sleep", "--sessions", "1")
+		out, err := run(t, dev, "", "reflect", "--sessions", "1")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		if n := strings.Count(out, " s-first: "); n != 1 || !strings.Contains(out, " ~/dev s-first: 2 corrections: 1 capture, 1 retrieval,") {
 			t.Errorf("the session has %d lines, want one line that counts each correction once:\n%s", n, out)
@@ -370,11 +374,11 @@ func TestReflectPass(t *testing.T) {
 			t.Errorf("%d calls, want 4: an extraction and a judge for each file of the session", len(*calls))
 		}
 		for _, bad := range []string{"0", "-1", "two"} {
-			if _, err := run(t, dev, "", "sleep", "--sessions", bad); err == nil || !strings.Contains(err.Error(), "--sessions") || !strings.Contains(err.Error(), "memcore help sleep") {
+			if _, err := run(t, dev, "", "reflect", "--sessions", bad); err == nil || !strings.Contains(err.Error(), "--sessions") || !strings.Contains(err.Error(), "memcore help reflect") {
 				t.Errorf("--sessions %s: %v, want a usage error", bad, err)
 			}
 		}
-		if _, err := run(t, dev, "", "sleep", "now"); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep") {
+		if _, err := run(t, dev, "", "reflect", "now"); err == nil || !strings.Contains(err.Error(), "usage: memcore reflect") {
 			t.Errorf("an argument: %v, want a usage error", err)
 		}
 	})
@@ -387,7 +391,7 @@ func TestReflectPass(t *testing.T) {
 			}
 			return twoCorrections(0.10)(n, req)
 		}, heldAndNone(0.05))
-		out, err := run(t, dev, "", "sleep")
+		out, err := run(t, dev, "", "reflect")
 		if err == nil || !strings.Contains(err.Error(), "Not logged in") || !strings.Contains(err.Error(), "keeps the sessions that it finished") {
 			t.Fatalf("err = %v, want the cause", err)
 		}
@@ -410,9 +414,9 @@ func TestReflectPass(t *testing.T) {
 			t.Fatal(err)
 		}
 		fakeAgent(t, twoCorrections(0), heldAndNone(0))
-		out, err := run(t, dev, "", "sleep")
+		out, err := run(t, dev, "", "reflect")
 		if err != nil {
-			t.Fatalf("sleep: %v\n%s", err, out)
+			t.Fatalf("reflect: %v\n%s", err, out)
 		}
 		if want := " /tmp/work/checks s-away: 0 corrections.\n"; !strings.Contains(out, want) {
 			t.Errorf("the output lacks %q:\n%s", want, out)
@@ -423,8 +427,8 @@ func TestReflectPass(t *testing.T) {
 		dev, repo := reflectFixture(t)
 		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
 		t.Setenv("CLAUDECODE", "1")
-		_, err := run(t, dev, "", "sleep")
-		if err == nil || !strings.Contains(err.Error(), "only the person runs a sleep pass") {
+		_, err := run(t, dev, "", "reflect")
+		if err == nil || !strings.Contains(err.Error(), "only the person runs a reflect pass") {
 			t.Errorf("err = %v, want a refusal", err)
 		}
 		if records, _ := readReflect(repo); len(*calls) != 0 || len(records) != 0 {
@@ -434,9 +438,9 @@ func TestReflectPass(t *testing.T) {
 
 	t.Run("an unknown agent", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
-		gitT(t, repo, "config", "memcore.sleepagent", "llama")
+		gitT(t, repo, "config", "memcore.reflectagent", "llama")
 		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
-		_, err := run(t, dev, "", "sleep")
+		_, err := run(t, dev, "", "reflect")
 		if err == nil || !strings.Contains(err.Error(), `"llama"`) || !strings.Contains(err.Error(), "the known agents are claude") || len(*calls) != 0 {
 			t.Errorf("err = %v with %d calls, want the known agents and no call", err, len(*calls))
 		}
@@ -444,13 +448,13 @@ func TestReflectPass(t *testing.T) {
 
 	t.Run("a pass that already runs", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
-		unlock, ok, err := store.TryLockFile(repo, reflectLock)
+		unlock, ok, err := store.TryLockFile(repo, "reflect.lock")
 		if err != nil || !ok {
 			t.Fatalf("lock: %v, %v", ok, err)
 		}
 		defer unlock()
 		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
-		if _, err := run(t, dev, "", "sleep"); err == nil || !strings.Contains(err.Error(), "a sleep pass already runs") || len(*calls) != 0 {
+		if _, err := run(t, dev, "", "reflect"); err == nil || !strings.Contains(err.Error(), "a reflect pass already runs") || len(*calls) != 0 {
 			t.Errorf("err = %v with %d calls, want a refusal", err, len(*calls))
 		}
 	})
@@ -459,8 +463,8 @@ func TestReflectPass(t *testing.T) {
 func TestReflectList(t *testing.T) {
 	dev, repo := reflectFixture(t)
 	t.Setenv("CLAUDECODE", "1") // an agent may list
-	out, err := run(t, dev, "", "sleep", "--list")
-	if err != nil || out != "No sleep pass has judged a session yet. The person runs one with memcore sleep.\n" {
+	out, err := run(t, dev, "", "reflect", "--list")
+	if err != nil || out != "No reflect pass has judged a session yet. The person runs one with memcore reflect.\n" {
 		t.Fatalf("without records: %v\n%s", err, out)
 	}
 	write := func(r reflectRecord) {
@@ -495,9 +499,9 @@ func TestReflectList(t *testing.T) {
 	calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
 	list := func(want string, args ...string) {
 		t.Helper()
-		out, err := run(t, dev, "", append([]string{"sleep"}, args...)...)
+		out, err := run(t, dev, "", append([]string{"reflect"}, args...)...)
 		if want = fill.Replace(want); err != nil || out != want {
-			t.Errorf("sleep %v: %v\n got %s\nwant %s", args, err, out, want)
+			t.Errorf("reflect %v: %v\n got %s\nwant %s", args, err, out, want)
 		}
 	}
 	// A miss with no answer is open. The list prints no other correction, and --all prints each one.
@@ -508,8 +512,8 @@ func TestReflectList(t *testing.T) {
 	const memory = "dev/memories/ask-before-push.md"
 	answer := func(c reflectCorrection, session string, args ...string) {
 		t.Helper()
-		if out, err := run(t, dev, "", append([]string{"sleep", "--answer", correctionID(session, c.Time, c.Quote)}, args...)...); err != nil {
-			t.Fatalf("sleep --answer: %v\n%s", err, out)
+		if out, err := run(t, dev, "", append([]string{"reflect", "--answer", correctionID(session, c.Time, c.Quote)}, args...)...); err != nil {
+			t.Fatalf("reflect --answer: %v\n%s", err, out)
 		}
 	}
 	answer(small, "s-first", "--reason", "It concerns only its task.")
@@ -530,15 +534,15 @@ func TestReflectList(t *testing.T) {
 		t.Errorf("--list changed the records: %d, want 4", len(records))
 	}
 	for _, args := range [][]string{{"--list", "--budget", "1"}, {"--list", "--sessions", "2"}, {"--list", "--budget="}, {"--sessions=", "--list"}, {"--list", "--all", "--budget", "1"}} {
-		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep --list") {
-			t.Errorf("sleep %v: %v, want a usage error", args, err)
+		if _, err := run(t, dev, "", append([]string{"reflect"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore reflect --list") {
+			t.Errorf("reflect %v: %v, want a usage error", args, err)
 		}
 	}
 	// --all without --list starts no pass, also for the person at a terminal.
 	t.Setenv("CLAUDECODE", "")
 	for _, args := range [][]string{{"--all"}, {"--all", "--sessions", "1"}, {"--answer", id("s-first", small), "--reason", "r", "--all"}} {
-		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep") || !strings.Contains(err.Error(), "--all") {
-			t.Errorf("sleep %v: %v, want a usage error that names --all", args, err)
+		if _, err := run(t, dev, "", append([]string{"reflect"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore reflect") || !strings.Contains(err.Error(), "--all") {
+			t.Errorf("reflect %v: %v, want a usage error that names --all", args, err)
 		}
 	}
 	if records, _ := readReflect(repo); len(*calls) != 0 || len(records) != 4 {
@@ -551,16 +555,16 @@ func TestReflectList(t *testing.T) {
 	write(reflectRecord{Session: "s-away", File: "claude/p/s-away.jsonl", Blob: "b5", Dir: "/tmp/work/checks", Start: "2026-11-20T09:00:00Z", Corrections: []reflectCorrection{away}})
 	write(reflectRecord{Session: "s-nowhere", File: "claude/p/s-nowhere.jsonl", Blob: "b6", Start: "2026-11-20T10:30:00Z", Corrections: []reflectCorrection{nowhere}})
 	t.Setenv("CLAUDECODE", "1")
-	out, err = run(t, dev, "", "sleep", "--list")
+	out, err = run(t, dev, "", "reflect", "--list")
 	if err != nil {
-		t.Fatalf("sleep --list: %v\n%s", err, out)
+		t.Fatalf("reflect --list: %v\n%s", err, out)
 	}
 	for _, want := range []string{
 		"\n" + id("s-away", away) + " 2026-11-20 10:00 /tmp/work/checks s-away: capture miss\n",
 		"\n" + id("s-nowhere", nowhere) + " 2026-11-20 11:00 outside home s-nowhe: capture miss\n",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("sleep --list lacks %q:\n%s", want, out)
+			t.Errorf("reflect --list lacks %q:\n%s", want, out)
 		}
 	}
 }
@@ -621,7 +625,7 @@ func TestReflectListFollowsMoves(t *testing.T) {
 	}
 
 	// answered records one correction for each answer, and the answer with its path and time. It returns the
-	// print of sleep --list --all.
+	// print of reflect --list --all.
 	type answer struct{ quote, path, answered string }
 	answered := func(t *testing.T, dev, repo string, answers ...answer) string {
 		t.Helper()
@@ -638,9 +642,9 @@ func TestReflectListFollowsMoves(t *testing.T) {
 		if err := appendAnswers(repo, records); err != nil {
 			t.Fatal(err)
 		}
-		out, err := run(t, dev, "", "sleep", "--list", "--all")
+		out, err := run(t, dev, "", "reflect", "--list", "--all")
 		if err != nil {
-			t.Fatalf("sleep --list --all: %v\n%s", err, out)
+			t.Fatalf("reflect --list --all: %v\n%s", err, out)
 		}
 		return out
 	}
@@ -742,14 +746,14 @@ func TestReflectAnswer(t *testing.T) {
 			"Answered " + full(twinA)[:8] + ": Both concern only their task.\nAnswered " + full(twinB)[:8] + ": Both concern only their task.\n",
 			map[string]reflectAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}, full(twinA): {Reason: "Both concern only their task."}, full(twinB): {Reason: "Both concern only their task."}}},
 	}
-	if list, err := run(t, dev, "", "sleep", "--list"); err != nil || !strings.Contains(list, "\n"+full(twinA)[:8]+" 2026-11-18 10:05 ") || !strings.Contains(list, "\n"+full(twinB)[:8]+" 2026-11-18 10:05 ") {
-		t.Errorf("sleep --list does not print 8 digits of each twin: %v\n%s", err, list)
+	if list, err := run(t, dev, "", "reflect", "--list"); err != nil || !strings.Contains(list, "\n"+full(twinA)[:8]+" 2026-11-18 10:05 ") || !strings.Contains(list, "\n"+full(twinB)[:8]+" 2026-11-18 10:05 ") {
+		t.Errorf("reflect --list does not print 8 digits of each twin: %v\n%s", err, list)
 	}
 	for _, c := range good {
 		t.Run(c.name, func(t *testing.T) {
-			out, err := run(t, dev, "", append([]string{"sleep"}, c.args...)...)
+			out, err := run(t, dev, "", append([]string{"reflect"}, c.args...)...)
 			if err != nil || out != c.out {
-				t.Fatalf("sleep %v: %v\n got %q\nwant %q", c.args, err, out, c.out)
+				t.Fatalf("reflect %v: %v\n got %q\nwant %q", c.args, err, out, c.out)
 			}
 			answers, err := readAnswers(repo)
 			if err != nil || len(answers) != len(c.want) {
@@ -773,10 +777,10 @@ func TestReflectAnswer(t *testing.T) {
 		args []string
 		want []string // each must be in the error
 	}{
-		{"an unknown id", []string{"--answer", "0123456789", "--reason", "r"}, []string{"0123456789", "memcore sleep --list", "memcore help sleep"}},
-		{"an unknown id beside a known one", []string{"--answer", smallID + ",0123456789", "--reason", "r"}, []string{"0123456789", "memcore sleep --list"}},
+		{"an unknown id", []string{"--answer", "0123456789", "--reason", "r"}, []string{"0123456789", "memcore reflect --list", "memcore help reflect"}},
+		{"an unknown id beside a known one", []string{"--answer", smallID + ",0123456789", "--reason", "r"}, []string{"0123456789", "memcore reflect --list"}},
 		{"a short prefix", []string{"--answer", heldID[:6], "--reason", "r"}, []string{heldID[:6], "7 digits"}},
-		{"an empty id", []string{"--answer", heldID + ",", "--reason", "r"}, []string{"usage: memcore sleep --answer"}},
+		{"an empty id", []string{"--answer", heldID + ",", "--reason", "r"}, []string{"usage: memcore reflect --answer"}},
 		{"a prefix that fits two corrections", []string{"--answer", "1d2633e", "--reason", "r"}, []string{full(twinA), full(twinB)}},
 		{"a path that is no document", []string{"--answer", heldID, "--with", "dev/memories/none.md"}, []string{"--with", "dev/memories/none.md"}},
 		{"a folder", []string{"--answer", heldID, "--with", "dev/memories"}, []string{"--with", "dev/memories"}},
@@ -785,23 +789,23 @@ func TestReflectAnswer(t *testing.T) {
 		{"a path outside the memory repo", []string{"--answer", heldID, "--with", "../memory/dev/memories/ask-before-push.md"}, []string{"--with", "not a path in the memory repo"}},
 		{"no --with and no --reason", []string{"--answer", heldID}, []string{"--with <path>", "--reason <text>"}},
 		{"an empty reason alone", []string{"--answer", heldID, "--reason", " "}, []string{"--with <path>", "--reason <text>"}},
-		{"--answer beside --budget", []string{"--answer", heldID, "--reason", "r", "--budget", "1"}, []string{"usage: memcore sleep --answer"}},
-		{"--answer beside --sessions", []string{"--answer", heldID, "--reason", "r", "--sessions", "1"}, []string{"usage: memcore sleep --answer"}},
-		{"--answer beside --list", []string{"--list", "--answer", heldID, "--reason", "r"}, []string{"usage: memcore sleep --answer"}},
+		{"--answer beside --budget", []string{"--answer", heldID, "--reason", "r", "--budget", "1"}, []string{"usage: memcore reflect --answer"}},
+		{"--answer beside --sessions", []string{"--answer", heldID, "--reason", "r", "--sessions", "1"}, []string{"usage: memcore reflect --answer"}},
+		{"--answer beside --list", []string{"--list", "--answer", heldID, "--reason", "r"}, []string{"usage: memcore reflect --answer"}},
 	}
 	for _, c := range bad {
 		t.Run(c.name, func(t *testing.T) {
-			out, err := run(t, dev, "", append([]string{"sleep"}, c.args...)...)
+			out, err := run(t, dev, "", append([]string{"reflect"}, c.args...)...)
 			if err == nil {
-				t.Fatalf("sleep %v: no error\n%s", c.args, out)
+				t.Fatalf("reflect %v: no error\n%s", c.args, out)
 			}
 			for _, want := range c.want {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("sleep %v: the error lacks %q: %v", c.args, want, err)
+					t.Errorf("reflect %v: the error lacks %q: %v", c.args, want, err)
 				}
 			}
 			if strings.Contains(out, "Answered") {
-				t.Errorf("sleep %v printed an answer: %s", c.args, out)
+				t.Errorf("reflect %v printed an answer: %s", c.args, out)
 			}
 		})
 	}
@@ -812,8 +816,8 @@ func TestReflectAnswer(t *testing.T) {
 	// --with or --reason without --answer starts no pass, also for the person at a terminal.
 	t.Setenv("CLAUDECODE", "")
 	for _, args := range [][]string{{"--with", memory}, {"--reason", "r"}, {"--reason", "r", "--sessions", "1"}, {"--list", "--with", memory}} {
-		if _, err := run(t, dev, "", append([]string{"sleep"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore sleep") || !strings.Contains(err.Error(), "--answer") {
-			t.Errorf("sleep %v: %v, want a usage error that names --answer", args, err)
+		if _, err := run(t, dev, "", append([]string{"reflect"}, args...)...); err == nil || !strings.Contains(err.Error(), "usage: memcore reflect") || !strings.Contains(err.Error(), "--answer") {
+			t.Errorf("reflect %v: %v, want a usage error that names --answer", args, err)
 		}
 	}
 	if len(*calls) != 0 {

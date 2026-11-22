@@ -239,12 +239,12 @@ func TestOrientExact(t *testing.T) {
   memcore snapshot [--from <dir>] Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.
   memcore inbox                Fetches, then lists the unpushed commits as the fold at push leaves them.
   memcore stats [<path>]       Measures whether memory helps, per week, from the use log and git history.
-  memcore sleep [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>] Finds the corrections in new transcripts, and judges each one against memory.
+  memcore reflect [--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>] Finds the corrections in new transcripts, and judges each one against memory.
   memcore push                 Fetches, folds and pushes the unpushed commits.
   memcore help [<command>]     Shows the input of a command, with an example.
   memcore version              Prints the version of memcore and the commit that it was built from.
 
-Only the person runs recover, drop, ui and init, and a sleep pass.
+Only the person runs recover, drop, ui and init, and a reflect pass.
 Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.
 Before you first use a command, run memcore help <command>: it shows the input, with an example.
 
@@ -311,8 +311,8 @@ func TestOrientCommands(t *testing.T) {
 				t.Errorf("orient lists %s, which only the person runs: %q", name, row)
 			}
 		}
-		if strings.HasPrefix(row, "  memcore sleep ") && strings.Contains(row, "Only the person runs a pass") {
-			t.Errorf("the row of sleep holds its rule of the person: %q", row)
+		if strings.HasPrefix(row, "  memcore reflect ") && strings.Contains(row, "Only the person runs a pass") {
+			t.Errorf("the row of reflect holds its rule of the person: %q", row)
 		}
 	}
 }

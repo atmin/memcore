@@ -20,11 +20,11 @@ import (
 	"github.com/atmin/memcore/internal/thinking"
 )
 
-// settled is how old the last line of a transcript must be before a sleep pass judges it.
+// settled is how old the last line of a transcript must be before a reflect pass judges it.
 // A younger transcript most likely belongs to a session that still runs.
 const settled = time.Hour
 
-// sleepCorrection is one correction of the person, with the verdict of a sleep pass.
+// reflectCorrection is one correction of the person, with the verdict of a reflect pass.
 type reflectCorrection struct {
 	Time    string `json:"time"`              // the time of the line that holds the quote
 	Quote   string `json:"quote"`             // the words of the person, as the transcript spells them
@@ -34,7 +34,7 @@ type reflectCorrection struct {
 	Reason  string `json:"reason,omitempty"`  // one sentence of the judge
 }
 
-// sleepRecord is one line of sleep.jsonl: what a sleep pass found in one file of the transcripts branch.
+// reflectRecord is one line of reflect.jsonl: what a reflect pass found in one file of the transcripts branch.
 type reflectRecord struct {
 	Session     string              `json:"session"`
 	File        string              `json:"file"` // the path on the transcripts branch
@@ -61,7 +61,7 @@ func (r reflectRecord) where() string {
 	return "outside home"
 }
 
-// sleepUnit is one file of the transcripts branch that a sleep pass judges.
+// reflectUnit is one file of the transcripts branch that a reflect pass judges.
 type reflectUnit struct {
 	Session string
 	File    string
@@ -71,12 +71,12 @@ type reflectUnit struct {
 	Start   time.Time
 }
 
-// sleepPath is the file of the records of sleep passes, in the local state.
+// reflectPath is the file of the records of reflect passes, in the local state.
 func reflectPath(repo string) string {
-	return filepath.Join(store.StateDir(repo), "sleep.jsonl")
+	return filepath.Join(store.StateDir(repo), "reflect.jsonl")
 }
 
-// readSleep returns the records of the sleep passes, in the order of the file. A later record of a file of the
+// readReflect returns the records of the reflect passes, in the order of the file. A later record of a file of the
 // transcripts branch replaces an earlier one, at the place of the later one. A missing file holds no record.
 func readReflect(repo string) ([]reflectRecord, error) {
 	f, err := os.Open(reflectPath(repo))
@@ -84,7 +84,7 @@ func readReflect(repo string) ([]reflectRecord, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read the records of sleep: %w", err)
+		return nil, fmt.Errorf("read the records of reflect: %w", err)
 	}
 	defer f.Close()
 	var all []reflectRecord
@@ -96,12 +96,12 @@ func readReflect(repo string) ([]reflectRecord, error) {
 		}
 		var r reflectRecord
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
-			return nil, fmt.Errorf("read the records of sleep: line %d: %w", n, err)
+			return nil, fmt.Errorf("read the records of reflect: line %d: %w", n, err)
 		}
 		all = append(all, r)
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("read the records of sleep: %w", err)
+		return nil, fmt.Errorf("read the records of reflect: %w", err)
 	}
 	newest := map[string]int{}
 	for i, r := range all {
@@ -116,22 +116,22 @@ func readReflect(repo string) ([]reflectRecord, error) {
 	return records, nil
 }
 
-// appendSleep appends one record to the records of the sleep passes.
+// appendReflect appends one record to the records of the reflect passes.
 func appendReflect(repo string, r reflectRecord) error {
 	line, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Errorf("write a record of sleep: %w", err)
+		return fmt.Errorf("write a record of reflect: %w", err)
 	}
 	f, err := os.OpenFile(reflectPath(repo), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("write a record of sleep: %w", err)
+		return fmt.Errorf("write a record of reflect: %w", err)
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		f.Close()
-		return fmt.Errorf("write a record of sleep: %w", err)
+		return fmt.Errorf("write a record of reflect: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("write a record of sleep: %w", err)
+		return fmt.Errorf("write a record of reflect: %w", err)
 	}
 	return nil
 }
@@ -142,7 +142,7 @@ type judged struct {
 	Record reflectRecord
 }
 
-// sleepCorrections returns the corrections of the records, in their order. Two corrections of one session with
+// reflectCorrections returns the corrections of the records, in their order. Two corrections of one session with
 // the same time and the same quote count once: a version beside a transcript repeats the start of the session.
 func reflectCorrections(records []reflectRecord) []judged {
 	seen := map[[3]string]bool{}
@@ -208,7 +208,7 @@ func correctionIDs(corrections []judged) []string {
 	return ids
 }
 
-// sleepAnswer is one line of answers.jsonl: what happened to one correction.
+// reflectAnswer is one line of answers.jsonl: what happened to one correction.
 type reflectAnswer struct {
 	ID       string `json:"id"`               // the whole id of the correction
 	Session  string `json:"session"`          // the session of the correction
@@ -232,7 +232,7 @@ func readAnswers(repo string) (map[string]reflectAnswer, error) {
 		return answers, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read the answers of sleep: %w", err)
+		return nil, fmt.Errorf("read the answers of reflect: %w", err)
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
@@ -243,12 +243,12 @@ func readAnswers(repo string) (map[string]reflectAnswer, error) {
 		}
 		var a reflectAnswer
 		if err := json.Unmarshal(sc.Bytes(), &a); err != nil {
-			return nil, fmt.Errorf("read the answers of sleep: line %d: %w", n, err)
+			return nil, fmt.Errorf("read the answers of reflect: line %d: %w", n, err)
 		}
 		answers[a.ID] = a
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("read the answers of sleep: %w", err)
+		return nil, fmt.Errorf("read the answers of reflect: %w", err)
 	}
 	return answers, nil
 }
@@ -259,20 +259,20 @@ func appendAnswers(repo string, answers []reflectAnswer) error {
 	for _, a := range answers {
 		line, err := json.Marshal(a)
 		if err != nil {
-			return fmt.Errorf("write an answer of sleep: %w", err)
+			return fmt.Errorf("write an answer of reflect: %w", err)
 		}
 		lines = append(append(lines, line...), '\n')
 	}
 	f, err := os.OpenFile(answersPath(repo), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("write an answer of sleep: %w", err)
+		return fmt.Errorf("write an answer of reflect: %w", err)
 	}
 	if _, err := f.Write(lines); err != nil {
 		f.Close()
-		return fmt.Errorf("write an answer of sleep: %w", err)
+		return fmt.Errorf("write an answer of reflect: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("write an answer of sleep: %w", err)
+		return fmt.Errorf("write an answer of reflect: %w", err)
 	}
 	return nil
 }
@@ -289,7 +289,7 @@ func sessionOf(p string) (string, bool) {
 	return id, id != ""
 }
 
-// sleepSessions returns the files of the transcripts branch that a sleep pass judges now, by the oldest start of
+// reflectSessions returns the files of the transcripts branch that a reflect pass judges now, by the oldest start of
 // their sessions first. A file counts when all of these hold:
 //   - It is the transcript of a main session, or a version beside it.
 //   - The use log holds a start of that session, so memcore knows what the session saw.
@@ -371,7 +371,7 @@ func lastLineTime(content string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// The verdicts of a sleep pass about one correction.
+// The verdicts of a reflect pass about one correction.
 const (
 	verdictCapture     = "capture"     // no memory held the fact
 	verdictRetrieval   = "retrieval"   // a memory held the fact, and the session did not read it
