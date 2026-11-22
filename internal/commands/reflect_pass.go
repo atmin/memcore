@@ -24,20 +24,20 @@ import (
 // The settings of a sleep pass, in the git configuration of the memory repo, and their first values.
 // Real passes will show whether these values fit, so each one lives only here.
 const (
-	sleepBudgetKey = "memcore.sleepbudget" // the budget of a pass, in dollars at API prices
-	sleepAgentKey  = "memcore.sleepagent"  // the agent that thinks
-	sleepModelKey  = "memcore.sleepmodel"  // the model of that agent
+	reflectBudgetKey = "memcore.sleepbudget" // the budget of a pass, in dollars at API prices
+	reflectAgentKey  = "memcore.sleepagent"  // the agent that thinks
+	reflectModelKey  = "memcore.sleepmodel"  // the model of that agent
 
-	sleepBudget = 2.0
-	sleepAgent  = "claude"
-	sleepModel  = "sonnet"
+	reflectBudget = 2.0
+	reflectAgent  = "claude"
+	reflectModel  = "sonnet"
 
 	// sleepLock is the file of the local state that a running pass locks.
-	sleepLock = "sleep.lock"
+	reflectLock = "sleep.lock"
 )
 
 // sleepAgents are the agents that a sleep pass can run.
-var sleepAgents = []string{"claude"}
+var reflectAgents = []string{"claude"}
 
 // setting reads a key of the git configuration of the memory repo, and returns false when it is unset.
 func setting(repo, key string) (string, bool, error) {
@@ -55,14 +55,14 @@ func setting(repo, key string) (string, bool, error) {
 
 // sleepSettings returns the budget, the agent and the model of a pass. A budget of the command line wins over
 // the setting.
-func sleepSettings(repo, budgetFlag string) (budget float64, agent, model string, err error) {
-	budget, agent, model = sleepBudget, sleepAgent, sleepModel
+func reflectSettings(repo, budgetFlag string) (budget float64, agent, model string, err error) {
+	budget, agent, model = reflectBudget, reflectAgent, reflectModel
 	text, from := budgetFlag, "--budget"
 	if text == "" {
-		if value, ok, err := setting(repo, sleepBudgetKey); err != nil {
+		if value, ok, err := setting(repo, reflectBudgetKey); err != nil {
 			return 0, "", "", err
 		} else if ok {
-			text, from = value, "the setting "+sleepBudgetKey
+			text, from = value, "the setting "+reflectBudgetKey
 		}
 	}
 	if text != "" {
@@ -70,19 +70,19 @@ func sleepSettings(repo, budgetFlag string) (budget float64, agent, model string
 			return 0, "", "", inputErrf("%s: the value %q is no amount of dollars above 0, such as 2 or 0.50", from, text)
 		}
 	}
-	if value, ok, err := setting(repo, sleepAgentKey); err != nil {
+	if value, ok, err := setting(repo, reflectAgentKey); err != nil {
 		return 0, "", "", err
 	} else if ok {
 		agent = value
 	}
 	known := false
-	for _, a := range sleepAgents {
+	for _, a := range reflectAgents {
 		known = known || a == agent
 	}
 	if !known {
-		return 0, "", "", fmt.Errorf("the setting %s names the agent %q, which memcore cannot run: the known agents are %s", sleepAgentKey, agent, strings.Join(sleepAgents, ", "))
+		return 0, "", "", fmt.Errorf("the setting %s names the agent %q, which memcore cannot run: the known agents are %s", reflectAgentKey, agent, strings.Join(reflectAgents, ", "))
 	}
-	if value, ok, err := setting(repo, sleepModelKey); err != nil {
+	if value, ok, err := setting(repo, reflectModelKey); err != nil {
 		return 0, "", "", err
 	} else if ok {
 		model = value
@@ -92,7 +92,7 @@ func sleepSettings(repo, budgetFlag string) (budget float64, agent, model string
 
 // runSleep runs one sleep pass: it extracts the corrections of each new transcript, and judges each one.
 // A pass proposes no change, commits nothing and writes only the records of the local state.
-func runSleep(env Env, args []string) error {
+func runReflect(env Env, args []string) error {
 	flags := flag.NewFlagSet("sleep", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	budgetFlag := flags.String("budget", "", "the budget of the pass, in dollars at API prices")
@@ -116,7 +116,7 @@ func runSleep(env Env, args []string) error {
 		if given["budget"] || given["sessions"] || given["list"] || given["all"] {
 			return usageErr("usage: memcore sleep --answer takes only --with and --reason: no --budget, --sessions, --list or --all")
 		}
-		return answerSleep(env, *answerFlag, *withFlag, *reasonFlag)
+		return answerReflect(env, *answerFlag, *withFlag, *reasonFlag)
 	}
 	if given["with"] || given["reason"] {
 		return usageErr("usage: memcore sleep --with and --reason belong to --answer <id>[,<id>]")
@@ -128,7 +128,7 @@ func runSleep(env Env, args []string) error {
 		if given["budget"] || given["sessions"] {
 			return usageErr("usage: memcore sleep --list takes no --budget and no --sessions, because it runs no pass")
 		}
-		return listSleep(env, *all)
+		return listReflect(env, *all)
 	}
 	limit := 0 // no limit
 	if *sessionsFlag != "" {
@@ -144,11 +144,11 @@ func runSleep(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	budget, agent, model, err := sleepSettings(repo, *budgetFlag)
+	budget, agent, model, err := reflectSettings(repo, *budgetFlag)
 	if err != nil {
 		return err
 	}
-	unlock, ok, err := store.TryLockFile(repo, sleepLock)
+	unlock, ok, err := store.TryLockFile(repo, reflectLock)
 	if err != nil {
 		return err
 	}
@@ -161,11 +161,11 @@ func runSleep(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	records, err := readSleep(repo)
+	records, err := readReflect(repo)
 	if err != nil {
 		return err
 	}
-	units, err := sleepSessions(repo, events, records, time.Now())
+	units, err := reflectSessions(repo, events, records, time.Now())
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func runSleep(env Env, args []string) error {
 
 	p := pass{env: env, repo: repo, events: events, agent: agent, model: model, budget: budget, judged: map[string]bool{}, seen: map[[3]string]bool{}}
 	// A correction that an earlier pass recorded counts in no total of this pass.
-	for _, c := range sleepCorrections(records) {
+	for _, c := range reflectCorrections(records) {
 		p.seen[[3]string{c.Record.Session, c.Time, c.Quote}] = true
 	}
 	sessions := map[string]bool{} // the sessions that the pass started
@@ -256,7 +256,7 @@ func (p *pass) flush() {
 // judge extracts and judges one file of the transcripts branch, appends its record, and prints its line.
 // No call gets a limit of its cost: the size of its input bounds it. On an error it writes no record, so the
 // next pass reads the file again.
-func (p *pass) judge(u sleepUnit) error {
+func (p *pass) judge(u reflectUnit) error {
 	transcript, err := store.Git(p.repo, "cat-file", "blob", u.Blob)
 	if err != nil {
 		return fmt.Errorf("read %s on the transcripts branch: %w", u.File, err)
@@ -278,12 +278,12 @@ func (p *pass) judge(u sleepUnit) error {
 		}
 		groups[commit] = append(groups[commit], i)
 	}
-	result := make([]sleepCorrection, len(found))
+	result := make([]reflectCorrection, len(found))
 	for _, commit := range commits {
 		if commit == "" {
 			// memcore saw the session only after these corrections, so it does not know what memory held then.
 			for _, i := range groups[commit] {
-				result[i] = sleepCorrection{Time: found[i].Time, Quote: found[i].Quote, Summary: found[i].Summary, Verdict: verdictBefore}
+				result[i] = reflectCorrection{Time: found[i].Time, Quote: found[i].Quote, Summary: found[i].Summary, Verdict: verdictBefore}
 			}
 			continue
 		}
@@ -306,13 +306,13 @@ func (p *pass) judge(u sleepUnit) error {
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Time < result[j].Time })
-	record := sleepRecord{Session: u.Session, File: u.File, Blob: u.Blob, Dir: u.Dir, Level: u.Level,
+	record := reflectRecord{Session: u.Session, File: u.File, Blob: u.Blob, Dir: u.Dir, Level: u.Level,
 		Start: u.Start.UTC().Format(time.RFC3339), Time: time.Now().UTC().Format(time.RFC3339),
 		Agent: p.agent, Model: p.model, Cost: unitCost, Corrections: result}
 	if record.Corrections == nil {
-		record.Corrections = []sleepCorrection{}
+		record.Corrections = []reflectCorrection{}
 	}
-	if err := appendSleep(p.repo, record); err != nil {
+	if err := appendReflect(p.repo, record); err != nil {
 		return err
 	}
 	p.judged[u.Session] = true
@@ -387,7 +387,7 @@ var verdictNames = map[string]string{
 }
 
 // openCorrection reports whether a correction is open: it is a miss or a stale memory, and it has no answer.
-func openCorrection(c judged, answers map[string]sleepAnswer) bool {
+func openCorrection(c judged, answers map[string]reflectAnswer) bool {
 	switch c.Verdict {
 	case verdictCapture, verdictRetrieval, verdictApplication, verdictStale:
 		_, answered := answers[c.id()]
@@ -399,12 +399,12 @@ func openCorrection(c judged, answers map[string]sleepAnswer) bool {
 // listSleep prints the open corrections of the records, or every correction with all. The newest session comes
 // first, and each session in the order of its corrections. Each one starts with its short id, which sleep
 // --answer takes. The first line counts every correction. It runs no agent and writes nothing, so an agent may run it too.
-func listSleep(env Env, all bool) error {
+func listReflect(env Env, all bool) error {
 	repo, err := openRepo()
 	if err != nil {
 		return err
 	}
-	records, err := readSleep(repo)
+	records, err := readReflect(repo)
 	if err != nil {
 		return err
 	}
@@ -412,7 +412,7 @@ func listSleep(env Env, all bool) error {
 		fmt.Fprintln(env.Out, "No sleep pass has judged a session yet. The person runs one with memcore sleep.")
 		return nil
 	}
-	corrections := sleepCorrections(records)
+	corrections := reflectCorrections(records)
 	sort.SliceStable(corrections, func(i, j int) bool {
 		a, b := corrections[i], corrections[j]
 		if a.Record.Start != b.Record.Start {
@@ -486,7 +486,7 @@ func listSleep(env Env, all bool) error {
 // after the answer, and it undoes a dropped move, as the reads of stats do. Each answer gets a line of its own
 // among the lines of the log, after a line in the same second. These lines stay here, and never reach the use
 // log. An answer with no path, or with a time that does not parse, keeps its path as recorded.
-func answerFollower(repo string, answers map[string]sleepAnswer) (func(sleepAnswer) string, error) {
+func answerFollower(repo string, answers map[string]reflectAnswer) (func(reflectAnswer) string, error) {
 	events, _, err := readLog(repo)
 	if err != nil {
 		return nil, err
@@ -507,7 +507,7 @@ func answerFollower(repo string, answers map[string]sleepAnswer) (func(sleepAnsw
 		}
 	}
 	follow := follower(lines, clock().UTC())
-	return func(a sleepAnswer) string {
+	return func(a reflectAnswer) string {
 		if place, ok := places[a.ID]; ok {
 			return follow(a.Path, place)
 		}
@@ -518,7 +518,7 @@ func answerFollower(repo string, answers map[string]sleepAnswer) (func(sleepAnsw
 // answerSleep records what happened to corrections: the document that now holds their rule, the reason, or
 // both. It runs no agent and changes no document, so an agent may run it too. It writes every answer of a call,
 // or none.
-func answerSleep(env Env, idList, with, reason string) error {
+func answerReflect(env Env, idList, with, reason string) error {
 	reason = strings.Join(strings.Fields(reason), " ")
 	if with == "" && reason == "" {
 		return inputErrf("an answer needs --with <path>, --reason <text> or both: --with names the document that now holds the rule")
@@ -544,14 +544,14 @@ func answerSleep(env Env, idList, with, reason string) error {
 			return fmt.Errorf("--with: read %s: %w", p, err)
 		}
 	}
-	records, err := readSleep(repo)
+	records, err := readReflect(repo)
 	if err != nil {
 		return err
 	}
-	corrections := sleepCorrections(records)
+	corrections := reflectCorrections(records)
 	all := correctionIDs(corrections)
 	now := time.Now().UTC().Format(time.RFC3339)
-	var answers []sleepAnswer
+	var answers []reflectAnswer
 	chosen := map[string]bool{}
 	for _, prefix := range strings.Split(idList, ",") {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
@@ -581,7 +581,7 @@ func answerSleep(env Env, idList, with, reason string) error {
 		c := corrections[fits[0]]
 		if id := all[fits[0]]; !chosen[id] {
 			chosen[id] = true
-			answers = append(answers, sleepAnswer{ID: id, Session: c.Record.Session, Time: c.Time, Path: p, Reason: reason, Answered: now})
+			answers = append(answers, reflectAnswer{ID: id, Session: c.Record.Session, Time: c.Time, Path: p, Reason: reason, Answered: now})
 		}
 	}
 	if err := appendAnswers(repo, answers); err != nil {

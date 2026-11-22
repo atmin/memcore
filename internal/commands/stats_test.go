@@ -1039,20 +1039,20 @@ func TestMisses(t *testing.T) {
 		{Time: ago(2 * day), Session: "no-start", Command: "show", Outcome: "ok"},
 		start("oldest", 20*day), // the log starts here, so three weeks print
 	}
-	correction := func(d time.Duration, quote, verdict string) sleepCorrection {
-		return sleepCorrection{Time: ago(d), Quote: quote, Summary: "s", Verdict: verdict}
+	correction := func(d time.Duration, quote, verdict string) reflectCorrection {
+		return reflectCorrection{Time: ago(d), Quote: quote, Summary: "s", Verdict: verdict}
 	}
-	records := []sleepRecord{
-		{Session: "this-week", File: "claude/p/this-week.jsonl", Blob: "b1", Corrections: []sleepCorrection{
+	records := []reflectRecord{
+		{Session: "this-week", File: "claude/p/this-week.jsonl", Blob: "b1", Corrections: []reflectCorrection{
 			correction(2*day, "a", verdictCapture), correction(2*day, "b", verdictCapture), correction(2*day, "c", verdictRetrieval), correction(2*day, "d", verdictUnrelated),
 			correction(2*day, "before memcore saw the session", verdictBefore)}},
-		{Session: "this-week", File: "claude/p/this-week.0123abcd.jsonl", Blob: "b2", Corrections: []sleepCorrection{
+		{Session: "this-week", File: "claude/p/this-week.0123abcd.jsonl", Blob: "b2", Corrections: []reflectCorrection{
 			correction(2*day, "a", verdictCapture), correction(day, "e", verdictStale)}},
 		// A session of last week that went on into this week: its late correction counts in this week.
-		{Session: "last-week", File: "claude/p/last-week.jsonl", Blob: "b3", Corrections: []sleepCorrection{
+		{Session: "last-week", File: "claude/p/last-week.jsonl", Blob: "b3", Corrections: []reflectCorrection{
 			correction(8*day, "f", verdictApplication), correction(6*day, "g", verdictApplication), correction(-day, "after the call", verdictCapture)}},
-		{Session: "last-week-no-correction", File: "claude/p/last-week-no-correction.jsonl", Blob: "b4", Corrections: []sleepCorrection{}},
-		{Session: "no-start", File: "claude/p/no-start.jsonl", Blob: "b5", Corrections: []sleepCorrection{correction(30*day, "before the weeks", verdictCapture)}},
+		{Session: "last-week-no-correction", File: "claude/p/last-week-no-correction.jsonl", Blob: "b4", Corrections: []reflectCorrection{}},
+		{Session: "no-start", File: "claude/p/no-start.jsonl", Blob: "b5", Corrections: []reflectCorrection{correction(30*day, "before the weeks", verdictCapture)}},
 	}
 	weeks := measure(events, nil, statsNow)
 	if len(weeks) != 3 {
@@ -1101,7 +1101,7 @@ func TestMisses(t *testing.T) {
 	}
 }
 
-func TestStatsReadsTheRecordsOfSleep(t *testing.T) {
+func TestStatsReadsTheRecordsOfReflect(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	home, repo, _ := newMemory(t)
 	now := time.Now().UTC()
@@ -1109,7 +1109,7 @@ func TestStatsReadsTheRecordsOfSleep(t *testing.T) {
 	if err := appendEvent(repo, &e); err != nil {
 		t.Fatal(err)
 	}
-	if err := appendSleep(repo, sleepRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b1", Corrections: []sleepCorrection{
+	if err := appendReflect(repo, reflectRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b1", Corrections: []reflectCorrection{
 		{Time: now.Add(-30 * time.Minute).Format(time.RFC3339), Quote: "q", Summary: "s", Verdict: verdictCapture}}}); err != nil {
 		t.Fatal(err)
 	}

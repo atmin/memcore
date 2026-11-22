@@ -34,7 +34,7 @@ func fakeAgent(t *testing.T, extract func(n int, req thinking.Request) (thinking
 
 // sleepFixture makes a memory repo with one memory at ~/dev, and two old sessions there: s-first with two
 // corrections, and s-second with none. It returns the directory ~/dev and the repo.
-func sleepFixture(t *testing.T) (dev, repo string) {
+func reflectFixture(t *testing.T) (dev, repo string) {
 	t.Helper()
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	home, repo, _ := newMemory(t)
@@ -72,9 +72,9 @@ func heldAndNone(cost float64) func(thinking.Request) (thinking.Reply, error) {
 	}
 }
 
-func TestSleepPass(t *testing.T) {
+func TestReflectPass(t *testing.T) {
 	t.Run("judges and records each session", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		calls := fakeAgent(t, twoCorrections(0.10), heldAndNone(0.05))
 		out, err := run(t, dev, "", "sleep")
 		if err != nil {
@@ -101,7 +101,7 @@ func TestSleepPass(t *testing.T) {
 		if in := (*calls)[1].Input; !strings.Contains(in, "Push only when the person asks.") || !strings.Contains(in, "dev/memories/ask-before-push.md") {
 			t.Errorf("the judge does not see the memory of the session:\n%s", in)
 		}
-		records, err := readSleep(repo)
+		records, err := readReflect(repo)
 		if err != nil || len(records) != 2 {
 			t.Fatalf("records = %+v, %v; want 2", records, err)
 		}
@@ -135,7 +135,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("a correction before the first event of its session is before memory", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		commit := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
 		early := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second)
 		// memcore saw the session first between its two corrections.
@@ -170,7 +170,7 @@ func TestSleepPass(t *testing.T) {
 		if len(judged) != 1 || strings.Contains(judged[0], "Never push without asking.") || !strings.Contains(judged[0], "Use small commits.") {
 			t.Errorf("the judge got %q, want one call with only the later correction", judged)
 		}
-		records, err := readSleep(repo)
+		records, err := readReflect(repo)
 		if err != nil || len(records) != 3 || records[0].Session != "s-early" {
 			t.Fatalf("records = %+v, %v; want s-early first of 3", records, err)
 		}
@@ -181,7 +181,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("a read before the correction is an application miss", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		at := time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Second)
 		if err := appendEvent(repo, &Event{Time: at.Format(time.RFC3339), Session: "s-first", Command: "show", Outcome: "ok", Paths: []string{"dev/memories/ask-before-push.md"}}); err != nil {
 			t.Fatal(err)
@@ -197,7 +197,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("the budget ends the pass", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
 		out, err := run(t, dev, "", "sleep", "--budget", "0.25")
 		if err != nil {
@@ -208,13 +208,13 @@ func TestSleepPass(t *testing.T) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
 		}
-		if records, _ := readSleep(repo); len(records) != 1 {
+		if records, _ := readReflect(repo); len(records) != 1 {
 			t.Errorf("%d records, want 1", len(records))
 		}
 	})
 
 	t.Run("a pass finishes the session that it started", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		// The extraction alone passes the budget, and the judge of the same session still runs.
 		calls := fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
 		out, err := run(t, dev, "", "sleep", "--budget", "0.15")
@@ -226,7 +226,7 @@ func TestSleepPass(t *testing.T) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
 		}
-		records, _ := readSleep(repo)
+		records, _ := readReflect(repo)
 		if len(records) != 1 || records[0].Session != "s-first" || len(records[0].Corrections) != 2 {
 			t.Errorf("records = %+v, want the first session with both corrections", records)
 		}
@@ -236,7 +236,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("a cost equal to the budget ends the pass", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		fakeAgent(t, twoCorrections(0.25), heldAndNone(0.25)) // two costs that add up to 0.5 exactly
 		out, err := run(t, dev, "", "sleep", "--budget", "0.50")
 		if err != nil {
@@ -247,13 +247,13 @@ func TestSleepPass(t *testing.T) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
 		}
-		if records, _ := readSleep(repo); len(records) != 1 {
+		if records, _ := readReflect(repo); len(records) != 1 {
 			t.Errorf("%d records, want 1", len(records))
 		}
 	})
 
 	t.Run("a cost below the budget starts the next session", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		fakeAgent(t, twoCorrections(0.20), heldAndNone(0.07))
 		out, err := run(t, dev, "", "sleep", "--budget", "0.30")
 		if err != nil {
@@ -267,13 +267,13 @@ func TestSleepPass(t *testing.T) {
 		if strings.Contains(out, "The pass stopped") {
 			t.Errorf("the pass names a stop, and it judged every session:\n%s", out)
 		}
-		if records, _ := readSleep(repo); len(records) != 2 {
+		if records, _ := readReflect(repo); len(records) != 2 {
 			t.Errorf("%d records, want 2", len(records))
 		}
 	})
 
 	t.Run("the budget never splits the files of one session", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		events, _, err := readLog(repo)
 		if err != nil {
 			t.Fatal(err)
@@ -296,7 +296,7 @@ func TestSleepPass(t *testing.T) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
 		}
-		if records, _ := readSleep(repo); len(records) != 2 || records[0].Session != "s-first" || records[1].Session != "s-first" {
+		if records, _ := readReflect(repo); len(records) != 2 || records[0].Session != "s-first" || records[1].Session != "s-first" {
 			t.Errorf("records = %+v, want both files of the first session", records)
 		}
 		if len(*calls) != 4 {
@@ -305,7 +305,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("the setting of the budget and of the model", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		gitT(t, repo, "config", "memcore.sleepbudget", "0.75")
 		gitT(t, repo, "config", "memcore.sleepmodel", "haiku")
 		// The first session costs 0.80 dollars: more than the setting, and less than the default of 2 dollars.
@@ -336,7 +336,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("--sessions ends the pass", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		// A version beside the transcript of the first session belongs to that session.
 		// It repeats the lines of the transcript at their times, so it starts at the logged start of the session.
 		events, _, err := readLog(repo)
@@ -363,7 +363,7 @@ func TestSleepPass(t *testing.T) {
 				t.Errorf("the output lacks %q:\n%s", want, out)
 			}
 		}
-		if records, _ := readSleep(repo); len(records) != 2 || records[0].Session != "s-first" || records[1].Session != "s-first" {
+		if records, _ := readReflect(repo); len(records) != 2 || records[0].Session != "s-first" || records[1].Session != "s-first" {
 			t.Errorf("records = %+v, want both files of the first session", records)
 		}
 		if len(*calls) != 4 {
@@ -380,7 +380,7 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("an error of the agent keeps the finished sessions", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		fakeAgent(t, func(n int, req thinking.Request) (thinking.Reply, error) {
 			if n == 2 {
 				return thinking.Reply{Cost: 0.01}, errors.New("run the agent: the agent reports an error: Not logged in: check that claude is logged in")
@@ -394,13 +394,13 @@ func TestSleepPass(t *testing.T) {
 		if !strings.Contains(out, "Judged 1 session with 2 corrections") || !strings.Contains(out, "about 0.16 dollars at API prices. 1 session waits.") {
 			t.Errorf("output:\n%s", out)
 		}
-		if records, _ := readSleep(repo); len(records) != 1 || records[0].Session != "s-first" {
+		if records, _ := readReflect(repo); len(records) != 1 || records[0].Session != "s-first" {
 			t.Errorf("records = %+v, want the first session", records)
 		}
 	})
 
 	t.Run("the line of a session outside home names its directory", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		commit := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
 		old := time.Now().Add(-50 * time.Hour).UTC().Truncate(time.Second)
 		transcriptT(t, repo, "claude/p2/s-away.jsonl", transcriptText("s-away", old, "you|Run the checks."))
@@ -420,20 +420,20 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("refuses an agent", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
 		t.Setenv("CLAUDECODE", "1")
 		_, err := run(t, dev, "", "sleep")
 		if err == nil || !strings.Contains(err.Error(), "only the person runs a sleep pass") {
 			t.Errorf("err = %v, want a refusal", err)
 		}
-		if records, _ := readSleep(repo); len(*calls) != 0 || len(records) != 0 {
+		if records, _ := readReflect(repo); len(*calls) != 0 || len(records) != 0 {
 			t.Errorf("%d calls and %d records, want none", len(*calls), len(records))
 		}
 	})
 
 	t.Run("an unknown agent", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
+		dev, repo := reflectFixture(t)
 		gitT(t, repo, "config", "memcore.sleepagent", "llama")
 		calls := fakeAgent(t, twoCorrections(0), heldAndNone(0))
 		_, err := run(t, dev, "", "sleep")
@@ -443,8 +443,8 @@ func TestSleepPass(t *testing.T) {
 	})
 
 	t.Run("a pass that already runs", func(t *testing.T) {
-		dev, repo := sleepFixture(t)
-		unlock, ok, err := store.TryLockFile(repo, sleepLock)
+		dev, repo := reflectFixture(t)
+		unlock, ok, err := store.TryLockFile(repo, reflectLock)
 		if err != nil || !ok {
 			t.Fatalf("lock: %v, %v", ok, err)
 		}
@@ -456,32 +456,32 @@ func TestSleepPass(t *testing.T) {
 	})
 }
 
-func TestSleepList(t *testing.T) {
-	dev, repo := sleepFixture(t)
+func TestReflectList(t *testing.T) {
+	dev, repo := reflectFixture(t)
 	t.Setenv("CLAUDECODE", "1") // an agent may list
 	out, err := run(t, dev, "", "sleep", "--list")
 	if err != nil || out != "No sleep pass has judged a session yet. The person runs one with memcore sleep.\n" {
 		t.Fatalf("without records: %v\n%s", err, out)
 	}
-	write := func(r sleepRecord) {
+	write := func(r reflectRecord) {
 		t.Helper()
-		if err := appendSleep(repo, r); err != nil {
+		if err := appendReflect(repo, r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	held := sleepCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md", Reason: "The memory says so."}
-	small := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture, Reason: "No memory holds it."}
-	later := sleepCorrection{Time: "2026-11-19T09:00:00Z", Quote: "Not that file.", Summary: "A detail.", Verdict: verdictUnrelated}
-	early := sleepCorrection{Time: "2026-11-19T07:30:00Z", Quote: "No tabs here.", Summary: "Use spaces.", Verdict: verdictBefore}
-	applied := sleepCorrection{Time: "2026-11-19T09:10:00Z", Quote: "I said: ask first.", Summary: "Ask before a push.", Verdict: verdictApplication, Path: "dev/memories/ask-before-push.md", Reason: "The session read it."}
-	stale := sleepCorrection{Time: "2026-11-19T09:20:00Z", Quote: "We use tabs now.", Summary: "Use tabs.", Verdict: verdictStale, Path: "dev/memories/spaces.md", Reason: "The memory says spaces."}
-	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{small, held}})
-	write(sleepRecord{Session: "s-first", File: "claude/p/s-first.0123abcd.jsonl", Blob: "b2", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{held}})
-	write(sleepRecord{Session: "s-empty", File: "claude/p/s-empty.jsonl", Blob: "b3", Level: "~", Start: "2026-11-18T12:00:00Z", Corrections: []sleepCorrection{}})
-	write(sleepRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []sleepCorrection{later, early, applied, stale}})
+	held := reflectCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md", Reason: "The memory says so."}
+	small := reflectCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture, Reason: "No memory holds it."}
+	later := reflectCorrection{Time: "2026-11-19T09:00:00Z", Quote: "Not that file.", Summary: "A detail.", Verdict: verdictUnrelated}
+	early := reflectCorrection{Time: "2026-11-19T07:30:00Z", Quote: "No tabs here.", Summary: "Use spaces.", Verdict: verdictBefore}
+	applied := reflectCorrection{Time: "2026-11-19T09:10:00Z", Quote: "I said: ask first.", Summary: "Ask before a push.", Verdict: verdictApplication, Path: "dev/memories/ask-before-push.md", Reason: "The session read it."}
+	stale := reflectCorrection{Time: "2026-11-19T09:20:00Z", Quote: "We use tabs now.", Summary: "Use tabs.", Verdict: verdictStale, Path: "dev/memories/spaces.md", Reason: "The memory says spaces."}
+	write(reflectRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []reflectCorrection{small, held}})
+	write(reflectRecord{Session: "s-first", File: "claude/p/s-first.0123abcd.jsonl", Blob: "b2", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []reflectCorrection{held}})
+	write(reflectRecord{Session: "s-empty", File: "claude/p/s-empty.jsonl", Blob: "b3", Level: "~", Start: "2026-11-18T12:00:00Z", Corrections: []reflectCorrection{}})
+	write(reflectRecord{Session: "s-later", File: "claude/p/s-later.jsonl", Blob: "b4", Level: "~", Start: "2026-11-19T08:00:00Z", Corrections: []reflectCorrection{later, early, applied, stale}})
 
 	// Each head line starts with the short id of its correction.
-	id := func(session string, c sleepCorrection) string { return short(correctionID(session, c.Time, c.Quote)) }
+	id := func(session string, c reflectCorrection) string { return short(correctionID(session, c.Time, c.Quote)) }
 	fill := strings.NewReplacer("{early}", id("s-later", early), "{later}", id("s-later", later), "{applied}", id("s-later", applied), "{stale}", id("s-later", stale), "{held}", id("s-first", held), "{small}", id("s-first", small))
 	const (
 		totals      = "6 corrections in 3 judged sessions: 1 capture, 1 retrieval, 1 application, 1 stale, 1 unrelated, 1 before memory."
@@ -506,7 +506,7 @@ func TestSleepList(t *testing.T) {
 	list(totals+" 4 open.\n"+earlyText+laterText+appliedText+staleText+heldText+smallText, "--all", "--list")
 
 	const memory = "dev/memories/ask-before-push.md"
-	answer := func(c sleepCorrection, session string, args ...string) {
+	answer := func(c reflectCorrection, session string, args ...string) {
 		t.Helper()
 		if out, err := run(t, dev, "", append([]string{"sleep", "--answer", correctionID(session, c.Time, c.Quote)}, args...)...); err != nil {
 			t.Fatalf("sleep --answer: %v\n%s", err, out)
@@ -526,7 +526,7 @@ func TestSleepList(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Errorf("--list called the agent %d times", len(*calls))
 	}
-	if records, _ := readSleep(repo); len(records) != 4 {
+	if records, _ := readReflect(repo); len(records) != 4 {
 		t.Errorf("--list changed the records: %d, want 4", len(records))
 	}
 	for _, args := range [][]string{{"--list", "--budget", "1"}, {"--list", "--sessions", "2"}, {"--list", "--budget="}, {"--sessions=", "--list"}, {"--list", "--all", "--budget", "1"}} {
@@ -541,15 +541,15 @@ func TestSleepList(t *testing.T) {
 			t.Errorf("sleep %v: %v, want a usage error that names --all", args, err)
 		}
 	}
-	if records, _ := readSleep(repo); len(*calls) != 0 || len(records) != 4 {
+	if records, _ := readReflect(repo); len(*calls) != 0 || len(records) != 4 {
 		t.Errorf("%d calls and %d records, want no call and 4 records: --all may start no pass", len(*calls), len(records))
 	}
 
 	// A session outside home has no level. Its head line names its directory, or says that it ran outside home.
-	away := sleepCorrection{Time: "2026-11-20T10:00:00Z", Quote: "Run the checks first.", Summary: "Run the checks first.", Verdict: verdictCapture}
-	nowhere := sleepCorrection{Time: "2026-11-20T11:00:00Z", Quote: "Keep the log.", Summary: "Keep the log.", Verdict: verdictCapture}
-	write(sleepRecord{Session: "s-away", File: "claude/p/s-away.jsonl", Blob: "b5", Dir: "/tmp/work/checks", Start: "2026-11-20T09:00:00Z", Corrections: []sleepCorrection{away}})
-	write(sleepRecord{Session: "s-nowhere", File: "claude/p/s-nowhere.jsonl", Blob: "b6", Start: "2026-11-20T10:30:00Z", Corrections: []sleepCorrection{nowhere}})
+	away := reflectCorrection{Time: "2026-11-20T10:00:00Z", Quote: "Run the checks first.", Summary: "Run the checks first.", Verdict: verdictCapture}
+	nowhere := reflectCorrection{Time: "2026-11-20T11:00:00Z", Quote: "Keep the log.", Summary: "Keep the log.", Verdict: verdictCapture}
+	write(reflectRecord{Session: "s-away", File: "claude/p/s-away.jsonl", Blob: "b5", Dir: "/tmp/work/checks", Start: "2026-11-20T09:00:00Z", Corrections: []reflectCorrection{away}})
+	write(reflectRecord{Session: "s-nowhere", File: "claude/p/s-nowhere.jsonl", Blob: "b6", Start: "2026-11-20T10:30:00Z", Corrections: []reflectCorrection{nowhere}})
 	t.Setenv("CLAUDECODE", "1")
 	out, err = run(t, dev, "", "sleep", "--list")
 	if err != nil {
@@ -565,7 +565,7 @@ func TestSleepList(t *testing.T) {
 	}
 }
 
-func TestSleepListFollowsMoves(t *testing.T) {
+func TestReflectListFollowsMoves(t *testing.T) {
 	const (
 		memory = "dev/memories/ask-before-push.md"
 		topic  = "dev/memories/git/ask-before-push.md"
@@ -590,7 +590,7 @@ func TestSleepListFollowsMoves(t *testing.T) {
 	// the moves the times base, base+1h and so on in the use log, so each answer has a known place among them.
 	moved := func(t *testing.T, targets ...string) (dev, repo string, moves []Event) {
 		t.Helper()
-		dev, repo = sleepFixture(t)
+		dev, repo = reflectFixture(t)
 		for _, topic := range []string{"memories/git", "memories/review"} {
 			if out, err := run(t, dev, "", "draft", "topic", topic, "--description", "Read when you test a move."); err != nil {
 				t.Fatalf("draft topic: %v\n%s", err, out)
@@ -625,14 +625,14 @@ func TestSleepListFollowsMoves(t *testing.T) {
 	type answer struct{ quote, path, answered string }
 	answered := func(t *testing.T, dev, repo string, answers ...answer) string {
 		t.Helper()
-		var corrections []sleepCorrection
-		var records []sleepAnswer
+		var corrections []reflectCorrection
+		var records []reflectAnswer
 		for i, a := range answers {
-			c := sleepCorrection{Time: at(time.Duration(i-48) * time.Minute), Quote: a.quote, Summary: a.quote, Verdict: verdictCapture}
+			c := reflectCorrection{Time: at(time.Duration(i-48) * time.Minute), Quote: a.quote, Summary: a.quote, Verdict: verdictCapture}
 			corrections = append(corrections, c)
-			records = append(records, sleepAnswer{ID: correctionID("s-first", c.Time, c.Quote), Session: "s-first", Time: c.Time, Path: a.path, Answered: a.answered})
+			records = append(records, reflectAnswer{ID: correctionID("s-first", c.Time, c.Quote), Session: "s-first", Time: c.Time, Path: a.path, Answered: a.answered})
 		}
-		if err := appendSleep(repo, sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: at(-time.Hour), Corrections: corrections}); err != nil {
+		if err := appendReflect(repo, reflectRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: at(-time.Hour), Corrections: corrections}); err != nil {
 			t.Fatal(err)
 		}
 		if err := appendAnswers(repo, records); err != nil {
@@ -696,18 +696,18 @@ func TestSleepListFollowsMoves(t *testing.T) {
 	})
 }
 
-func TestSleepAnswer(t *testing.T) {
-	dev, repo := sleepFixture(t)
+func TestReflectAnswer(t *testing.T) {
+	dev, repo := reflectFixture(t)
 	t.Setenv("CLAUDECODE", "1") // an agent may answer
-	held := sleepCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md"}
-	small := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture}
+	held := reflectCorrection{Time: "2026-11-18T10:02:03Z", Quote: "Never push\n without asking.", Summary: "Ask before a push.", Verdict: verdictRetrieval, Path: "dev/memories/ask-before-push.md"}
+	small := reflectCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture}
 	// The ids of these two quotes share their first 7 digits, 1d2633e.
-	twinA := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use rule 12272.", Summary: "Rule A.", Verdict: verdictCapture}
-	twinB := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use rule 15967.", Summary: "Rule B.", Verdict: verdictCapture}
-	if err := appendSleep(repo, sleepRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []sleepCorrection{held, small, twinA, twinB}}); err != nil {
+	twinA := reflectCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use rule 12272.", Summary: "Rule A.", Verdict: verdictCapture}
+	twinB := reflectCorrection{Time: "2026-11-18T10:05:00Z", Quote: "Use rule 15967.", Summary: "Rule B.", Verdict: verdictCapture}
+	if err := appendReflect(repo, reflectRecord{Session: "s-first", File: "claude/p/s-first.jsonl", Blob: "b1", Level: "~/dev", Start: "2026-11-18T10:00:00Z", Corrections: []reflectCorrection{held, small, twinA, twinB}}); err != nil {
 		t.Fatal(err)
 	}
-	full := func(c sleepCorrection) string { return correctionID("s-first", c.Time, c.Quote) }
+	full := func(c reflectCorrection) string { return correctionID("s-first", c.Time, c.Quote) }
 	heldID, smallID := full(held), full(small)
 	if a, b := full(twinA), full(twinB); a[:7] != "1d2633e" || b[:7] != "1d2633e" || a == b {
 		t.Fatalf("the twins have the ids %s and %s, want two ids that share 1d2633e", a, b)
@@ -719,28 +719,28 @@ func TestSleepAnswer(t *testing.T) {
 		name string
 		args []string
 		out  string
-		want map[string]sleepAnswer // by id; the test compares the path and the reason
+		want map[string]reflectAnswer // by id; the test compares the path and the reason
 	}{
 		{"a path", []string{"--answer", heldID[:7], "--with", memory},
 			"Answered " + heldID[:7] + " with " + memory + ".\n",
-			map[string]sleepAnswer{heldID: {Path: memory}}},
+			map[string]reflectAnswer{heldID: {Path: memory}}},
 		{"a reason only", []string{"--answer", smallID, "--reason", "It concerns only its task."},
 			"Answered " + smallID[:7] + ": It concerns only its task.\n",
-			map[string]sleepAnswer{heldID: {Path: memory}, smallID: {Reason: "It concerns only its task."}}},
+			map[string]reflectAnswer{heldID: {Path: memory}, smallID: {Reason: "It concerns only its task."}}},
 		{"two ids, and a second answer replaces the first", []string{"--answer", heldID[:9] + ", " + smallID[:7], "--with", memory, "--reason", "One memory holds both rules"},
 			"Answered " + heldID[:7] + " with " + memory + ": One memory holds both rules.\nAnswered " + smallID[:7] + " with " + memory + ": One memory holds both rules.\n",
-			map[string]sleepAnswer{heldID: {Path: memory, Reason: "One memory holds both rules"}, smallID: {Path: memory, Reason: "One memory holds both rules"}}},
+			map[string]reflectAnswer{heldID: {Path: memory, Reason: "One memory holds both rules"}, smallID: {Path: memory, Reason: "One memory holds both rules"}}},
 		// A new answer replaces the whole older one, so it keeps no path and no reason of it.
 		{"a reason replaces a path and a reason", []string{"--answer", heldID, "--reason", "The memory went."},
 			"Answered " + heldID[:7] + ": The memory went.\n",
-			map[string]sleepAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory, Reason: "One memory holds both rules"}}},
+			map[string]reflectAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory, Reason: "One memory holds both rules"}}},
 		{"a path replaces a path and a reason", []string{"--answer", smallID, "--with", memory},
 			"Answered " + smallID[:7] + " with " + memory + ".\n",
-			map[string]sleepAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}}},
+			map[string]reflectAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}}},
 		// Two ids share 7 digits, so the list prints 8 digits of each, and an answer takes them.
 		{"the longer short id of a twin", []string{"--answer", full(twinA)[:8] + "," + full(twinB)[:8], "--reason", "Both concern only their task."},
 			"Answered " + full(twinA)[:8] + ": Both concern only their task.\nAnswered " + full(twinB)[:8] + ": Both concern only their task.\n",
-			map[string]sleepAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}, full(twinA): {Reason: "Both concern only their task."}, full(twinB): {Reason: "Both concern only their task."}}},
+			map[string]reflectAnswer{heldID: {Reason: "The memory went."}, smallID: {Path: memory}, full(twinA): {Reason: "Both concern only their task."}, full(twinB): {Reason: "Both concern only their task."}}},
 	}
 	if list, err := run(t, dev, "", "sleep", "--list"); err != nil || !strings.Contains(list, "\n"+full(twinA)[:8]+" 2026-11-18 10:05 ") || !strings.Contains(list, "\n"+full(twinB)[:8]+" 2026-11-18 10:05 ") {
 		t.Errorf("sleep --list does not print 8 digits of each twin: %v\n%s", err, list)
@@ -819,7 +819,7 @@ func TestSleepAnswer(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Errorf("the agent got %d calls, want none", len(*calls))
 	}
-	if records, _ := readSleep(repo); len(records) != 1 {
+	if records, _ := readReflect(repo); len(records) != 1 {
 		t.Errorf("%d records, want the one of the fixture: no call may start a pass", len(records))
 	}
 }

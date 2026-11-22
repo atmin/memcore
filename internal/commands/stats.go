@@ -131,7 +131,7 @@ func runStats(env Env, args []string) error {
 	if len(events) == 0 && broken == 0 {
 		b.WriteString("\nThe use log is empty.\n")
 	}
-	records, err := readSleep(repo)
+	records, err := readReflect(repo)
 	if err != nil {
 		return err
 	}
@@ -881,7 +881,7 @@ func writeMisses(b *strings.Builder, w week) {
 // countMisses fills the misses of each week from the records of the sleep passes. A correction counts in the
 // week of its own time. A session counts in the week of its first logged start, as started, and as judged when
 // a record holds it.
-func countMisses(weeks []week, events []Event, records []sleepRecord, now time.Time) {
+func countMisses(weeks []week, events []Event, records []reflectRecord, now time.Time) {
 	at := func(t time.Time) (int, bool) {
 		d := now.Sub(t)
 		if d < 0 {
@@ -911,7 +911,7 @@ func countMisses(weeks []week, events []Event, records []sleepRecord, now time.T
 			}
 		}
 	}
-	for _, c := range sleepCorrections(records) {
+	for _, c := range reflectCorrections(records) {
 		t, err := time.Parse(time.RFC3339, c.Time)
 		if err != nil {
 			continue

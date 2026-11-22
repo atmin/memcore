@@ -44,12 +44,12 @@ func startEvent(session string, at time.Time, commit string) Event {
 		Level: "~/dev", Dir: "~/dev", Commit: commit, Outcome: "ok"}
 }
 
-func TestSleepSessions(t *testing.T) {
+func TestReflectSessions(t *testing.T) {
 	_, repo, _ := newMemory(t)
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 	old := now.Add(-48 * time.Hour)
 
-	if units, err := sleepSessions(repo, []Event{startEvent("s-old", old, "")}, nil, now); err != nil || len(units) != 0 {
+	if units, err := reflectSessions(repo, []Event{startEvent("s-old", old, "")}, nil, now); err != nil || len(units) != 0 {
 		t.Fatalf("without a transcripts branch: %v, %v", units, err)
 	}
 
@@ -77,11 +77,11 @@ func TestSleepSessions(t *testing.T) {
 		startEvent("s-gone", old, "c1"), // no transcript
 		{Time: old.Format(time.RFC3339), Session: "s-nostart", Command: "show", Outcome: "ok"},
 	}
-	records := []sleepRecord{
+	records := []reflectRecord{
 		{Session: "s-judged", File: "claude/p1/s-judged.jsonl", Blob: blobs["claude/p1/s-judged.jsonl"]},
 		{Session: "s-grown", File: "claude/p1/s-grown.jsonl", Blob: "0000000000000000000000000000000000000000"}, // an older, shorter version
 	}
-	units, err := sleepSessions(repo, events, records, now)
+	units, err := reflectSessions(repo, events, records, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,26 +108,26 @@ func TestSleepSessions(t *testing.T) {
 	}
 }
 
-func TestSleepCorrections(t *testing.T) {
+func TestReflectCorrections(t *testing.T) {
 	_, repo, _ := newMemory(t)
-	c1 := sleepCorrection{Time: "2026-11-18T10:00:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: "capture"}
-	c2 := sleepCorrection{Time: "2026-11-18T10:05:00Z", Quote: "No trailers.", Summary: "No trailers.", Verdict: "stale", Path: "dev/memories/commits.md"}
-	write := func(r sleepRecord) {
+	c1 := reflectCorrection{Time: "2026-11-18T10:00:00Z", Quote: "Use small commits.", Summary: "Commit small.", Verdict: "capture"}
+	c2 := reflectCorrection{Time: "2026-11-18T10:05:00Z", Quote: "No trailers.", Summary: "No trailers.", Verdict: "stale", Path: "dev/memories/commits.md"}
+	write := func(r reflectRecord) {
 		t.Helper()
-		if err := appendSleep(repo, r); err != nil {
+		if err := appendReflect(repo, r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if records, err := readSleep(repo); err != nil || len(records) != 0 {
+	if records, err := readReflect(repo); err != nil || len(records) != 0 {
 		t.Fatalf("without a file: %v, %v", records, err)
 	}
-	write(sleepRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b1", Corrections: []sleepCorrection{c1}})
-	write(sleepRecord{Session: "s2", File: "claude/p/s2.jsonl", Blob: "b2", Corrections: []sleepCorrection{c1}})
-	write(sleepRecord{Session: "s1", File: "claude/p/s1.0123abcd.jsonl", Blob: "b3", Corrections: []sleepCorrection{c1, c2}})
-	write(sleepRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b4", Corrections: []sleepCorrection{c1}}) // the transcript grew
-	write(sleepRecord{Session: "s3", File: "claude/p/s3.jsonl", Blob: "b5"})
+	write(reflectRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b1", Corrections: []reflectCorrection{c1}})
+	write(reflectRecord{Session: "s2", File: "claude/p/s2.jsonl", Blob: "b2", Corrections: []reflectCorrection{c1}})
+	write(reflectRecord{Session: "s1", File: "claude/p/s1.0123abcd.jsonl", Blob: "b3", Corrections: []reflectCorrection{c1, c2}})
+	write(reflectRecord{Session: "s1", File: "claude/p/s1.jsonl", Blob: "b4", Corrections: []reflectCorrection{c1}}) // the transcript grew
+	write(reflectRecord{Session: "s3", File: "claude/p/s3.jsonl", Blob: "b5"})
 
-	records, err := readSleep(repo)
+	records, err := readReflect(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestSleepCorrections(t *testing.T) {
 		t.Fatalf("blobs = %q, want %q: a later record of a file replaces an earlier one", blobs, want)
 	}
 	var got []string
-	for _, c := range sleepCorrections(records) {
+	for _, c := range reflectCorrections(records) {
 		got = append(got, c.Record.Session+" "+c.Quote)
 	}
 	want := []string{"s2 Use small commits.", "s1 Use small commits.", "s1 No trailers."}
@@ -281,7 +281,7 @@ func TestVerdicts(t *testing.T) {
 	}
 	got := verdicts(corrections, findings, events, "s1")
 	for i, c := range cases {
-		want := sleepCorrection{Time: stamp(0), Quote: c.name, Summary: "s", Verdict: c.verdict, Path: c.path, Reason: "r"}
+		want := reflectCorrection{Time: stamp(0), Quote: c.name, Summary: "s", Verdict: c.verdict, Path: c.path, Reason: "r"}
 		if got[i] != want {
 			t.Errorf("%s:\n got %+v\nwant %+v", c.name, got[i], want)
 		}
