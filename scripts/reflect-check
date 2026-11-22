@@ -1,6 +1,6 @@
 #!/bin/sh
-# Run by hand after a build: one real sleep pass, with the real Claude Code, over one fixture transcript.
-# Usage: scripts/sleep-check
+# Run by hand after a build: one real reflect pass, with the real Claude Code, over one fixture transcript.
+# Usage: scripts/reflect-check
 #
 # It spends the tokens of two short headless calls, which cost a few cents at API prices. Its budget lets the
 # pass start its one session, and limits no call. It runs against a scratch memory repo under home, so
@@ -10,10 +10,10 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 for flag in --safe-mode --setting-sources --strict-mcp-config --tools --no-session-persistence --json-schema; do
-	claude --help 2>/dev/null | grep -q -- "$flag" || { echo "sleep-check: claude lacks $flag, so a sleep pass cannot run" >&2; exit 1; }
+	claude --help 2>/dev/null | grep -q -- "$flag" || { echo "reflect-check: claude lacks $flag, so a reflect pass cannot run" >&2; exit 1; }
 done
 
-work=$(mktemp -d "$HOME/.memcore-sleep-check.XXXXXX")
+work=$(mktemp -d "$HOME/.memcore-reflect-check.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/project"
 (cd "$root" && CGO_ENABLED=0 go build -o "$work/bin/memcore" ./cmd/memcore)
@@ -51,11 +51,11 @@ MEMORY
 
 commit=$(git -C "$MEMCORE_REPO" rev-parse HEAD)
 level=$(tail -n 1 "$state/log.jsonl" | sed -n 's/.*"level":"\([^"]*\)".*/\1/p')
-[ -n "$level" ] || { echo "sleep-check: the use log names no level" >&2; exit 1; }
+[ -n "$level" ] || { echo "reflect-check: the use log names no level" >&2; exit 1; }
 
 # The times of the fixture are two days old, so the session has ended for a pass.
 day=$(date -u -v-2d +%Y-%m-%d 2>/dev/null || date -u -d '2 days ago' +%Y-%m-%d)
-session=sleep-check-session
+session=reflect-check-session
 transcript="$work/transcript.jsonl"
 cat >"$transcript" <<FIXTURE
 {"agent":"claude","session":"$session","dir":"$work/project"}
@@ -78,11 +78,11 @@ git -C "$MEMCORE_REPO" update-ref refs/heads/transcripts "$snapshot"
 printf '{"time":"%sT09:59:00Z","session":"%s","agent":"claude","commit":"%s","level":"%s","command":"hook","hook":"session-start","outcome":"ok"}\n' \
 	"$day" "$session" "$commit" "$level" >>"$state/log.jsonl"
 
-echo "== memcore sleep --budget 0.50 --sessions 1"
-memcore sleep --budget 0.50 --sessions 1
+echo "== memcore reflect --budget 0.50 --sessions 1"
+memcore reflect --budget 0.50 --sessions 1
 echo
-echo "== memcore sleep --list"
-list=$(memcore sleep --list)
+echo "== memcore reflect --list"
+list=$(memcore reflect --list)
 printf '%s\n' "$list"
 echo
 echo "== memcore stats, the line of the misses"
@@ -92,8 +92,8 @@ status=0
 for quote in "Never push without asking me first." "write each commit message in one line, with no body."; do
 	case "$list" in
 	*"$quote"*) ;;
-	*) echo "sleep-check: FAIL, the records lack the correction: $quote" >&2; status=1 ;;
+	*) echo "reflect-check: FAIL, the records lack the correction: $quote" >&2; status=1 ;;
 	esac
 done
-[ "$status" -eq 0 ] && echo "sleep-check: ok, the pass recorded both corrections."
+[ "$status" -eq 0 ] && echo "reflect-check: ok, the pass recorded both corrections."
 exit "$status"

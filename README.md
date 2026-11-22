@@ -2,13 +2,13 @@
 
 *A palimpsest for agents.*
 
-memcore is long-term memory for the agents you work with, kept as plain markdown in git. The working tree holds what is true now, and history holds earlier beliefs. The `memcore` command does the git work for the agents. It runs the installed git, and for a sleep pass the agent that you already use. So you install nothing else.
+memcore is long-term memory for the agents you work with, kept as plain markdown in git. The working tree holds what is true now, and history holds earlier beliefs. The `memcore` command does the git work for the agents. It runs the installed git, and for a reflect pass the agent that you already use. So you install nothing else.
 
 Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.
 
-**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `move`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `sleep`, `push`, `drop`, `recover` and `ui` work on it.
+**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `move`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `reflect`, `push`, `drop`, `recover` and `ui` work on it.
 
-`push` asks at your terminal, and an agent's push sends memories, notes and plans without a question. With `memcore.autopush` set, memcore pushes ripe memories, notes and plans by itself. `memcore ui` opens a window to review, push, browse and search. `memcore sleep` finds your corrections in new transcripts, and says which of them memory should have prevented. With the learn skill, an agent then turns those corrections into changes of memory, for your review.
+`push` asks at your terminal, and an agent's push sends memories, notes and plans without a question. With `memcore.autopush` set, memcore pushes ripe memories, notes and plans by itself. `memcore ui` opens a window to review, push, browse and search. `memcore reflect` finds your corrections in new transcripts, and says which of them memory should have prevented. With the learn skill, an agent then turns those corrections into changes of memory, for your review.
 
 These docs describe what memcore does today. A trial exists outside this repo: one person's agent memories, imported and consolidated by hand.
 
@@ -17,7 +17,7 @@ These docs describe what memcore does today. A trial exists outside this repo: o
 - **Agents act, and you verify.** An agent writes a memory. memcore commits it to the memory repo without asking you. You review the commits in bulk. An agent pushes memories, notes and plans when you ask, and only you push skills and scripts. When you turn the automatic push on, memcore pushes memories, notes and plans by itself after a delay. You read them when you choose.
 - **Lean context, progressive disclosure.** An agent sees the least it needs. It reaches anything else in a few small hops, as an index keeps a large table one small read away.
 - **Plain files, plain git.** memcore uses no database and no vector store. You can read and edit everything by hand.
-- **Local first.** Memory lives in a git repo on your machine, and it works without the remote. Local redaction runs before anything leaves. Memories go to your remote for storage. Redacted transcripts go to the provider of your agent only when you run a sleep pass.
+- **Local first.** Memory lives in a git repo on your machine, and it works without the remote. Local redaction runs before anything leaves. Memories go to your remote for storage. Redacted transcripts go to the provider of your agent only when you run a reflect pass.
 - **Any agent.** A stock agent learns memcore from one instruction. The formats are open standards, so nothing ties memcore to one agent.
 
 ## Docs
@@ -37,11 +37,11 @@ These docs describe memcore. An agent that uses memcore loads none of them: it r
 
 ## Skills
 
-memcore ships these skills, and this repo follows them itself. The voice skill applies to every reply and every document. The plan, build and review skills are for changes to code, in this repo and in yours. The cleanup skill tidies a level of the memory repo. The learn skill turns the corrections of a sleep pass into changes of memory.
+memcore ships these skills, and this repo follows them itself. The voice skill applies to every reply and every document. The plan, build and review skills are for changes to code, in this repo and in yours. The cleanup skill tidies a level of the memory repo. The learn skill turns the corrections of a reflect pass into changes of memory.
 
 - [Voice](skills/voice/SKILL.md): read before you write any reply or document. It covers how agents talk and write.
 - [Plan](skills/plan/SKILL.md): read when you plan a change that needs more than one commit. It covers the rules and the template of a plan.
 - [Build](skills/build/SKILL.md): read when you get an approved plan. It covers the worktree, the steps, the stops and the report.
 - [Review](skills/review/SKILL.md): read when a plan or a commit needs a review. It covers the choice of the reviewer and the answers.
 - [Cleanup](skills/cleanup/SKILL.md): read when a level of memory is hard to read, or over its budget. It covers the survey, the proposal and the changes.
-- [Learn](skills/learn/SKILL.md): read after a sleep pass, when corrections are open. It covers the change for each verdict, the limits and the answers.
+- [Learn](skills/learn/SKILL.md): read after a reflect pass, when corrections are open. It covers the change for each verdict, the limits and the answers.

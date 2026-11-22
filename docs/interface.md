@@ -20,7 +20,7 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 | | `verify <path>` | Checks the documents at a path, or any markdown, against the references they name and the glossaries on their path. It also warns on the name of a memory that moved or went. |
 | | `inbox` | Lists what waits on you: the unpushed commits as the fold at push leaves them, and the stale indexes. The header counts the index commits that `push` adds apart from the commits that the fold leaves. An entry shows the message and the files of its commit after the fold. It counts the fixups that fold in. When the fold drops commits, the list ends with their count. It also warns of a remote that lost accepted commits. It fetches first, then prints a summary of the newest week of `stats` in three lines. With the automatic push on, it says so. Each entry of a commit of the queue then ends with its state. The state is ripe, the time after which memcore pushes it, or the reason that it is held. A last section lists the commits that memcore pushed automatically since your last push. `inbox` shows a likely secret in a message or a path as a placeholder. |
 | | `push` | Refuses uncommitted changes, fetches, and folds in the fixups. It writes each stale index again before and after the fold. Then it asks for confirmation at your terminal and pushes. An agent runs it only when you ask. Without a terminal, it asks nothing and pushes a queue that holds only memories, notes, plans and indexes. For any other file, or a merge, it pushes nothing, and names the commits that you push at your terminal. After the push, it moves the accepted checkout forward, and links and unlinks scripts to match. `--expect <commit>` pushes nothing unless `main` is at that commit before the fetch, so it pushes only the queue that you reviewed. `--auto` is the automatic push, which memcore starts itself in the background, at most once an hour. It asks nothing, and pushes nothing unless you set `memcore.autopush`. The one exception is an earlier automatic push that has not ended: it sends those commits again. Then it pushes the ripe memories, notes and plans, and leaves every other commit in the queue. See [Automatic push](git.md#automatic-push). |
-| | `sleep` | Runs one sleep pass: your agent, headless, lists your corrections in the new transcripts, and judges each one against the memories that its session saw. Only you run a pass, at a terminal. `--budget <dollars>` and `--sessions <n>` limit it. `sleep --list` prints the open corrections, and `sleep --answer <id>` records what happened to one. An agent may run both. See **Sleep** below. |
+| | `reflect` | Runs one reflect pass: your agent, headless, lists your corrections in the new transcripts, and judges each one against the memories that its session saw. Only you run a pass, at a terminal. `--budget <dollars>` and `--sessions <n>` limit it. `reflect --list` prints the open corrections, and `reflect --answer <id>` records what happened to one. An agent may run both. See **Reflect** below. |
 | yours | `drop <commit>` | Removes a commit of the review queue, with its fixups, after it asks at your terminal. It records your reason. |
 | | `recover` | Runs after a fetch finds that the remote lost accepted commits. It asks at your terminal, drops them here, and moves the queue onto the remote (see [Git](git.md)). |
 | | `ui` | Opens the window: a local page to review the queue, drop commits, push, browse the memory repo and search its text. See **The window** below. `--install` writes the application of the window, and `--uninstall` removes it. Both work before `init`. See [Install](install.md). |
@@ -69,14 +69,14 @@ In Review, each file of an entry has three views of its change:
 
 Agents seldom call `verify` themselves, because the write commands run it.
 
-**Stats.** `stats` measures whether memory helps, from the use log, git history and the records of the sleep passes. It reads no transcript and calls no agent. A week is 7 days that end at the time of the call, in UTC. `stats` prints the four newest weeks, newest first. It leaves out a week that ends before the log starts. For each week, it shows:
+**Stats.** `stats` measures whether memory helps, from the use log, git history and the records of the reflect passes. It reads no transcript and calls no agent. A week is 7 days that end at the time of the call, in UTC. `stats` prints the four newest weeks, newest first. It leaves out a week that ends before the log starts. For each week, it shows:
 - **Capture:** the committed lines of `remember`, `revise`, `forget` and `draft`, for memories and for other documents. A fold changes no count.
 - **Review:** the queue commits created, pushed and dropped. The fixups count among the created and the dropped. The commits of an agent's push and of an automatic push count among the pushed. An accepted memory is a memory that a pushed commit adds or modifies, imports included. Each push counts it once, in the week of the push. The precision is the share of accepted memories that are no accepted mistake. The two newest weeks say "so far", because their mistakes can still grow.
 - **Use:** the sessions, the reads per session, the reads around memcore, and the five most-read memories. Only reads with a session count here.
 - **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. A subagent can inherit the session id of its agent. So one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
 - **Friction:** the failed calls of memcore, grouped by command and error. Errors that differ only in a path, a commit or a number fall in one group. The five largest groups show, then the count of the rest.
 - **Marks:** the counts of `#again`, `#wrong` and `#stale`.
-- **Misses:** the capture, retrieval and application misses and the stale memories, from the records of the sleep passes. A correction counts in the week of its own time. A correction with the verdict "before memory" or "unrelated" counts as no miss. Then come the judged sessions, of the sessions with a logged start in the week. A session counts in the week of its first start. A week without a judged session says so.
+- **Misses:** the capture, retrieval and application misses and the stale memories, from the records of the reflect passes. A correction counts in the week of its own time. A correction with the verdict "before memory" or "unrelated" counts as no miss. Then come the judged sessions, of the sessions with a logged start in the week. A session counts in the week of its first start. A week without a judged session says so.
 
 More rules of `stats`:
 - A line without a session still counts for capture, review, friction and marks. A line that does not parse stays out, and `stats` names the count.
@@ -95,7 +95,7 @@ Then `stats` lists the memories with no logged read in 30 days, 20 at most:
 
 `stats <path>` prints only the reads of each memory, note and plan under a path of the memory repo, such as `work/shop`. `.` covers the whole repo. It counts the whole use log, every read with a session or without one. A read counts under the path that its document has now, as in the weeks. The most-read document comes first, and ties sort by path. An unread document prints 0.
 
-**Sleep.** `memcore sleep` runs one sleep pass, in the foreground. A pass never starts by itself, proposes no change and commits nothing. An agent in a session with you turns its corrections into changes, by the learn skill below. Only you run a pass, because it has two costs: it sends redacted transcripts to the provider of your agent, and it spends the limits of your plan.
+**Reflect.** `memcore reflect` runs one reflect pass, in the foreground. A pass never starts by itself, proposes no change and commits nothing. An agent in a session with you turns its corrections into changes, by the learn skill below. Only you run a pass, because it has two costs: it sends redacted transcripts to the provider of your agent, and it spends the limits of your plan.
 
 A pass judges each file of the transcripts branch that fits all of these:
 - It is the transcript of a main session, or a version beside it. A subagent gets its words from the agent, so a pass skips its file.
@@ -118,33 +118,33 @@ memcore turns each answer into a verdict:
 The use log decides between a retrieval miss and an application miss, not the agent. A line of `orient` is no read.
 
 A pass has two limits, and ends at the first:
-- **The budget**, 2 dollars unless `--budget` or the setting `memcore.sleepbudget` says otherwise. The cost is what the agent reports, at API prices. On a subscription, a pass spends the limits of the plan and no money. A pass compares its cost with the budget before it starts a session. It finishes each session that it starts, so it can pass the budget by one session. No call of the agent gets a limit of its own.
+- **The budget**, 2 dollars unless `--budget` or the setting `memcore.reflectbudget` says otherwise. The cost is what the agent reports, at API prices. On a subscription, a pass spends the limits of the plan and no money. A pass compares its cost with the budget before it starts a session. It finishes each session that it starts, so it can pass the budget by one session. No call of the agent gets a limit of its own.
 - **`--sessions <n>`**, the most sessions of one pass. It needs no price, so it also limits an agent that reports no cost.
 
 A pass prints one line for each session, with its level or its directory. Then it prints the totals: the judged sessions, the corrections by verdict, the cost and the sessions that wait. An error of the agent ends the pass with its cause, and the finished sessions stay recorded. A second pass refuses to run beside the first.
 
 Three settings in the git configuration of the memory repo change a pass:
-- `memcore.sleepbudget`: the budget in dollars.
-- `memcore.sleepmodel`: the model of the agent, `sonnet` by default.
-- `memcore.sleepagent`: the agent. `claude` is the default and the only value now.
+- `memcore.reflectbudget`: the budget in dollars.
+- `memcore.reflectmodel`: the model of the agent, `sonnet` by default.
+- `memcore.reflectagent`: the agent. `claude` is the default and the only value now.
 
 The headless session of a pass is memcore's own. It runs in an empty folder, with no tools, no settings, no `CLAUDE.md` and no auto-memory, and it leaves no transcript. memcore marks it with `MEMCORE_INTERNAL`. A call of memcore from a marked session logs nothing, and starts no background work.
 
-To judge every session again, delete `.git/memcore/sleep.jsonl` of the memory repo, and run a pass. The pass then reads each transcript again, at its full cost.
+To judge every session again, delete `.git/memcore/reflect.jsonl` of the memory repo, and run a pass. The pass then reads each transcript again, at its full cost.
 
 Each correction has an id: the SHA-256 of its session, its time and its quote. So the id stays the same when a later pass finds the same words. A print shows the first 7 digits of an id, and more while two recorded corrections share them.
 
-A correction is open when it is a miss or a stale memory, and it has no answer. `memcore sleep --list` prints the open corrections, the newest session first. Each one has these lines:
+A correction is open when it is a miss or a stale memory, and it has no answer. `memcore reflect --list` prints the open corrections, the newest session first. Each one has these lines:
 - a head line: the id, the time, the level of the session, the verdict and the memory if any;
 - your words, the rule and the reason of the judge, one line each.
 
-A session outside home has no level, so the list shows its directory instead, such as `/tmp/work/checks`. The first line of the list counts every correction, and the open ones. `memcore sleep --list --all` prints every correction, and the answer of each answered one. The answer of a moved document shows the path that the document has now.
+A session outside home has no level, so the list shows its directory instead, such as `/tmp/work/checks`. The first line of the list counts every correction, and the open ones. `memcore reflect --list --all` prints every correction, and the answer of each answered one. The answer of a moved document shows the path that the document has now.
 
-`memcore sleep --answer <id>[,<id>]` records an answer: what happened to a correction. It takes an id, or its first 7 digits or more.
+`memcore reflect --answer <id>[,<id>]` records an answer: what happened to a correction. It takes an id, or its first 7 digits or more.
 - `--with <path>` names the document of the memory repo that now holds the rule.
 - `--reason <text>` says why. It stands alone for no change, and after `forget` removed the document.
 
-An answer needs `--with`, `--reason` or both, and a second answer of a correction replaces the first. An answer changes no document. It is a line of the local state, `.git/memcore/answers.jsonl`. It still holds after you delete `sleep.jsonl`, when the next pass finds the same words. Its print follows each later `move` of its document, so a move needs no second answer. `--list` and `--answer` run no agent, so an agent may run them.
+An answer needs `--with`, `--reason` or both, and a second answer of a correction replaces the first. An answer changes no document. It is a line of the local state, `.git/memcore/answers.jsonl`. It still holds after you delete `reflect.jsonl`, when the next pass finds the same words. Its print follows each later `move` of its document, so a move needs no second answer. `--list` and `--answer` run no agent, so an agent may run them.
 
 **Learn.** memcore ships the [learn](../skills/learn/SKILL.md) skill, which an agent follows in a session with you after a pass. The agent checks each open correction against memory as it is now. Then it makes the change that fits the verdict, with `remember`, `revise` or `forget`, and records the answer. A correction that concerns only its task gets a reason and no memory. The skill makes at most ten changes in one session, and each change lands in the review queue. When `remember` warns about the bytes of `orient`, the skill adds no more memories at the top of that level.
 
@@ -184,7 +184,7 @@ Each hook runs memcore by its full path, so it does not depend on the `PATH` of 
 
 Where the agent's permissions allow it, `init` also denies the agent direct edits under the memory repo. So `memcore` stays the only way in. It denies `drop`, `recover` and `ui` there too, the commands that only you run. It leaves `push` allowed, because an agent pushes memories, notes and plans when you ask. `init` gets no rule, because a rule cannot tell `--dry-run` apart. memcore refuses an agent for the rest of `init`. Skill formats are standard, but the place where each agent looks for skills is not. memcore serves skills itself, from the checkout of the accepted history, so that location never matters.
 
-memcore ships as a single executable. It runs the installed git, and for a sleep pass the agent that you already use. So you install nothing else. See [Architecture](architecture.md).
+memcore ships as a single executable. It runs the installed git, and for a reflect pass the agent that you already use. So you install nothing else. See [Architecture](architecture.md).
 
 ## Sources
 

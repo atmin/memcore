@@ -27,7 +27,7 @@ CGO_ENABLED=0 go build -o ~/.local/bin/memcore ./cmd/memcore
 
 To update a build from source, pull the repo and build again. Then run `memcore ui --install`, so memcore.app holds the new build. `memcore version` names the build that runs: the tag of a release, or `dev` for a build from source. It adds the commit of the build when the build records one.
 
-Put `~/.local/bin` on `PATH` before you run `init`. Without memcore on `PATH`, `init` adds no hook. At run time, memcore needs only git. A sleep pass also needs Claude Code on `PATH`, logged in, because it runs your agent headless.
+Put `~/.local/bin` on `PATH` before you run `init`. Without memcore on `PATH`, `init` adds no hook. At run time, memcore needs only git. A reflect pass also needs Claude Code on `PATH`, logged in, because it runs your agent headless.
 
 ## `memcore init <remote>`
 
@@ -46,7 +46,7 @@ A second run adds only what is new: new transcripts, new files of auto-memory, a
 
 ## Day to day
 
-Agents run `memcore` themselves. You run `memcore inbox` to see what waits for your review, and `memcore push` to accept it. Or you run `memcore ui`, which opens a window to review, push, browse and search. You run `memcore sleep` when you want to know where memory failed you: a sleep pass never starts by itself. `push` and a fetch link the accepted scripts onto `~/.local/bin`.
+Agents run `memcore` themselves. You run `memcore inbox` to see what waits for your review, and `memcore push` to accept it. Or you run `memcore ui`, which opens a window to review, push, browse and search. You run `memcore reflect` when you want to know where memory failed you: a reflect pass never starts by itself. `push` and a fetch link the accepted scripts onto `~/.local/bin`.
 
 Nothing of memcore runs between sessions: there is no service and no scheduled job. The one exception is the server of `memcore ui`. It runs in the background while a window is open, apart from any session, and stops 10 s after the last window closes. Snapshots start the way `git gc --auto` does:
 1. An agent calls `memcore`.

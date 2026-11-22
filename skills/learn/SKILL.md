@@ -1,17 +1,17 @@
 ---
 name: learn
-description: Use after a sleep pass, when corrections are open. It turns each open correction into a change of memory, or into a reason for none.
+description: Use after a reflect pass, when corrections are open. It turns each open correction into a change of memory, or into a reason for none.
 ---
 
 # Learn
 
-A sleep pass finds the corrections of the person, and judges each one against memory. A miss is a correction that memory should have prevented. A miss is open until it has an answer. This skill gives each open correction its answer, in a session with the person.
+A reflect pass finds the corrections of the person, and judges each one against memory. A miss is a correction that memory should have prevented. A miss is open until it has an answer. This skill gives each open correction its answer, in a session with the person.
 
 Make every change through a memcore command, so it lands in the review queue. Never edit a file of the memory repo by hand.
 
 ## Survey
 
-1. Run `memcore sleep --list`. It prints each open correction with its id, its verdict, the words of the person and the rule. `memcore sleep --list --all` also prints the answered corrections, each with its answer.
+1. Run `memcore reflect --list`. It prints each open correction with its id, its verdict, the words of the person and the rule. `memcore reflect --list --all` also prints the answered corrections, each with its answer.
 2. Group the corrections that state one rule at one level. One change answers a whole group. A memory answers only the sessions that see it, at its level or below it. So the same rule at a sibling level is a group of its own.
 3. Order the groups by the count of their sessions. A rule that the person repeated in several sessions comes first.
 
@@ -66,14 +66,14 @@ When `remember` warns about the bytes of `orient`, add no more memory at the top
 
 - Make at most ten changes in one session. The person reviews each one, so a short queue gets a careful review.
 - Never push. The person reviews the queue and pushes.
-- Never run a sleep pass. Only the person runs one, at a terminal.
+- Never run a reflect pass. Only the person runs one, at a terminal.
 
 ## Record
 
 Record the answer of each correction right after its change. An answer takes the ids of a whole group, with a comma between two:
 
-    memcore sleep --answer <id>[,<id>] --with <path>
-    memcore sleep --answer <id>[,<id>] --reason <text>
+    memcore reflect --answer <id>[,<id>] --with <path>
+    memcore reflect --answer <id>[,<id>] --reason <text>
 
 - After `remember` or `revise`, `--with` names the document that now holds the rule.
 - For no change, `--reason` says why.
@@ -86,4 +86,4 @@ End the session with a report to the person:
 1. each change, with its document and the corrections that it answers;
 2. each answer with no change, with its reason;
 3. each instruction, skill or script that the person may want to change, and each level that needs a cleanup;
-4. the count of the corrections that stay open, from `memcore sleep --list`.
+4. the count of the corrections that stay open, from `memcore reflect --list`.

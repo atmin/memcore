@@ -18,9 +18,9 @@ The docs use each term below with one meaning only.
 - **transcript**: the record of one session.
 - **snapshot**: a commit of new transcripts to the transcripts branch.
 - **hook**: a command that an agent runs at a point of a session, such as its start. `init` adds the hooks of memcore to Claude Code.
-- **sleep pass**: one run of `memcore sleep`. It reads the new transcripts, and records your corrections with a verdict each.
+- **reflect pass**: one run of `memcore reflect`. It reads the new transcripts, and records your corrections with a verdict each.
 - **correction**: your words in a session that tell the agent it did wrong, or how to do it differently.
-- **verdict**: what a sleep pass says about a correction: a miss of one kind, a stale memory, unrelated to memory, or before memory. Before memory means that memcore saw the session only after the correction.
+- **verdict**: what a reflect pass says about a correction: a miss of one kind, a stale memory, unrelated to memory, or before memory. Before memory means that memcore saw the session only after the correction.
 - **miss**: a correction that memory should have prevented. A capture miss means that no memory held the fact. A retrieval miss means that a memory held it, and the session did not read it. An application miss means that the session read the memory, and acted against it.
 - **answer**: what happened to a correction: the document that now holds its rule, or the reason. The reason stands alone for no change, and for a removed document.
 - **open correction**: a miss or a stale memory with no answer.
