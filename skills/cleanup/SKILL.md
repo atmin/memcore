@@ -16,7 +16,11 @@ Read the level first, and change nothing. Two directories take part:
 - the memory repo, where the level is a path, such as `work/shop`.
 
 Collect these numbers:
-1. The lines that the level costs in `orient`, against its budget of 40: `memcore orient | grep -c '^- <level>/'`.
+1. The two numbers of `orient`:
+   - the lines of the level, against its budget of 40: `memcore orient | grep -c '^- <level>/'`;
+   - the bytes of the print, against the 9,500 that the `SessionStart` hook shows in full: `memcore orient | wc -c`.
+
+   The bytes count the whole print: the fixed head, the level and each level above it.
 2. The faults, and the descriptions that name no moment to read: `memcore verify <level>`.
 3. The size of each document: `(cd <memory repo> && find <level>/memories <level>/notes -name '*.md' ! -name README.md | xargs wc -c)`.
 4. The reads of each document, which follow moves: `memcore stats <level>`.
@@ -44,7 +48,7 @@ A description says when to read the document, as "Read before you ..." or "Read 
 ### Topic folders
 
 - Start from two values, and test them. A folder lists 15 documents at most. A topic folder holds 3 documents at least.
-- Split a folder into topic folders past 15 documents, or when `orient` prints the level over its budget.
+- Split a folder into topic folders past 15 documents. Split it too when `orient` passes the 40 lines of the level or the 9,500 bytes.
 - Name a topic after a part of the domain, such as `payments` or `local-setup`. Never name it after a type or a date.
 - Nest a topic folder only when it lists more than 15 documents itself.
 - Leave a document that fits no topic directly in the folder of its kind.
@@ -111,7 +115,7 @@ Turn a memory into a note with three commands:
 ## Findings
 
 Write the findings as a note at the level: `memcore draft note cleanup-<YYYY-MM-DD> --description "Read before the next cleanup of this level."`. Then fill it with `memcore revise`. The note holds:
-1. the survey before and after: the lines in `orient`, the warnings of `verify` and the documents in each folder;
+1. the survey before and after: the lines and the bytes in `orient`, the warnings of `verify` and the documents in each folder;
 2. each rejected change, with its reason;
 3. each answer about size, with its reason;
 4. each fault that no command could fix, and each step that was slow or awkward;

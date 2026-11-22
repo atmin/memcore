@@ -21,7 +21,7 @@ Change nothing yet. Give the person the count of the open corrections and the gr
 
 Memory changed since the session of a correction. So check each group against memory as it is now.
 
-1. Run `memcore orient` in the directory of the session. The head line of a correction names its level, such as `~/work/shop`.
+1. Run `memcore orient` in the directory of the session. The head line of a correction names its level, such as `~/work/shop`. A session outside home has its directory there instead, and it saw only the memories of the root.
 2. Read each memory that may hold the rule, with `memcore show <path>`.
 3. Check the verdict. The judge errs, so read the words of the person against the memory that the verdict names. When the verdict is wrong, name the fault that you find, and decide by that fault.
 
@@ -60,6 +60,8 @@ A new memory goes to the level of the session, and never higher. Placement is lo
 
 A rule moves up only when two sibling levels hold it, and the person says so. The lesson then moves up, with the project names removed.
 
+When `remember` warns about the bytes of `orient`, add no more memory at the top of that level. Place the next one with `--topic`, where a topic folder fits. Name the level in the report, for a cleanup.
+
 ## Limits
 
 - Make at most ten changes in one session. The person reviews each one, so a short queue gets a careful review.
@@ -83,5 +85,5 @@ End the session with a report to the person:
 
 1. each change, with its document and the corrections that it answers;
 2. each answer with no change, with its reason;
-3. each instruction, skill or script that the person may want to change;
+3. each instruction, skill or script that the person may want to change, and each level that needs a cleanup;
 4. the count of the corrections that stay open, from `memcore sleep --list`.
