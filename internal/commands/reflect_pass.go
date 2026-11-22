@@ -268,16 +268,7 @@ func (p *pass) judge(u reflectUnit) error {
 		return err
 	}
 	// The corrections of one seen commit go to the judge together, with the memories at that commit.
-	groups := map[string][]int{}
-	var commits []string
-	for i, c := range found {
-		at, _ := time.Parse(time.RFC3339, c.Time)
-		commit := seenCommit(p.events, u.Session, at)
-		if _, ok := groups[commit]; !ok {
-			commits = append(commits, commit)
-		}
-		groups[commit] = append(groups[commit], i)
-	}
+	commits, groups := groupBySeen(p.events, u.Session, found)
 	result := make([]reflectCorrection, len(found))
 	for _, commit := range commits {
 		if commit == "" {
@@ -328,6 +319,23 @@ func (p *pass) judge(u reflectUnit) error {
 		}
 	}
 	return nil
+}
+
+// groupBySeen groups corrections of a session by the commit that the session saw at their time. It returns the
+// commits in the order of their first correction, and the indexes of the corrections of each commit. The commit
+// "" holds the corrections from before memcore saw the session.
+func groupBySeen(events []Event, session string, corrections []thinking.Correction) ([]string, map[string][]int) {
+	groups := map[string][]int{}
+	var commits []string
+	for i, c := range corrections {
+		at, _ := time.Parse(time.RFC3339, c.Time)
+		commit := seenCommit(events, session, at)
+		if _, ok := groups[commit]; !ok {
+			commits = append(commits, commit)
+		}
+		groups[commit] = append(groups[commit], i)
+	}
+	return commits, groups
 }
 
 // verdictCounts counts the verdicts of corrections, by kind.
