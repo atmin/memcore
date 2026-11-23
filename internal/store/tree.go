@@ -16,6 +16,8 @@ type Tree struct {
 	root    string
 	files   map[string]bool // the ignored files, relative to the root
 	folders map[string]bool // the ignored folders, relative to the root
+	earlier *Tree           // a reader whose ignored paths stay ignored, or nil
+	tracked map[string]bool // the tracked files and their folders, which earlier does not hide
 }
 
 // OpenTree asks git which untracked paths of the working tree at repo it ignores. It reads the ignored paths
@@ -43,13 +45,34 @@ func OpenTree(repo string) (Tree, error) {
 	return t, nil
 }
 
+// With returns a reader that also skips each path that earlier skips. A path that git tracks now stays
+// visible, and so does each folder that holds such a path. A rebase opens earlier at its start. So a stop at a
+// commit before a rule of the tip still skips the paths of that rule.
+func (t Tree) With(earlier Tree) (Tree, error) {
+	if len(earlier.files) == 0 && len(earlier.folders) == 0 && earlier.earlier == nil {
+		return t, nil
+	}
+	out, err := Git(t.root, "--no-optional-locks", "-c", "core.fsmonitor=false", "ls-files", "--cached", "-z")
+	if err != nil {
+		return t, fmt.Errorf("list the tracked files of %s: %w", t.root, err)
+	}
+	tracked := map[string]bool{}
+	for _, p := range strings.Split(out, "\x00") {
+		for ; p != "" && p != "." && !tracked[p]; p = path.Dir(p) {
+			tracked[p] = true
+		}
+	}
+	t.earlier, t.tracked = &earlier, tracked
+	return t, nil
+}
+
 // Root returns the directory of the repo.
 func (t Tree) Root() string {
 	return t.root
 }
 
 // Ignored reports whether git ignores the path rel, or a folder that holds it. rel is relative to the root,
-// with slashes.
+// with slashes. A reader from With also skips each path that its earlier reader skips, unless git tracks it.
 func (t Tree) Ignored(rel string) bool {
 	rel = clean(rel)
 	if rel == "" {
@@ -63,7 +86,7 @@ func (t Tree) Ignored(rel string) bool {
 			return true
 		}
 	}
-	return false
+	return t.earlier != nil && !t.tracked[rel] && t.earlier.Ignored(rel)
 }
 
 // Exists reports whether the path rel exists, and git does not ignore it.

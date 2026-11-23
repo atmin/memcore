@@ -423,15 +423,24 @@ func buildAside(repo, tmp string, chains []*chain) (tip string, built []*chain, 
 					return "", nil, fmt.Errorf("apply %s of the chain %s in the clone: %w", short(c.sha), name, err)
 				}
 				paths := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+				// The clone holds no ignored path, so a reader of the moment skips what the working tree skips.
+				t, err := store.OpenTree(clone)
+				if err != nil {
+					return "", nil, err
+				}
 				var ce *conflictError
-				if err := resolveIndexes(clone, paths); errors.As(err, &ce) {
+				if err := resolveIndexes(t, paths); errors.As(err, &ce) {
 					return "", nil, fmt.Errorf("the chain %s conflicts with the commits before it in %s, so the automatic push built nothing", name, strings.Join(ce.paths, ", "))
 				} else if err != nil {
 					return "", nil, fmt.Errorf("apply %s of the chain %s in the clone: %w", short(c.sha), name, err)
 				}
 			}
 		}
-		indexes, err := writeIndexes(clone)
+		t, err := store.OpenTree(clone)
+		if err != nil {
+			return "", nil, err
+		}
+		indexes, err := writeIndexes(t)
 		if err != nil {
 			return "", nil, fmt.Errorf("write the indexes of the chain %s in the clone: %w", name, err)
 		}
@@ -481,7 +490,7 @@ func commitAside(clone, tmp, target string) error {
 }
 
 // dropQueueFolders removes from the clone each folder that holds no file there, while the review queue tracks
-// a file in it. scratchClone copies every folder of the working tree, since an index lists the empty folders
+// a file in it. scratchClone copies each folder that git does not ignore, since an index lists the empty folders
 // of its level. A folder of a chain that is not built is no empty folder: the accepted history lacks it. The
 // build of a chain creates the folders of its own files.
 func dropQueueFolders(repo, clone string) error {

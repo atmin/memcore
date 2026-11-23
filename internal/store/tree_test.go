@@ -137,6 +137,88 @@ func TestTree(t *testing.T) {
 	if got := tree.Root(); got != repo {
 		t.Errorf("Root() = %q, want %q", got, repo)
 	}
+
+	t.Run("a joined reader skips the paths of the earlier reader", func(t *testing.T) {
+		repo := t.TempDir()
+		gitT(t, repo, "init", "-q", "-b", "main")
+		writeT(t, repo, ".gitignore", "local/\n", 0o644)
+		writeT(t, repo, "dev/a.md", "visible\n", 0o644)
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", "init")
+		writeT(t, repo, "dev/local/README.md", "mine\n", 0o644)
+		writeT(t, repo, "dev/local/other.md", "mine\n", 0o644)
+		earlier, err := OpenTree(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// The rule is gone, as at a stop of a rebase before the rule.
+		writeT(t, repo, ".gitignore", "", 0o644)
+		now, err := OpenTree(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if now.Ignored("dev/local/README.md") {
+			t.Fatal("dev/local/README.md is ignored with no rule")
+		}
+		joined, err := now.With(earlier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range []string{"dev/local", "dev/local/README.md", "dev/local/other.md"} {
+			if !joined.Ignored(rel) || joined.Exists(rel) {
+				t.Errorf("the joined reader shows %s, want it ignored", rel)
+			}
+		}
+		if list, err := joined.ReadDir("dev"); err != nil || !slices.Equal(names(list), []string{"a.md"}) {
+			t.Errorf("ReadDir(dev) = %q, %v; want a.md", names(list), err)
+		}
+		if got := joined.Root(); got != repo {
+			t.Errorf("Root() = %q, want %q", got, repo)
+		}
+
+		// The stop tracks the path, so the path is visible.
+		gitT(t, repo, "add", "dev/local/README.md")
+		now, err = OpenTree(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined, err = now.With(earlier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rel, ignored := range map[string]bool{"dev/local": false, "dev/local/README.md": false, "dev/local/other.md": true} {
+			if got := joined.Ignored(rel); got != ignored {
+				t.Errorf("Ignored(%q) = %v, want %v", rel, got, ignored)
+			}
+		}
+		if list, err := joined.ReadDir("dev/local"); err != nil || !slices.Equal(names(list), []string{"README.md"}) {
+			t.Errorf("ReadDir(dev/local) = %q, %v; want README.md", names(list), err)
+		}
+	})
+
+	t.Run("a join with a reader that ignores nothing runs no git", func(t *testing.T) {
+		repo := t.TempDir()
+		gitT(t, repo, "init", "-q", "-b", "main")
+		earlier, err := OpenTree(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeT(t, repo, ".gitignore", ".DS_Store\n", 0o644)
+		writeT(t, repo, "dev/.DS_Store", "finder\n", 0o644)
+		now, err := OpenTree(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", "") // a call of git would fail
+		joined, err := now.With(earlier)
+		if err != nil {
+			t.Fatalf("With: %v", err)
+		}
+		if !joined.Ignored("dev/.DS_Store") {
+			t.Error("the joined reader shows dev/.DS_Store, want the rule of now")
+		}
+	})
 }
 
 // walkAllowed lists the functions that may read a directory without a Tree, as path::symbol, with the reason.

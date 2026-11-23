@@ -35,7 +35,12 @@ func rebaseEditor(repo, editor string, args ...string) error {
 		// The rebase of the person stays: an abort below would end it.
 		return errors.New("a rebase is in progress in the memory repo: the person finishes it or aborts it first")
 	}
-	_, err := store.Git(repo, append([]string{"-c", "core.editor=true", "-c", "sequence.editor=" + editor, "-c", "rebase.rescheduleFailedExec=false", "rebase", "--empty=drop"}, args...)...)
+	// A stop may be at a commit that lacks a rule of the tip. So the paths that git ignores now stay ignored.
+	first, err := store.OpenTree(repo)
+	if err != nil {
+		return err
+	}
+	_, err = store.Git(repo, append([]string{"-c", "core.editor=true", "-c", "sequence.editor=" + editor, "-c", "rebase.rescheduleFailedExec=false", "rebase", "--empty=drop"}, args...)...)
 	done, stuck := -1, 0
 	for err != nil {
 		// A deliberate stop moves the rebase on. The same stop three times means no progress.
@@ -52,13 +57,17 @@ func rebaseEditor(repo, editor string, args ...string) error {
 		out, _ := store.Git(repo, "diff", "--name-only", "-z", "--diff-filter=U")
 		paths := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
 		if out == "" {
-			if serr := settle(repo); serr != nil {
+			if serr := settle(repo, first); serr != nil {
 				return abort(repo, fmt.Errorf("rebase the review queue: %w; %v", err, serr))
 			}
 			_, err = store.Git(repo, "-c", "core.editor=true", "-c", "rebase.rescheduleFailedExec=false", "rebase", "--continue")
 			continue
 		}
-		if rerr := resolveIndexes(repo, paths); rerr != nil {
+		t, rerr := treeAtStop(repo, first)
+		if rerr == nil {
+			rerr = resolveIndexes(t, paths)
+		}
+		if rerr != nil {
 			return abort(repo, rerr)
 		}
 		_, err = store.Git(repo, "-c", "core.editor=true", "-c", "rebase.rescheduleFailedExec=false", "rebase", "--continue")
@@ -66,11 +75,22 @@ func rebaseEditor(repo, editor string, args ...string) error {
 	return nil
 }
 
+// treeAtStop opens a reader at a stop of a rebase. It also skips each path of first, the reader of the start.
+func treeAtStop(repo string, first store.Tree) (store.Tree, error) {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return t, err
+	}
+	return t.With(first)
+}
+
 // resolveIndexes resolves a conflict that only indexes hold, at the paths of a stopped rebase or cherry-pick.
 // Indexes are generated, so it writes each of them again from the documents, and stages it. For a topic index
 // it keeps the frontmatter that sameFrontmatter merges. A conflict in any other document, or in the
 // frontmatter of a topic index, returns a conflictError, and the caller ends its rebase or its cherry-pick.
-func resolveIndexes(repo string, paths []string) error {
+// It reads the working tree through t, which the caller opens at the stop.
+func resolveIndexes(t store.Tree, paths []string) error {
+	repo := t.Root()
 	var levels, topics []string
 	for _, p := range paths {
 		if store.IsTopicIndex(p) {
@@ -96,7 +116,7 @@ func resolveIndexes(repo string, paths []string) error {
 	deepestFirst(topics)
 	for _, tf := range topics {
 		index := path.Join(tf, "README.md")
-		if err := store.WriteTopicIndex(repo, tf); err != nil {
+		if err := store.WriteTopicIndexIn(t, tf); err != nil {
 			return err
 		}
 		if _, err := store.Git(repo, "--literal-pathspecs", "add", "--", index); err != nil {
@@ -117,7 +137,7 @@ func resolveIndexes(repo string, paths []string) error {
 		if err := noSymlink(repo, index); err != nil {
 			return err
 		}
-		if err := store.WriteIndex(repo, level); err != nil {
+		if err := store.WriteIndexIn(t, level); err != nil {
 			return err
 		}
 		if _, err := store.Git(repo, "--literal-pathspecs", "add", "--", index); err != nil {
@@ -200,7 +220,9 @@ func abort(repo string, err error) error {
 //
 // A fixup may empty its target until the next fixup, such as a revision back to the text before it. After such a fixup, settle keeps
 // the empty commit, so the next fixup applies. Any other stop is an error.
-func settle(repo string) error {
+//
+// first is the reader that the rebase opened at its start. settle skips its paths, as treeAtStop does.
+func settle(repo string, first store.Tree) error {
 	done, err := os.ReadFile(filepath.Join(gitPath(repo, "rebase-merge"), "done"))
 	if err != nil {
 		return fmt.Errorf("read the progress of the rebase: %w", err)
@@ -208,7 +230,11 @@ func settle(repo string) error {
 	lines := strings.Split(strings.TrimSpace(string(done)), "\n")
 	switch last := lines[len(lines)-1]; {
 	case strings.HasPrefix(last, "exec false"):
-		indexes, err := writeIndexes(repo)
+		t, err := treeAtStop(repo, first)
+		if err != nil {
+			return err
+		}
+		indexes, err := writeIndexes(t)
 		if err != nil {
 			return err
 		}
@@ -261,12 +287,10 @@ func settle(repo string) error {
 }
 
 // writeIndexes writes every index of the working tree again from the documents: each topic index, deepest
-// first, and then the index of each level. It returns their paths, and stages nothing.
-func writeIndexes(repo string) ([]string, error) {
-	t, err := store.OpenTree(repo)
-	if err != nil {
-		return nil, err
-	}
+// first, and then the index of each level. It returns their paths, and stages nothing. It reads the working
+// tree through t, which the caller opens after its last change of the documents.
+func writeIndexes(t store.Tree) ([]string, error) {
+	repo := t.Root()
 	levels, err := levelFolders(t)
 	if err != nil {
 		return nil, err

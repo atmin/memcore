@@ -235,6 +235,40 @@ func TestIgnoredInWrites(t *testing.T) {
 	})
 }
 
+// TestPushKeepsIgnoredPaths folds a fixup into a commit before the rule that ignores a folder. The fold then
+// replays commits that lack the rule, and push must still skip the folder.
+func TestPushKeepsIgnoredPaths(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, remote := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	remember(t, dev, "a-fact", "Read when you test a fact.")
+	commitByHand(t, repo, map[string]string{".gitignore": readT(t, filepath.Join(repo, ".gitignore")) + "local/\n"})
+	writeT(t, repo, "dev/local/README.md", "# Local\n\nA file of the test.\n")
+	reviseT(t, dev, memoryText("a-fact", "Read when you test a fact.", "Sharper."), "a-fact", "Sharper.")
+	want, err := preview(repo, false)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	base, _ := revParse(repo, acceptedRef)
+	pushYes(t, home)
+	pushed := pushedCommits(t, remote, base)
+	matchesPush(t, want, false, pushed)
+	for _, c := range pushed {
+		for _, f := range c.files {
+			if strings.HasPrefix(f.path, "dev/local/") {
+				t.Errorf("the commit %q holds %s", c.subject, f.path)
+			}
+		}
+	}
+	for _, index := range []string{"README.md", "dev/README.md"} {
+		if got := gitT(t, remote, "show", "main:"+index); strings.Contains(got, "local") {
+			t.Errorf("%s =\n%s\nwant no level local", index, got)
+		}
+	}
+	survives(t, repo, "dev/local/README.md", "# Local\n\nA file of the test.\n")
+	clean(t, repo)
+}
+
 func TestIgnoredInReads(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 
