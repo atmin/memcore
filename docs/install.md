@@ -32,13 +32,15 @@ Put `~/.local/bin` on `PATH` before you run `init`. Without memcore on `PATH`, `
 ## `memcore init <remote>`
 
 Setup needs only the remote, because every memory repo has one. You can run `init` again safely. It:
-- **Sets up the memory repo.** If the remote is empty, `init` creates the memory repo in `~/memory`. If not, it clones the remote. So the same command sets up your first machine and every later one.
+- **Sets up the memory repo.** If the remote is empty, `init` creates the memory repo in `~/memory`. If not, it clones the remote. So the same command sets up your first machine and every later one. A new memory repo gets a `.gitignore` in its first commit. It names the files that an operating system or an editor leaves, such as `.DS_Store` and `*~`.
 - **Snapshots the transcripts.** `init` first commits every transcript of Claude Code to the transcripts branch. So the transcripts are safe before anything else can fail. See [Transcripts](transcripts.md).
 - **Imports auto-memory.** `init` imports each file of the auto-memory of Claude Code as a memory, at its project's level. It makes one commit per project. It skips `MEMORY.md`, the index of auto-memory, so a fact that only that index holds stays out. A file that fails a check stays out, and `inbox` lists it with its reason. When every file is in, or you accepted the rest at the terminal, `init` turns auto-memory off.
 - **Connects your agents.** For Claude Code, `init` adds five hooks to `~/.claude/settings.json`, and denies some tools and commands. See [Interface](interface.md). Before it changes the settings, it shows the diff and asks once. It keeps a copy of the original under `.git/memcore/init/`.
 - **Shows your inbox.** `init` ends with the report of `memcore inbox`, without a fetch.
 
 The snapshot and the import need no agent. Each file of auto-memory becomes a memory at the level of its project, and keeps its session. `MEMORY.md` is only the index of those files, so `init` skips it, with any fact that it holds alone. A fact that two projects hold stays twice, once at each project.
+
+A memory repo from an older `init` has no `.gitignore`, and `init` adds none to a clone. To add one by hand, copy the `.gitignore` of a memory repo that a newer `init` created into the root of your memory repo. Then commit it, and push.
 
 A second run adds only what is new: new transcripts, new files of auto-memory, and each missing hook. Two flags help you try `init` and leave it:
 - `memcore init --dry-run <remote>` builds the memory repo at `MEMCORE_REPO`, and prints the change of the settings without making it. It asks nothing, so an agent may run it too.

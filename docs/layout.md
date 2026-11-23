@@ -47,6 +47,8 @@ The root is a level like any other, so nothing sits there loose. The folder give
 | `conventions.md` | The rules of one repo, for an agent with no context. A repo that keeps its own `AGENTS.md` needs no conventions file. |
 | `glossary.md` | The agreed terms at this level, each with one meaning. Agents use these terms and no synonyms for them. An entry may end with the words it forbids. `verify` blocks a document that uses one of them. Such an ending reads `Not: memory repository, memory store.` Any level can have a glossary. |
 
+When memcore lists the memory repo, it skips each untracked path that git ignores. Such a file is no document, and such a folder is no level, so no index lists them. A link to an ignored file is dead, because a clone lacks the file. A folder that holds only ignored files counts as empty, and gets no index. memcore never writes over an ignored file or removes one, so an emptied folder stays with its ignored files. A path that you name, as in `memcore show <path>`, is read as it is.
+
 **Topic folders.** A large level groups its memories or notes in topic folders:
 - A topic folder sits inside `memories/` or `notes/`, as `memories/payments/`. It can hold more topic folders.
 - A folder directly in a level is a child level. So a topic folder never sits there.

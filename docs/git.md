@@ -19,6 +19,8 @@ A folded commit keeps the author date of its target, and loses the dates of its 
 
 `inbox` runs the same fold on a scratch clone of `main`, to show what `push` would leave. It shows an index that `push` would commit as `new`. The header of `inbox` counts the index commits that `push` adds apart from the commits that the fold leaves. Only `push` folds the memory repo. The clone runs no hook, file system monitor or signing helper. When the fold in the clone stops, `inbox` warns and lists each commit of the queue as it is.
 
+A file that git ignores changes neither the preview of `inbox` nor `push`. An untracked file that git does not ignore still stops `push`.
+
 Agents load unreviewed memories at once, and `orient` labels them as unreviewed. A bad memory lasts until your next review, and the review leaves a clean history. With the automatic push on, a memory can leave the queue before you read it. It loses the label then.
 
 Hostile text can make an agent plant a memory or a skill. Such text is a web page, an issue or an email. Later agents then follow that memory or skill.
