@@ -19,6 +19,7 @@ import (
 )
 
 // ReflectEval is the input of the check that compares a local model with the records of the reflect passes.
+// Its stage measure calls no model, and measures how much code could take over from the model of a pass.
 // scripts/reflect-eval runs it by hand, and no command of memcore calls it.
 type ReflectEval struct {
 	Endpoint string // the base URL of the local model server, on this machine
@@ -26,7 +27,7 @@ type ReflectEval struct {
 	Context  int    // the context of the model, in tokens
 	Out      string // the folder of results.jsonl
 	Sessions int    // the most records that the check reads, in the order of the file; 0 for all
-	Stage    string // extract, judge, or "" for both
+	Stage    string // extract, judge, measure, or "" for extract and judge
 }
 
 // evalReserve is the part of the context, in tokens, that the check keeps for the prompt and the answer.
@@ -119,7 +120,7 @@ type evalCounts struct {
 // RunReflectEval runs the check: it runs extract and judge with a local model over the transcripts that reflect
 // passes recorded, compares the results with the records, prints a report to out and writes results.jsonl in
 // e.Out. It reads the memory repo and its local state, and writes nothing there. A call that fails, or an input
-// over the context, counts in the report and stops nothing.
+// over the context, counts in the report and stops nothing. The stage measure runs runMeasure instead.
 func RunReflectEval(e ReflectEval, out io.Writer) error {
 	if err := checkEval(e); err != nil {
 		return err
@@ -147,6 +148,9 @@ func RunReflectEval(e ReflectEval, out io.Writer) error {
 	}
 	if e.Sessions > 0 && len(records) > e.Sessions {
 		records = records[:e.Sessions]
+	}
+	if e.Stage == stageMeasure {
+		return runMeasure(repo, records, events, results, out)
 	}
 
 	c := evalCounts{recorded: map[string]int{}, pairs: map[string]int{}}
@@ -191,8 +195,18 @@ func RunReflectEval(e ReflectEval, out io.Writer) error {
 }
 
 // checkEval refuses an input that the check cannot use. The transcripts stay on the machine, so the host of the
-// endpoint must name the machine itself.
+// endpoint must name the machine itself. The stage measure calls no model, so it needs only --out, and it ignores
+// --endpoint, --model and --context.
 func checkEval(e ReflectEval) error {
+	if e.Stage == stageMeasure {
+		if e.Out == "" {
+			return errors.New("--stage measure needs --out")
+		}
+		if e.Sessions < 0 {
+			return fmt.Errorf("--sessions: %d is no count of records: give 0 for all, or more", e.Sessions)
+		}
+		return nil
+	}
 	if e.Endpoint == "" || e.Model == "" || e.Out == "" {
 		return errors.New("the check needs --endpoint, --model and --out")
 	}
@@ -212,7 +226,7 @@ func checkEval(e ReflectEval) error {
 		return fmt.Errorf("--sessions: %d is no count of records: give 0 for all, or more", e.Sessions)
 	}
 	if e.Stage != "" && e.Stage != "extract" && e.Stage != "judge" {
-		return fmt.Errorf("--stage: %q is no part of the check: give extract or judge, or nothing for both", e.Stage)
+		return fmt.Errorf("--stage: %q is no part of the check: give extract, judge or measure, or nothing for extract and judge", e.Stage)
 	}
 	return nil
 }
