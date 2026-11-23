@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/atmin/memcore/internal/store"
 )
 
 func TestInit(t *testing.T) {
@@ -578,5 +580,52 @@ func TestOnboard(t *testing.T) {
 		if strings.Contains(got, "memcore") || strings.Contains(got, "autoMemoryEnabled") {
 			t.Errorf("settings =\n%s\nwant nothing of init", got)
 		}
+	})
+}
+
+func TestInitIgnores(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	t.Run("empty remote", func(t *testing.T) {
+		_, repo, _ := newMemory(t)
+		if got := gitT(t, repo, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(got, ".gitignore\n") {
+			t.Errorf("the first commit holds\n%s\nwant .gitignore", got)
+		}
+		for _, tt := range []struct {
+			path    string
+			ignored bool
+		}{
+			{".DS_Store", true},
+			{"dev/.DS_Store", true},
+			{"notes/a.md~", true},
+			{".idea/x", true},
+			{"notes/a.md", false},
+		} {
+			_, err := store.Git(repo, "check-ignore", "-q", "--", tt.path)
+			if got := err == nil; got != tt.ignored {
+				t.Errorf("git ignores %s: %v, want %v", tt.path, got, tt.ignored)
+			}
+		}
+		clean(t, repo)
+	})
+
+	t.Run("remote that holds no .gitignore", func(t *testing.T) {
+		_, first, remote := newMemory(t)
+		gitT(t, first, "rm", "-q", ".gitignore")
+		gitT(t, first, "commit", "-q", "-m", "test: a memory repo with no .gitignore")
+		gitT(t, first, "push", "-q", "origin", "main")
+
+		home := newHome(t)
+		if out, err := run(t, home, "", "init", remote); err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		repo := filepath.Join(home, "memory")
+		if _, err := os.Lstat(filepath.Join(repo, ".gitignore")); err == nil {
+			t.Error("init added a .gitignore to a clone")
+		}
+		if got, want := gitT(t, repo, "rev-parse", "HEAD"), gitT(t, first, "rev-parse", "HEAD"); got != want {
+			t.Errorf("HEAD = %s, want the pushed %s", got, want)
+		}
+		clean(t, repo)
 	})
 }

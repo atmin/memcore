@@ -23,6 +23,39 @@ const voicePath = "skills/voice/SKILL.md"
 // initMessage is the message of the first commit of every memory repo, which init makes.
 const initMessage = "init: create the memory repo"
 
+// ignoreText is the .gitignore of a new memory repo. git ignores the files that it names, so memcore reads none.
+const ignoreText = `# Files that an operating system or an editor leaves.
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Linux
+.directory
+.Trash-*
+
+# Editors
+*~
+*.swp
+*.swo
+.#*
+\#*#
+.idea/
+.vscode/
+
+# Leftovers of a merge or a patch
+*.orig
+*.rej
+`
+
 // runInit sets up the memory repo and Claude Code, in this order:
 //   - the repo
 //   - the snapshot of the transcripts
@@ -265,7 +298,7 @@ func setupClaude(env Env, repo string, dryRun bool) error {
 	return nil
 }
 
-// create makes a new memory repo with the voice skill and the root index, and commits them.
+// create makes a new memory repo with the voice skill, the root index and the .gitignore, and commits them.
 func create(repo, remote string) error {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		return fmt.Errorf("create the memory repo: %w", err)
@@ -291,10 +324,13 @@ func create(repo, remote string) error {
 	if err := os.WriteFile(filepath.Join(repo, voicePath), voice, 0o644); err != nil {
 		return fmt.Errorf("seed the voice skill: %w", err)
 	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(ignoreText), 0o644); err != nil {
+		return fmt.Errorf("write the .gitignore: %w", err)
+	}
 	if err := store.WriteIndex(repo, ""); err != nil {
 		return err
 	}
-	return store.Commit(repo, []string{"README.md", voicePath}, initMessage)
+	return store.Commit(repo, []string{".gitignore", "README.md", voicePath}, initMessage)
 }
 
 // isMemoryRepo reports whether repo is a git repo whose first commit is the one that init makes.
