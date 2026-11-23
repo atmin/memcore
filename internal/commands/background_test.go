@@ -232,3 +232,11 @@ func TestAutoPush(t *testing.T) {
 		}
 	})
 }
+
+func TestBackgroundEnv(t *testing.T) {
+	in := []string{"PATH=/bin", "CLAUDE_CODE_SESSION_ID=s1", "HOME=/home/me", "CLAUDECODE=1", "CODEX_THREAD_ID=t1", "CODEX_HOME=/codex"}
+	want := "PATH=/bin HOME=/home/me CODEX_HOME=/codex"
+	if got := strings.Join(backgroundEnv(in), " "); got != want {
+		t.Errorf("backgroundEnv = %q, want %q", got, want)
+	}
+}

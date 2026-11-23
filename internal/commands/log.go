@@ -67,9 +67,7 @@ func Run(env Env, name string, args []string) error {
 		}
 	}
 	e := &Event{Command: name}
-	if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
-		e.Session, e.Agent = id, "claude"
-	}
+	e.Agent, e.Session = agentSession()
 	repo, rerr := memoryRepo()
 	late := Late(name, args)
 	if !late {

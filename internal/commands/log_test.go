@@ -151,6 +151,16 @@ func TestLog(t *testing.T) {
 		}
 	})
 
+	t.Run("a session of Codex", func(t *testing.T) {
+		t.Setenv("CODEX_THREAD_ID", "thread-1")
+		if out, err := run(t, dev, "", "show", "skills/voice/SKILL.md"); err != nil {
+			t.Fatalf("show: %v\n%s", err, out)
+		}
+		if e := last(t, repo); e.Session != "thread-1" || e.Agent != "codex" {
+			t.Errorf("session %q, agent %q, want thread-1 and codex", e.Session, e.Agent)
+		}
+	})
+
 	t.Run("no standard input in the log", func(t *testing.T) {
 		log := readT(t, filepath.Join(store.StateDir(repo), "log.jsonl"))
 		for _, token := range []string{"body-token-5521", "secret-token-9917"} {

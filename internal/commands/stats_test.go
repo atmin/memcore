@@ -140,6 +140,19 @@ func TestMeasure(t *testing.T) {
 			}},
 		},
 		{
+			name: "a session of Codex",
+			events: []Event{
+				{Time: ago(day), Session: "t1", Agent: "codex", Command: "orient", Outcome: "ok", Words: map[string]int{"header": 500, "~": 100}},
+				{Time: ago(day), Session: "t1", Agent: "codex", Command: "show", Paths: []string{"dev/memories/a.md"}, Outcome: "ok"},
+			},
+			want: []week{{
+				end: statsNow, lines: 2, sessions: 1, reads: 1,
+				top:     []ranked{{1, "dev/memories/a.md"}},
+				printed: 600, prints: 1, printers: 1,
+				costs: []cost{{"header", 500, -1}, {"~", 100, -1}},
+			}},
+		},
+		{
 			name: "friction groups errors that differ in a path, a commit or a number",
 			events: []Event{
 				{Time: ago(day), Command: "revise", Paths: []string{"dev/memories/a.md"}, Outcome: "error", Error: "dev/memories/a.md: 2 faults, so revise wrote nothing"},

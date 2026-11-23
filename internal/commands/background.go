@@ -37,16 +37,24 @@ var startBackground = func(repo string, args ...string) error {
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	// The work belongs to no session of an agent, so the use log does not count it as one.
-	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); name != "CLAUDE_CODE_SESSION_ID" && name != "CLAUDECODE" {
-			cmd.Env = append(cmd.Env, kv)
-		}
-	}
+	cmd.Env = backgroundEnv(os.Environ())
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start memcore %s in the background: %w", strings.Join(args, " "), err)
 	}
 	return cmd.Process.Release()
+}
+
+// backgroundEnv returns the environment of background work: env, a list of NAME=value, without the variables
+// that name the session of an agent. The work belongs to no session, so the use log does not count it as one.
+func backgroundEnv(env []string) []string {
+	var out []string
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains([]string{"CLAUDE_CODE_SESSION_ID", "CLAUDECODE", "CODEX_THREAD_ID"}, name) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // autoSnapshot starts a snapshot in the background after a command, when both of these hold:
