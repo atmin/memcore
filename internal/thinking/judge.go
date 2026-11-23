@@ -28,7 +28,7 @@ type Finding struct {
 	Reason string // one sentence
 }
 
-// JudgeRequest asks for one finding for each correction, against the memories that its session could see.
+// JudgeRequest asks for one finding for each correction, against the memories that memcore chose for the call.
 type JudgeRequest struct {
 	Corrections []Correction
 	Memories    []Memory
@@ -114,7 +114,7 @@ func Judge(req JudgeRequest) ([]Finding, float64, error) {
 			if known[f.Path] {
 				findings[*f.Index] = Finding{Kind: f.Kind, Path: f.Path, Reason: reason}
 			} else {
-				findings[*f.Index] = Finding{Kind: Unrelated, Reason: fmt.Sprintf("The judge named %q, which is no memory that the session saw.", f.Path)}
+				findings[*f.Index] = Finding{Kind: Unrelated, Reason: fmt.Sprintf("The judge named %q, which is no memory of the request.", f.Path)}
 			}
 		default:
 			findings[*f.Index] = Finding{Kind: Unrelated, Reason: fmt.Sprintf("The judge gave the unknown finding %q.", f.Kind)}

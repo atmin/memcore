@@ -396,7 +396,15 @@ type measureCounts struct {
 	tops                                          [2][4]int         // by query, then by top
 	groups                                        map[[2]string]int // the size of the memories of each group, by record and seen commit
 	memories                                      int               // the count of the memories of all groups
-	topBytes                                      [2]int            // the size of the top 5 of all ranked corrections, by query
+	selection                                     selectionTotals
+	topBytes                                      [2]int // the size of the top 5 of all ranked corrections, by query
+}
+
+// selectionTotals compares all memories on the path with the memories chosen for each judge call.
+type selectionTotals struct {
+	groups, failed        int
+	all, chosen           int
+	allBytes, chosenBytes int
 }
 
 // longKey is the key in measureCounts.hits of the count of lines over size bytes, outside the drop rules.
@@ -410,12 +418,24 @@ type memoryLoad struct {
 	err      error
 }
 
+type memoryLoads map[[2]string]memoryLoad
+
+func (loads memoryLoads) at(repo, commit, level string) memoryLoad {
+	key := [2]string{commit, level}
+	load, ok := loads[key]
+	if !ok {
+		load.memories, load.err = seenMemories(repo, commit, level)
+		loads[key] = load
+	}
+	return load
+}
+
 // runMeasure runs the measure stage over records, writes a line of results for each, and prints the report.
 // It calls no model.
 func runMeasure(repo string, records []reflectRecord, events []Event, results *os.File, out io.Writer) error {
 	c := measureCounts{hits: map[string]int{}, hitsWith: map[string]int{}, excerptAll: map[int]int{}, excerptKept: map[int]int{}, groups: map[[2]string]int{},
 		starts: map[string]startCount{}}
-	loads := map[[2]string]memoryLoad{}
+	loads := memoryLoads{}
 	for _, r := range records {
 		line, err := json.Marshal(measureRecord(repo, r, events, loads, &c))
 		if err != nil {
@@ -454,9 +474,10 @@ func lineOf(lines []transcriptLine, rc reflectCorrection) (int, bool) {
 }
 
 // measureRecord measures one record. A recorded correction belongs to the line that lineOf finds. A correction
-// whose time matches no line of the person counts apart, and nowhere else.
-func measureRecord(repo string, r reflectRecord, events []Event, loads map[[2]string]memoryLoad, c *measureCounts) measureResult {
+// whose time matches no line counts apart in the line and rank measures.
+func measureRecord(repo string, r reflectRecord, events []Event, loads memoryLoads, c *measureCounts) measureResult {
 	res := measureResult{Session: r.Session, File: r.File}
+	measureSelection(repo, r, events, loads, &c.selection)
 	content, err := store.Git(repo, "cat-file", "blob", r.Blob)
 	if err != nil {
 		c.failed++
@@ -548,9 +569,33 @@ func measureRecord(repo string, r reflectRecord, events []Event, loads map[[2]st
 	return res
 }
 
+// measureSelection counts every group with a seen commit, including corrections that name no memory.
+func measureSelection(repo string, r reflectRecord, events []Event, loads memoryLoads, totals *selectionTotals) {
+	var corrections []thinking.Correction
+	for _, rc := range r.Corrections {
+		corrections = append(corrections, rc.forJudge())
+	}
+	for _, group := range groupBySeen(events, r.Session, corrections) {
+		if group.commit == "" {
+			continue
+		}
+		load := loads.at(repo, group.commit, r.Level)
+		if load.err != nil {
+			totals.failed++
+			continue
+		}
+		chosen := group.nearest(load.memories, events, r.Session)
+		totals.groups++
+		totals.all += len(load.memories)
+		totals.chosen += len(chosen)
+		totals.allBytes += memoryBytes(load.memories)
+		totals.chosenBytes += memoryBytes(chosen)
+	}
+}
+
 // measureRanks ranks the memories for each correction of matched whose verdict names a memory. It finds the
 // memories as evalJudgePart does: those on the path of the level, at the commit that the session saw then.
-func measureRanks(repo string, r reflectRecord, matched []reflectCorrection, events []Event, loads map[[2]string]memoryLoad, c *measureCounts) []measureRank {
+func measureRanks(repo string, r reflectRecord, matched []reflectCorrection, events []Event, loads memoryLoads, c *measureCounts) []measureRank {
 	var out []measureRank
 	for _, rc := range matched {
 		switch rc.Verdict {
@@ -571,12 +616,7 @@ func measureRanks(repo string, r reflectRecord, matched []reflectCorrection, eve
 			out = append(out, rk)
 			continue
 		}
-		key := [2]string{commit, r.Level}
-		load, ok := loads[key]
-		if !ok {
-			load.memories, load.err = seenMemories(repo, commit, r.Level)
-			loads[key] = load
-		}
+		load := loads.at(repo, commit, r.Level)
 		if load.err != nil {
 			c.loadFailed++
 			rk.Skipped = load.err.Error()
@@ -684,5 +724,14 @@ func printMeasure(w io.Writer, c measureCounts) {
 		mean := func(n int) int { return int(math.Round(float64(n) / float64(c.ranked))) }
 		fmt.Fprintf(w, "  The top 5 of a ranked correction hold a mean of %d bytes by the quote, and %d by the quote and the summary.\n",
 			mean(c.topBytes[0]), mean(c.topBytes[1]))
+	}
+	t := c.selection
+	if t.groups > 0 {
+		mean := func(n int) float64 { return float64(n) / float64(t.groups) }
+		fmt.Fprintf(w, "Groups of recorded corrections: %d. Mean per group: %.1f memories (%d bytes) on the path, %.1f memories (%d bytes) chosen.\n",
+			t.groups, mean(t.all), int(math.Round(mean(t.allBytes))), mean(t.chosen), int(math.Round(mean(t.chosenBytes))))
+	}
+	if t.failed > 0 {
+		fmt.Fprintf(w, "Groups whose memories failed to load: %d.\n", t.failed)
 	}
 }

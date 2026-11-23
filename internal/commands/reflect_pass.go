@@ -268,32 +268,29 @@ func (p *pass) judge(u reflectUnit) error {
 		return err
 	}
 	// The corrections of one seen commit go to the judge together, with the memories at that commit.
-	commits, groups := groupBySeen(p.events, u.Session, found)
+	groups := groupBySeen(p.events, u.Session, found)
 	result := make([]reflectCorrection, len(found))
-	for _, commit := range commits {
-		if commit == "" {
+	for _, group := range groups {
+		if group.commit == "" {
 			// memcore saw the session only after these corrections, so it does not know what memory held then.
-			for _, i := range groups[commit] {
+			for _, i := range group.indices {
 				result[i] = reflectCorrection{Time: found[i].Time, Quote: found[i].Quote, Summary: found[i].Summary, Verdict: verdictBefore}
 			}
 			continue
 		}
-		memories, err := seenMemories(p.repo, commit, u.Level)
+		memories, err := seenMemories(p.repo, group.commit, u.Level)
 		if err != nil {
 			return err
 		}
-		var group []thinking.Correction
-		for _, i := range groups[commit] {
-			group = append(group, found[i])
-		}
-		findings, cost, err := thinking.Judge(thinking.JudgeRequest{Corrections: group, Memories: memories, Model: p.model})
+		memories = group.nearest(memories, p.events, u.Session)
+		findings, cost, err := thinking.Judge(thinking.JudgeRequest{Corrections: group.corrections, Memories: memories, Model: p.model})
 		p.cost += cost
 		unitCost += cost
 		if err != nil {
 			return err
 		}
-		for k, v := range verdicts(group, findings, p.events, u.Session) {
-			result[groups[commit][k]] = v
+		for k, v := range verdicts(group.corrections, findings, p.events, u.Session) {
+			result[group.indices[k]] = v
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Time < result[j].Time })
@@ -321,21 +318,40 @@ func (p *pass) judge(u reflectUnit) error {
 	return nil
 }
 
-// groupBySeen groups corrections of a session by the commit that the session saw at their time. It returns the
-// commits in the order of their first correction, and the indexes of the corrections of each commit. The commit
-// "" holds the corrections from before memcore saw the session.
-func groupBySeen(events []Event, session string, corrections []thinking.Correction) ([]string, map[string][]int) {
-	groups := map[string][]int{}
-	var commits []string
+// A seenGroup holds corrections that saw the same commit, in their original order.
+type seenGroup struct {
+	commit      string
+	corrections []thinking.Correction
+	indices     []int
+	latest      time.Time
+}
+
+func (g seenGroup) nearest(memories []thinking.Memory, events []Event, session string) []thinking.Memory {
+	return nearestMemories(g.corrections, memories, readPaths(events, session, g.latest))
+}
+
+// groupBySeen groups corrections by seen commit in order of first occurrence.
+// An empty commit holds corrections from before memcore saw the session.
+func groupBySeen(events []Event, session string, corrections []thinking.Correction) []seenGroup {
+	positions := map[string]int{}
+	var groups []seenGroup
 	for i, c := range corrections {
 		at, _ := time.Parse(time.RFC3339, c.Time)
 		commit := seenCommit(events, session, at)
-		if _, ok := groups[commit]; !ok {
-			commits = append(commits, commit)
+		pos, ok := positions[commit]
+		if !ok {
+			pos = len(groups)
+			positions[commit] = pos
+			groups = append(groups, seenGroup{commit: commit, latest: at})
 		}
-		groups[commit] = append(groups[commit], i)
+		group := &groups[pos]
+		group.indices = append(group.indices, i)
+		group.corrections = append(group.corrections, c)
+		if at.After(group.latest) {
+			group.latest = at
+		}
 	}
-	return commits, groups
+	return groups
 }
 
 // verdictCounts counts the verdicts of corrections, by kind.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,65 @@ func heldAndNone(cost float64) func(thinking.Request) (thinking.Reply, error) {
 	}
 }
 
+// nearestFixture gives both sessions eight memories. Five match "push". The first session
+// reads a sixth at its last correction, and a seventh after it. The eighth exceeds the test context.
+func nearestFixture(t *testing.T) (dev, repo string) {
+	t.Helper()
+	dev, repo = reflectFixture(t)
+	for _, name := range []string{"push-a", "push-b", "push-c", "push-d", "frost", "later", "long"} {
+		body := "Snow."
+		if strings.HasPrefix(name, "push-") {
+			body = "Push."
+		}
+		if name == "long" {
+			body = strings.Repeat("Snow. ", 1000)
+		}
+		writeT(t, repo, "dev/memories/"+name+".md", memoryText(name, "Weather.", body))
+	}
+	gitT(t, repo, "add", "dev/memories")
+	gitT(t, repo, "commit", "-m", "Add memories")
+	commit := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	times, second := lineTimes(t, repo)
+	last, err := time.Parse(time.RFC3339, times[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []Event{
+		{Session: "s-first", Time: times[0], Command: "orient", Commit: commit},
+		{Session: "s-second", Time: second, Command: "orient", Commit: commit},
+		{Session: "s-first", Time: times[2], Command: "show", Outcome: "ok", Paths: []string{"dev/memories/frost.md"}, Commit: commit},
+		{Session: "s-first", Time: last.Add(time.Second).Format(time.RFC3339), Command: "show", Outcome: "ok", Paths: []string{"dev/memories/later.md"}, Commit: commit},
+	} {
+		if err := appendEvent(repo, &e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dev, repo
+}
+
+var nearestPaths = []string{
+	"dev/memories/ask-before-push.md", "dev/memories/frost.md", "dev/memories/push-a.md",
+	"dev/memories/push-b.md", "dev/memories/push-c.md", "dev/memories/push-d.md",
+}
+
+func checkJudgePaths(t *testing.T, req thinking.Request, want []string) {
+	t.Helper()
+	var in struct{ Memories []thinking.Memory }
+	if err := json.Unmarshal([]byte(req.Input), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Memories == nil {
+		t.Fatal("the judge must receive a JSON array of memories")
+	}
+	var paths []string
+	for _, m := range in.Memories {
+		paths = append(paths, m.Path)
+	}
+	if !slices.Equal(paths, want) {
+		t.Errorf("judge got %v, want %v", paths, want)
+	}
+}
+
 func TestReflectPass(t *testing.T) {
 	t.Run("judges and records each session", func(t *testing.T) {
 		dev, repo := reflectFixture(t)
@@ -136,6 +196,30 @@ func TestReflectPass(t *testing.T) {
 		out, err = run(t, dev, "", "reflect")
 		if err != nil || out != "No session waits for a reflect pass.\n" {
 			t.Errorf("second pass: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("nearest memories and reads at the latest correction", func(t *testing.T) {
+		dev, _ := nearestFixture(t)
+		extract := twoCorrections(0)
+		var judged int
+		fakeAgent(t, func(n int, req thinking.Request) (thinking.Reply, error) {
+			if strings.Contains(req.Input, `"session":"s-second"`) {
+				return thinking.Reply{Output: []byte(`{"corrections":[{"quote":"Rename the flag.","summary":"Naming."}]}`)}, nil
+			}
+			return extract(n, req)
+		}, func(req thinking.Request) (thinking.Reply, error) {
+			judged++
+			if strings.Contains(req.Input, "Rename the flag.") {
+				checkJudgePaths(t, req, nil)
+				return thinking.Reply{Output: []byte(`{"findings":[{"index":0,"kind":"none","reason":"No memory holds it."}]}`)}, nil
+			}
+			checkJudgePaths(t, req, nearestPaths)
+			return thinking.Reply{Output: []byte(`{"findings":[{"index":0,"kind":"holds","path":"dev/memories/frost.md","reason":"Held."},{"index":1,"kind":"holds","path":"dev/memories/frost.md","reason":"Held."}]}`)}, nil
+		})
+		out, err := run(t, dev, "", "reflect")
+		if err != nil || judged != 2 || !strings.Contains(out, "s-first: 2 corrections: 0 capture, 1 retrieval, 1 application") {
+			t.Errorf("reflect with %d judge calls: %v\n%s", judged, err, out)
 		}
 	})
 

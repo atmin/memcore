@@ -329,6 +329,40 @@ func noModel(t *testing.T) {
 }
 
 func TestReflectMeasure(t *testing.T) {
+	t.Run("chosen memories of all recorded corrections", func(t *testing.T) {
+		_, repo := nearestFixture(t)
+		times, second := lineTimes(t, repo)
+		// Neither group has a ranked correction. The second group matches no transcript line or memory.
+		after, err := time.Parse(time.RFC3339, second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		evalRecords(t, repo, []reflectCorrection{
+			{Time: times[1], Quote: "Never push without asking.", Verdict: verdictCapture},
+			{Time: times[2], Quote: "Use small commits.", Verdict: verdictCapture},
+		}, []reflectCorrection{{Time: after.Add(time.Second).Format(time.RFC3339), Quote: "Unmatched.", Verdict: verdictCapture}})
+		noModel(t)
+		all, err := seenMemories(repo, "HEAD", "~/dev")
+		if err != nil || len(all) != 8 {
+			t.Fatalf("fixture has %d memories: %v", len(all), err)
+		}
+		var chosen []thinking.Memory
+		for _, m := range all {
+			if slices.Contains(nearestPaths, m.Path) {
+				chosen = append(chosen, m)
+			}
+		}
+		var out bytes.Buffer
+		if err := RunReflectEval(ReflectEval{Stage: "measure", Out: filepath.Join(t.TempDir(), "out")}, &out); err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("Groups of recorded corrections: 2. Mean per group: 8.0 memories (%d bytes) on the path, 3.0 memories (%d bytes) chosen.\n",
+			memoryBytes(all), (memoryBytes(chosen)+1)/2)
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report lacks %q:\n%s", want, out.String())
+		}
+	})
+
 	repo, times, raw := measureFixture(t)
 	noModel(t)
 	before := readT(t, reflectPath(repo))
@@ -405,6 +439,13 @@ func TestReflectMeasure(t *testing.T) {
 	}
 	if groups != 2 || memories != 3.5 || allBytes == 0 || byQuote != allBytes || bySummary != allBytes {
 		t.Errorf("the means:\n%s", strings.TrimPrefix(got, want))
+	}
+
+	// The first record sees three memories, then four. The second sees one.
+	// Their JSON sizes are 420, 554 and 143 bytes. All three groups fit within five memories.
+	const selection = "Groups of recorded corrections: 3. Mean per group: 2.7 memories (372 bytes) on the path, 2.7 memories (372 bytes) chosen.\n"
+	if !strings.HasSuffix(got, selection) {
+		t.Errorf("report lacks %q:\n%s", selection, last)
 	}
 
 	results := readT(t, filepath.Join(dir, "results.jsonl"))

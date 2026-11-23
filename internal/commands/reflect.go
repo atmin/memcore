@@ -34,6 +34,10 @@ type reflectCorrection struct {
 	Reason  string `json:"reason,omitempty"`  // one sentence of the judge
 }
 
+func (c reflectCorrection) forJudge() thinking.Correction {
+	return thinking.Correction{Time: c.Time, Quote: c.Quote, Summary: c.Summary}
+}
+
 // reflectRecord is one line of reflect.jsonl: what a reflect pass found in one file of the transcripts branch.
 type reflectRecord struct {
 	Session     string              `json:"session"`

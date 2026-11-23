@@ -128,6 +128,29 @@ func TestReflectEval(t *testing.T) {
 	}
 	endpoint := evalTrap(t)
 
+	t.Run("chosen memories fit the context", func(t *testing.T) {
+		_, repo := nearestFixture(t)
+		times, _ := lineTimes(t, repo)
+		// The latest correction comes first in the record.
+		evalRecords(t, repo, []reflectCorrection{
+			{Time: times[2], Quote: "Use small commits.", Summary: "Commit small.", Verdict: verdictCapture},
+			{Time: times[1], Quote: "Never push without asking.", Summary: "Ask before a push.", Verdict: verdictCapture},
+		}, nil)
+		calls := evalAgent(t, nil, func(req thinking.Request) (string, error) {
+			checkJudgePaths(t, req, nearestPaths)
+			return `{"findings":[{"index":0,"kind":"none","reason":"Absent."},{"index":1,"kind":"none","reason":"Absent."}]}`, nil
+		})
+		// The available 3,000 bytes fit the chosen memories. The long memory alone takes 6,000 bytes.
+		e := ReflectEval{Endpoint: endpoint, Model: "small", Context: evalReserve + 1000, Out: filepath.Join(t.TempDir(), "eval"), Stage: "judge"}
+		var out bytes.Buffer
+		if err := RunReflectEval(e, &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(*calls) != 1 || !strings.Contains(out.String(), "Judge: 1 group, 0 failed, 0 over the context.") {
+			t.Errorf("judge made %d calls:\n%s", len(*calls), out.String())
+		}
+	})
+
 	t.Run("both parts", func(t *testing.T) {
 		evalClock(t)
 		calls := evalAgent(t, extract, judge)

@@ -45,7 +45,7 @@ func TestJudge(t *testing.T) {
 			{Holds, "dev/memories/push.md", "The memory says so."},
 			{Contradicts, "memories/indent.md", "The memory says spaces."},
 			{Unrelated, "", "Only this task."},
-			{Unrelated, "", `The judge named "dev/memories/hosts.md", which is no memory that the session saw.`},
+			{Unrelated, "", `The judge named "dev/memories/hosts.md", which is no memory of the request.`},
 			{None, "", "A none finding checks no path."},
 			{Unrelated, "", `The judge gave the unknown finding "maybe".`},
 			{None, "", "First."},

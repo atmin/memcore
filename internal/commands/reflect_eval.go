@@ -386,47 +386,43 @@ func evalJudgePart(e ReflectEval, repo string, r reflectRecord, events []Event, 
 	for _, rc := range r.Corrections {
 		if rc.Verdict != verdictBefore {
 			kept = append(kept, rc)
-			corrections = append(corrections, thinking.Correction{Time: rc.Time, Quote: rc.Quote, Summary: rc.Summary})
+			corrections = append(corrections, rc.forJudge())
 		}
 	}
-	commits, groups := groupBySeen(events, r.Session, corrections)
 	var out []evalGroup
-	for _, commit := range commits {
+	for _, group := range groupBySeen(events, r.Session, corrections) {
 		c.groups++
-		g := evalGroup{Commit: commit, Outcome: evalOK}
-		if commit == "" {
+		g := evalGroup{Commit: group.commit, Outcome: evalOK}
+		if group.commit == "" {
 			// A pass judged these corrections, so the use log held an event of the session before them then.
 			c.judgeFailed++
 			g.Outcome, g.Error = evalFailed, "the use log holds no event of the session with a commit at or before these corrections, so no commit says what memory held then"
 			out = append(out, g)
 			continue
 		}
-		var group []thinking.Correction
-		for _, i := range groups[commit] {
-			group = append(group, corrections[i])
-		}
-		memories, err := seenMemories(repo, commit, r.Level)
+		memories, err := seenMemories(repo, group.commit, r.Level)
 		if err != nil {
 			c.judgeFailed++
 			g.Outcome, g.Error = evalFailed, err.Error()
 			out = append(out, g)
 			continue
 		}
-		if size, err := judgeInputSize(group, memories); err != nil || size > limit {
+		memories = group.nearest(memories, events, r.Session)
+		if size, err := judgeInputSize(group.corrections, memories); err != nil || size > limit {
 			c.judgeOver++
 			g.Outcome = evalOver
 			out = append(out, g)
 			continue
 		}
-		findings, _, err := thinking.Judge(thinking.JudgeRequest{Corrections: group, Memories: memories, Model: e.Model, Endpoint: e.Endpoint})
+		findings, _, err := thinking.Judge(thinking.JudgeRequest{Corrections: group.corrections, Memories: memories, Model: e.Model, Endpoint: e.Endpoint})
 		if err != nil {
 			c.judgeFailed++
 			g.Outcome, g.Error = evalFailed, err.Error()
 			out = append(out, g)
 			continue
 		}
-		for k, v := range verdicts(group, findings, events, r.Session) {
-			was := kept[groups[commit][k]]
+		for k, v := range verdicts(group.corrections, findings, events, r.Session) {
+			was := kept[group.indices[k]]
 			c.judged++
 			c.recorded[was.Verdict]++
 			sameVerdict := was.Verdict == v.Verdict
