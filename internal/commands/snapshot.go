@@ -19,6 +19,7 @@ import (
 	"github.com/atmin/memcore/internal/guards"
 	"github.com/atmin/memcore/internal/readers"
 	"github.com/atmin/memcore/internal/store"
+	"github.com/klauspost/compress/zstd"
 )
 
 // transcriptsRef is the branch of the snapshots, which memcore never checks out and never pushes.
@@ -154,7 +155,14 @@ func snapshot(out io.Writer, repo, claude, codex string) (int, error) {
 
 	var entries []string
 	for _, s := range sources {
+		// Codex compresses a session about 7 days after its last write. A compressed file that fails stops no other file,
+		// and it gets no state, so the next snapshot reads it again.
+		compressed := s.codex && strings.HasSuffix(s.file, ".zst")
 		info, err := os.Stat(s.file)
+		if err != nil && compressed {
+			fmt.Fprintf(out, "%s: %v\n", tilde(s.file), err)
+			continue
+		}
 		if err != nil {
 			return 0, fmt.Errorf("read the transcript %s: %w", s.file, err)
 		}
@@ -165,7 +173,16 @@ func snapshot(out io.Writer, repo, claude, codex string) (int, error) {
 			}
 			continue
 		}
-		f, err := os.Open(s.file)
+		var f io.ReadCloser
+		if s.codex {
+			f, err = openCodex(s.file)
+		} else {
+			f, err = os.Open(s.file)
+		}
+		if err != nil && compressed {
+			fmt.Fprintf(out, "%s: %v\n", tilde(s.file), err)
+			continue
+		}
 		if err != nil {
 			return 0, fmt.Errorf("read the transcript %s: %w", s.file, err)
 		}
@@ -185,13 +202,17 @@ func snapshot(out io.Writer, repo, claude, codex string) (int, error) {
 			branch = s.branchPath()
 		}
 		f.Close()
+		if err != nil && compressed {
+			fmt.Fprintf(out, "%s: %v\n", tilde(s.file), fmt.Errorf("decompress: %w", err))
+			continue
+		}
 		if err != nil {
 			return 0, fmt.Errorf("trim the transcript %s: %w", s.file, err)
 		}
 		if stats.Broken > 0 {
 			fmt.Fprintf(out, "%s: %s left out\n", tilde(s.file), count(stats.Broken, "broken line"))
 		}
-		now.Partial = stats.Partial
+		now.Partial = stats.Partial && !compressed // a compressed file has no line that is still being written
 		state.Files[s.file] = now
 		if trimmed.Len() == 0 {
 			continue
@@ -341,8 +362,8 @@ func codexBranchPath(sess readers.CodexSession) string {
 	return path.Join("codex", project, safeName(sess.Parent), "subagents", safeName(sess.ID+".jsonl"))
 }
 
-// codexFiles lists the session files of Codex: each .jsonl file under <dir>/sessions at any depth, and in
-// <dir>/archived_sessions. A missing folder gives no file.
+// codexFiles lists the session files of Codex: each .jsonl or .jsonl.zst file under <dir>/sessions at any depth,
+// and in <dir>/archived_sessions. A missing folder gives no file.
 func codexFiles(dir string) ([]source, error) {
 	var sources []source
 	sessions := filepath.Join(dir, "sessions")
@@ -353,7 +374,7 @@ func codexFiles(dir string) ([]source, error) {
 			}
 			return err
 		}
-		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), ".jsonl") {
+		if d.Type().IsRegular() && isCodexSession(d.Name()) {
 			sources = append(sources, source{file: p, codex: true})
 		}
 		return nil
@@ -367,11 +388,46 @@ func codexFiles(dir string) ([]source, error) {
 		return nil, fmt.Errorf("read the sessions of Codex in %s: %w", archived, err)
 	}
 	for _, e := range entries {
-		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.Type().IsRegular() && isCodexSession(e.Name()) {
 			sources = append(sources, source{file: filepath.Join(archived, e.Name()), codex: true})
 		}
 	}
 	return sources, nil
+}
+
+// isCodexSession reports whether a file name is a session of Codex, plain or compressed.
+func isCodexSession(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, ".jsonl.zst")
+}
+
+// openCodex opens a session file of Codex. It reads a .jsonl.zst file through a zstd decoder, and Close closes both.
+func openCodex(file string) (io.ReadCloser, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, fmt.Errorf("read the session %s: %w", file, err)
+	}
+	if !strings.HasSuffix(file, ".zst") {
+		return f, nil
+	}
+	dec, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1))
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("decompress %s: %w", file, err)
+	}
+	return zstdFile{dec, f}, nil
+}
+
+// zstdFile is a compressed file that a zstd decoder reads.
+type zstdFile struct {
+	dec  *zstd.Decoder
+	file *os.File
+}
+
+func (z zstdFile) Read(p []byte) (int, error) { return z.dec.Read(p) }
+
+func (z zstdFile) Close() error {
+	z.dec.Close()
+	return z.file.Close()
 }
 
 // codexImports returns the ids of the sessions that Codex imported from Claude Code, from

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // The lines below follow the format of Codex in the plan codex-transcripts. They are written by hand.
@@ -122,4 +124,101 @@ func TestSnapshotCodex(t *testing.T) {
 			t.Errorf("files =\n%s\nwant one transcript of s1", files)
 		}
 	})
+}
+
+// writeZstd writes content to dir/rel, compressed with zstd, as Codex compresses an old session.
+func writeZstd(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer enc.Close()
+	writeT(t, dir, rel, string(enc.EncodeAll([]byte(content), nil)))
+}
+
+func TestSnapshotCodexCompressed(t *testing.T) {
+	_, repo, _ := newMemory(t)
+	codex := t.TempDir()
+	project := "codex/" + digest("/home/dev/shop")
+	snap := func(t *testing.T) (int, string) {
+		t.Helper()
+		var out strings.Builder
+		n, err := snapshot(&out, repo, "", codex)
+		if err != nil {
+			t.Fatalf("snapshot: %v\n%s", err, out.String())
+		}
+		return n, out.String()
+	}
+
+	t.Run("a compressed file lands as its transcript", func(t *testing.T) {
+		writeZstd(t, codex, codexPath("z1")+".zst", codexMetaLine("z1", "/home/dev/shop", `"vscode"`)+codexSaid(1, "Use small commits."))
+		if n, out := snap(t); n != 1 {
+			t.Errorf("snapshot committed %d transcripts, want 1\n%s", n, out)
+		}
+		if got := branchFile(t, repo, project+"/z1.jsonl"); !strings.Contains(got, `"who":"you","text":"Use small commits."`) {
+			t.Errorf("the trimmed transcript =\n%s\nwant the text of the person", got)
+		}
+	})
+
+	t.Run("a plain session that became compressed makes no new commit", func(t *testing.T) {
+		content := codexMetaLine("p1", "/home/dev/shop", `"exec"`) + codexSaid(1, "Review the commit.")
+		writeT(t, codex, codexPath("p1"), content)
+		if n, out := snap(t); n != 1 {
+			t.Fatalf("snapshot committed %d transcripts, want 1\n%s", n, out)
+		}
+		before := gitT(t, repo, "rev-parse", "transcripts")
+		if err := os.Remove(filepath.Join(codex, filepath.FromSlash(codexPath("p1")))); err != nil {
+			t.Fatal(err)
+		}
+		writeZstd(t, codex, codexPath("p1")+".zst", content)
+		if n, out := snap(t); n != 0 {
+			t.Errorf("snapshot committed %d transcripts, want 0\n%s", n, out)
+		}
+		if got := gitT(t, repo, "rev-parse", "transcripts"); got != before {
+			t.Error("the compressed session made a commit")
+		}
+	})
+
+	t.Run("a file that fails to decompress stops no other file", func(t *testing.T) {
+		writeT(t, codex, codexPath("bad")+".zst", "these bytes are no zstd frame\n")
+		writeT(t, codex, codexPath("ok1"), codexMetaLine("ok1", "/home/dev/shop", `"vscode"`)+codexSaid(1, "Keep going."))
+		n, out := snap(t)
+		if !strings.Contains(out, "bad.jsonl.zst") {
+			t.Errorf("snapshot =\n%s\nwant the broken file named", out)
+		}
+		if n != 1 || !strings.Contains(branchFile(t, repo, project+"/ok1.jsonl"), "Keep going.") {
+			t.Errorf("snapshot committed %d transcripts, want the other session\n%s", n, out)
+		}
+		if _, out := snap(t); !strings.Contains(out, "bad.jsonl.zst") {
+			t.Errorf("a second snapshot =\n%s\nwant the broken file named again", out)
+		}
+	})
+}
+
+func TestSnapshotCodexUnreadable(t *testing.T) {
+	_, repo, _ := newMemory(t)
+	codex := t.TempDir()
+	writeT(t, codex, codexPath("ok2"), codexMetaLine("ok2", "/home/dev/shop", `"vscode"`)+codexSaid(1, "Keep going."))
+	writeZstd(t, codex, "archived_sessions/rollout-2026-11-23T14-37-50-gone.jsonl.zst", codexMetaLine("gone", "/home/dev/shop", `"vscode"`)+codexSaid(1, "Moved away."))
+	// A folder that can be listed but not searched fails each stat of a file in it, as a file that Codex moved does.
+	archived := filepath.Join(codex, "archived_sessions")
+	if err := os.Chmod(archived, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(archived, 0o755) })
+	if _, err := os.Stat(filepath.Join(archived, "rollout-2026-11-23T14-37-50-gone.jsonl.zst")); err == nil {
+		t.Skip("the stat of a file in a folder without search permission succeeds here")
+	}
+	var out strings.Builder
+	n, err := snapshot(&out, repo, "", codex)
+	if err != nil {
+		t.Fatalf("snapshot: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "gone.jsonl.zst") {
+		t.Errorf("snapshot =\n%s\nwant the file that failed named", out.String())
+	}
+	if n != 1 || !strings.Contains(branchFile(t, repo, "codex/"+digest("/home/dev/shop")+"/ok2.jsonl"), "Keep going.") {
+		t.Errorf("snapshot committed %d transcripts, want the other session\n%s", n, out.String())
+	}
 }
