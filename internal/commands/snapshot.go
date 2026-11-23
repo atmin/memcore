@@ -43,6 +43,7 @@ type source struct {
 	folder   string   // the project folder, as Claude Code names it
 	rest     []string // the names below the folder: the session file, or the session, subagents and the file
 	subagent bool
+	codex    bool // a session file of Codex, whose path on the branch comes from its content
 }
 
 // branchPath is the path of a transcript on the branch. The project folder becomes its digest. Claude Code
@@ -94,7 +95,7 @@ func runSnapshot(env Env, args []string) error {
 			return inputErrf("--from %s is not a folder", *from)
 		}
 	}
-	n, err := snapshot(env.Out, repo, src)
+	n, err := snapshot(env.Out, repo, src, "")
 	if err != nil {
 		return err
 	}
@@ -106,9 +107,10 @@ func runSnapshot(env Env, args []string) error {
 	return nil
 }
 
-// snapshot commits the changed transcripts under src to the transcripts branch, and returns how many it committed.
+// snapshot commits the changed transcripts to the transcripts branch, and returns how many it committed. claude is a
+// folder in the layout of ~/.claude/projects, and codex is the folder of Codex. An empty folder skips that agent.
 // It holds its own lock, so it never blocks a write. It never touches main, HEAD or the index of the repo.
-func snapshot(out io.Writer, repo, src string) (int, error) {
+func snapshot(out io.Writer, repo, claude, codex string) (int, error) {
 	unlock, err := store.LockFile(repo, "snapshot.lock")
 	if err != nil {
 		return 0, err
@@ -132,9 +134,22 @@ func snapshot(out io.Writer, repo, src string) (int, error) {
 			}
 		}
 	}
-	sources, err := transcriptFiles(src)
-	if err != nil {
-		return 0, err
+	var sources []source
+	if claude != "" {
+		if sources, err = transcriptFiles(claude); err != nil {
+			return 0, err
+		}
+	}
+	imports := map[string]bool{}
+	if codex != "" {
+		more, err := codexFiles(codex)
+		if err != nil {
+			return 0, err
+		}
+		sources = append(sources, more...)
+		if imports, err = codexImports(codex); err != nil {
+			return 0, err
+		}
 	}
 
 	var entries []string
@@ -155,7 +170,20 @@ func snapshot(out io.Writer, repo, src string) (int, error) {
 			return 0, fmt.Errorf("read the transcript %s: %w", s.file, err)
 		}
 		var trimmed bytes.Buffer
-		stats, err := readers.Trim(f, &trimmed, readers.TrimOptions{Redact: guards.Redact, Subagent: s.subagent})
+		var stats readers.TrimStats
+		branch := ""
+		opts := readers.TrimOptions{Redact: guards.Redact, Subagent: s.subagent}
+		if s.codex {
+			var sess readers.CodexSession
+			sess, stats, err = readers.TrimCodex(f, &trimmed, opts)
+			if imports[sess.ID] {
+				trimmed.Reset() // a session that Codex imported from Claude Code, whose own transcript the branch holds
+			}
+			branch = codexBranchPath(sess)
+		} else {
+			stats, err = readers.Trim(f, &trimmed, opts)
+			branch = s.branchPath()
+		}
 		f.Close()
 		if err != nil {
 			return 0, fmt.Errorf("trim the transcript %s: %w", s.file, err)
@@ -168,7 +196,7 @@ func snapshot(out io.Writer, repo, src string) (int, error) {
 		if trimmed.Len() == 0 {
 			continue
 		}
-		p, ok, err := place(repo, existing, s.branchPath(), trimmed.String())
+		p, ok, err := place(repo, existing, branch, trimmed.String())
 		if err != nil {
 			return 0, err
 		}
@@ -278,7 +306,7 @@ func transcriptFiles(src string) ([]source, error) {
 		for _, e := range entries {
 			switch {
 			case e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".jsonl"):
-				sources = append(sources, source{filepath.Join(dir, e.Name()), folder.Name(), []string{e.Name()}, false})
+				sources = append(sources, source{file: filepath.Join(dir, e.Name()), folder: folder.Name(), rest: []string{e.Name()}})
 			case e.IsDir():
 				subs, err := os.ReadDir(filepath.Join(dir, e.Name(), "subagents"))
 				if errors.Is(err, fs.ErrNotExist) {
@@ -290,8 +318,8 @@ func transcriptFiles(src string) ([]source, error) {
 				for _, sub := range subs {
 					if sub.Type().IsRegular() && strings.HasSuffix(sub.Name(), ".jsonl") {
 						sources = append(sources, source{
-							filepath.Join(dir, e.Name(), "subagents", sub.Name()),
-							folder.Name(), []string{e.Name(), "subagents", sub.Name()}, true,
+							file: filepath.Join(dir, e.Name(), "subagents", sub.Name()), folder: folder.Name(),
+							rest: []string{e.Name(), "subagents", sub.Name()}, subagent: true,
 						})
 					}
 				}
@@ -299,6 +327,78 @@ func transcriptFiles(src string) ([]source, error) {
 		}
 	}
 	return sources, nil
+}
+
+// codexBranchPath is the path of a transcript of Codex on the branch. Codex moves and renames a session file, so
+// the path comes from the content. The directory becomes its digest, because a directory can hide a secret from
+// the scanner. A main session is codex/<project>/<session id>.jsonl, and a subagent is
+// codex/<project>/<parent id>/subagents/<session id>.jsonl.
+func codexBranchPath(sess readers.CodexSession) string {
+	project := digest(sess.Dir)
+	if sess.Parent == "" {
+		return path.Join("codex", project, safeName(sess.ID+".jsonl"))
+	}
+	return path.Join("codex", project, safeName(sess.Parent), "subagents", safeName(sess.ID+".jsonl"))
+}
+
+// codexFiles lists the session files of Codex: each .jsonl file under <dir>/sessions at any depth, and in
+// <dir>/archived_sessions. A missing folder gives no file.
+func codexFiles(dir string) ([]source, error) {
+	var sources []source
+	sessions := filepath.Join(dir, "sessions")
+	err := filepath.WalkDir(sessions, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if p == sessions && errors.Is(err, fs.ErrNotExist) {
+				return fs.SkipAll
+			}
+			return err
+		}
+		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), ".jsonl") {
+			sources = append(sources, source{file: p, codex: true})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read the sessions of Codex in %s: %w", sessions, err)
+	}
+	archived := filepath.Join(dir, "archived_sessions")
+	entries, err := os.ReadDir(archived)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("read the sessions of Codex in %s: %w", archived, err)
+	}
+	for _, e := range entries {
+		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".jsonl") {
+			sources = append(sources, source{file: filepath.Join(archived, e.Name()), codex: true})
+		}
+	}
+	return sources, nil
+}
+
+// codexImports returns the ids of the sessions that Codex imported from Claude Code, from
+// <dir>/external_agent_session_imports.json. A missing file gives an empty set.
+func codexImports(dir string) (map[string]bool, error) {
+	ids := map[string]bool{}
+	b, err := os.ReadFile(filepath.Join(dir, "external_agent_session_imports.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return ids, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the imports of Codex: %w", err)
+	}
+	var file struct {
+		Records []struct {
+			ImportedThreadID string `json:"imported_thread_id"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(b, &file); err != nil {
+		return nil, fmt.Errorf("read the imports of Codex: %w", err)
+	}
+	for _, r := range file.Records {
+		if r.ImportedThreadID != "" {
+			ids[r.ImportedThreadID] = true
+		}
+	}
+	return ids, nil
 }
 
 // safeName returns the name of a file for the transcripts branch. A name that may hold a secret becomes

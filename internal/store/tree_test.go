@@ -230,7 +230,9 @@ var walkAllowed = map[string]string{
 	"internal/commands/import.go::importProject":     "lists the auto-memory of a project of Claude Code",
 	"internal/commands/import.go::importBlockers":    "lists the auto-memory files of Claude Code",
 	"internal/commands/snapshot.go::transcriptFiles": "lists the transcripts of Claude Code",
-	"internal/readers/claude.go::ProjectDirs":        "finds the directories that a project folder of Claude Code names",
+	// The folder of Codex, which lies outside the memory repo.
+	"internal/commands/snapshot.go::codexFiles": "lists the session files of Codex",
+	"internal/readers/claude.go::ProjectDirs":   "finds the directories that a project folder of Claude Code names",
 	// Other directories.
 	"internal/commands/init.go::isEmpty":          "checks the directory that init clones into",
 	"internal/commands/accepted.go::syncAccepted": "reads the checkout of the accepted history",

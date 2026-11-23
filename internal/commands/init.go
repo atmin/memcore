@@ -229,7 +229,7 @@ func setupClaude(env Env, repo string, dryRun bool) error {
 	// The snapshot comes first, so the transcripts are safe before anything else can fail.
 	projects := filepath.Join(claude, "projects")
 	if _, err := os.Stat(projects); err == nil {
-		n, err := snapshot(env.Out, repo, projects)
+		n, err := snapshot(env.Out, repo, projects, "")
 		if err != nil {
 			return err
 		}
