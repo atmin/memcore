@@ -32,21 +32,28 @@ func TestAutoSnapshot(t *testing.T) {
 		projects bool
 		started  bool
 		want     int
+		codex    string // a folder to create in the folder of Codex, or "" for none
 	}{
-		{"no snapshot yet", 0, "orient", true, false, 1},
-		{"a snapshot of five hours", 5 * time.Hour, "orient", true, false, 0},
-		{"a snapshot of seven hours", 7 * time.Hour, "orient", true, false, 1},
-		{"snapshot itself", 0, "snapshot", true, false, 0},
-		{"init", 0, "init", true, false, 0},
-		{"help", 0, "help", true, false, 0},
-		{"no projects folder", 0, "orient", false, false, 0},
-		{"a command that started one itself", 0, "hook", true, true, 0},
+		{"no snapshot yet", 0, "orient", true, false, 1, ""},
+		{"a snapshot of five hours", 5 * time.Hour, "orient", true, false, 0, ""},
+		{"a snapshot of seven hours", 7 * time.Hour, "orient", true, false, 1, ""},
+		{"snapshot itself", 0, "snapshot", true, false, 0, ""},
+		{"init", 0, "init", true, false, 0, ""},
+		{"help", 0, "help", true, false, 0, ""},
+		{"no projects folder", 0, "orient", false, false, 0, ""},
+		{"a command that started one itself", 0, "hook", true, true, 0, ""},
+		{"only the sessions of Codex", 0, "orient", false, false, 1, "sessions"},
+		{"only the archived sessions of Codex", 0, "orient", false, false, 1, "archived_sessions"},
+		{"a folder of Codex without sessions", 0, "orient", false, false, 0, "cache"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			home, repo, _ := newMemory(t)
 			if tt.projects {
 				mkdirT(t, filepath.Join(home, ".claude", "projects"))
+			}
+			if tt.codex != "" {
+				mkdirT(t, filepath.Join(home, ".codex", tt.codex))
 			}
 			if tt.age > 0 {
 				state := snapshotState{Time: time.Now().Add(-tt.age).UTC().Format(time.RFC3339), Files: map[string]sourceState{}}

@@ -50,7 +50,7 @@ var startBackground = func(repo string, args ...string) error {
 }
 
 // autoSnapshot starts a snapshot in the background after a command, when both of these hold:
-//   - The projects folder of Claude Code exists.
+//   - The projects folder of Claude Code exists, or the sessions or archived_sessions of Codex.
 //   - The last snapshot ran six hours ago or more, by lastSnapshot.
 //
 // It skips snapshot, init and help, and a command that started a snapshot itself.
@@ -58,11 +58,15 @@ func autoSnapshot(repo, command string, started bool) error {
 	if started || slices.Contains([]string{"snapshot", "init", "help"}, command) {
 		return nil
 	}
-	dir, err := claudeDir()
+	claude, err := claudeDir()
 	if err != nil {
 		return nil
 	}
-	if _, err := os.Stat(filepath.Join(dir, "projects")); err != nil {
+	codex, err := codexDir()
+	if err != nil {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(claude, "projects")); err != nil && !hasCodexSessions(codex) {
 		return nil
 	}
 	// One call at a time checks and marks. A call that finds another call at it leaves the start to that call.

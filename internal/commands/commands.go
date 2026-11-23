@@ -51,7 +51,7 @@ func Table() []Command {
 		{Name: "move", Args: "<path or name> <new name or path> --reason <text>", Does: "Renames a memory, a note or a plan, or moves it to a topic folder or another level, and rewrites every link to it in the same commit.", Run: runMove},
 		{Name: "draft", Args: "<kind> [<name>]", Does: "Starts a plan, a note, a script, a helper, a skill, a topic folder, a conventions file or a glossary from its template, and commits it.", Run: runDraft},
 		{Name: "verify", Args: "<path>", Does: "Checks a document, or every document under a path, for dead references and forbidden words.", Run: runVerify},
-		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
+		{Name: "snapshot", Args: "[--from <dir>]", Does: "Commits the new transcripts of Claude Code and Codex to the transcripts branch, trimmed and redacted.", Run: runSnapshot},
 		{Name: "inbox", Does: "Fetches, then lists the unpushed commits as the fold at push leaves them.", Run: runInbox},
 		{Name: "stats", Args: "[<path>]", Does: "Measures whether memory helps, per week, from the use log and git history.", More: "With a path, it counts the reads of each document under it.", Run: runStats},
 		{Name: "reflect", Args: "[--budget <dollars>] [--sessions <n>] | --list [--all] | --answer <id>[,<id>] [--with <path>] [--reason <text>]", Does: "Finds the corrections in new transcripts, and judges each one against memory.", More: "Only the person runs a pass. --list prints the open corrections, and --answer records what happened to one.", Run: runReflect},
@@ -100,6 +100,28 @@ func claudeDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(h, ".claude"), nil
+}
+
+// codexDir returns the folder of Codex: $CODEX_HOME, or ~/.codex.
+func codexDir() (string, error) {
+	if d := os.Getenv("CODEX_HOME"); d != "" {
+		return filepath.Clean(d), nil
+	}
+	h, err := home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, ".codex"), nil
+}
+
+// hasCodexSessions reports whether the folder of Codex holds sessions or archived_sessions.
+func hasCodexSessions(dir string) bool {
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // tilde writes a path under home with ~ in front, for a message.

@@ -62,7 +62,7 @@ func (s source) branchPath() string {
 	return path.Join(parts...)
 }
 
-// runSnapshot commits the new transcripts of Claude Code, or of --from, to the transcripts branch.
+// runSnapshot commits the new transcripts of Claude Code and Codex, or only of --from, to the transcripts branch.
 func runSnapshot(env Env, args []string) error {
 	flags := flag.NewFlagSet("snapshot", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -77,16 +77,30 @@ func runSnapshot(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	src := *from
+	src, codex := *from, ""
 	if src == "" {
 		dir, err := claudeDir()
 		if err != nil {
 			return err
 		}
+		if codex, err = codexDir(); err != nil {
+			return err
+		}
 		src = filepath.Join(dir, "projects")
+		claudeFound := true
 		if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(env.Out, "No transcripts in %s.\n", tilde(src))
+			claudeFound = false
+		}
+		codexFound := hasCodexSessions(codex)
+		if !claudeFound && !codexFound {
+			fmt.Fprintf(env.Out, "No transcripts in %s or %s.\n", tilde(src), tilde(filepath.Join(codex, "sessions")))
 			return nil
+		}
+		if !claudeFound {
+			src = ""
+		}
+		if !codexFound {
+			codex = ""
 		}
 	} else {
 		if !filepath.IsAbs(src) {
@@ -96,7 +110,7 @@ func runSnapshot(env Env, args []string) error {
 			return inputErrf("--from %s is not a folder", *from)
 		}
 	}
-	n, err := snapshot(env.Out, repo, src, "")
+	n, err := snapshot(env.Out, repo, src, codex)
 	if err != nil {
 		return err
 	}

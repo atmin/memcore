@@ -222,3 +222,48 @@ func TestSnapshotCodexUnreadable(t *testing.T) {
 		t.Errorf("snapshot committed %d transcripts, want the other session\n%s", n, out.String())
 	}
 }
+
+func TestSnapshotCommandCodex(t *testing.T) {
+	home, repo, _ := newMemory(t)
+	writeT(t, filepath.Join(home, ".claude", "projects"), "-home-dev-shop/c1.jsonl", said("c1", "/home/dev/shop", "From Claude Code."))
+	writeT(t, filepath.Join(home, ".codex"), codexPath("x1"), codexMetaLine("x1", "/home/dev/shop", `"vscode"`)+codexSaid(1, "From Codex."))
+
+	t.Run("both agents in one commit", func(t *testing.T) {
+		if out, err := run(t, home, "", "snapshot"); err != nil || !strings.Contains(out, "Snapshotted 2 transcripts") {
+			t.Fatalf("snapshot: %v\n%s", err, out)
+		}
+		if got := gitT(t, repo, "rev-list", "--count", "transcripts"); strings.TrimSpace(got) != "1" {
+			t.Errorf("the branch holds %s commits, want 1", got)
+		}
+		if !strings.Contains(branchFile(t, repo, "claude/"+digest("-home-dev-shop")+"/c1.jsonl"), "From Claude Code.") {
+			t.Error("the session of Claude Code is missing")
+		}
+		if !strings.Contains(branchFile(t, repo, "codex/"+digest("/home/dev/shop")+"/x1.jsonl"), "From Codex.") {
+			t.Error("the session of Codex is missing")
+		}
+	})
+
+	t.Run("--from reads no session of Codex", func(t *testing.T) {
+		writeT(t, filepath.Join(home, ".codex"), codexPath("x2"), codexMetaLine("x2", "/home/dev/shop", `"vscode"`)+codexSaid(1, "Later."))
+		old := t.TempDir()
+		writeT(t, old, "-home-dev-shop/c2.jsonl", said("c2", "/home/dev/shop", "An old copy."))
+		if out, err := run(t, home, "", "snapshot", "--from", old); err != nil || !strings.Contains(out, "Snapshotted 1 transcript") {
+			t.Fatalf("snapshot --from: %v\n%s", err, out)
+		}
+		if branchFile(t, repo, "codex/"+digest("/home/dev/shop")+"/x2.jsonl") != "" {
+			t.Error("snapshot --from committed a session of Codex")
+		}
+	})
+
+	t.Run("CODEX_HOME names the folder of Codex", func(t *testing.T) {
+		other := t.TempDir()
+		t.Setenv("CODEX_HOME", other)
+		writeT(t, other, "archived_sessions/rollout-2026-11-23T14-37-50-x3.jsonl", codexMetaLine("x3", "/home/dev/shop", `"vscode"`)+codexSaid(1, "Elsewhere."))
+		if out, err := run(t, home, "", "snapshot"); err != nil {
+			t.Fatalf("snapshot: %v\n%s", err, out)
+		}
+		if !strings.Contains(branchFile(t, repo, "codex/"+digest("/home/dev/shop")+"/x3.jsonl"), "Elsewhere.") {
+			t.Error("the session under CODEX_HOME is missing")
+		}
+	})
+}

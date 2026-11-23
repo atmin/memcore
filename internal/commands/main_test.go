@@ -30,6 +30,8 @@ func TestMain(m *testing.M) {
 	os.Unsetenv("MEMCORE_REPO")
 	// No test reads or writes the Claude Code folder of the machine.
 	os.Unsetenv("CLAUDE_CONFIG_DIR")
+	// Nor the folder of Codex.
+	os.Unsetenv("CODEX_HOME")
 	empty, err := os.MkdirTemp("", "memcore-home-")
 	if err != nil {
 		panic(err)

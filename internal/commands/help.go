@@ -146,9 +146,10 @@ warns on a name with a hyphen that a memory held before a move or a forget. For 
 `,
 	"snapshot": `memcore snapshot [--from <dir>]
 
-Takes no input. It commits the new transcripts of Claude Code to the transcripts branch of
-the memory repo, trimmed to the conversation and redacted. memcore never pushes that branch.
---from reads another folder in the layout of ~/.claude/projects, such as an old copy:
+Takes no input. It commits the new transcripts of Claude Code and Codex to the transcripts
+branch of the memory repo, trimmed to the conversation and redacted. memcore never pushes
+that branch. --from reads only another folder in the layout of ~/.claude/projects, such as
+an old copy, and no folder of Codex:
 
   memcore snapshot --from ~/old-projects
 `,
