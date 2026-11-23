@@ -21,8 +21,16 @@ func doc(description string) string {
 	return "---\nname: x\ndescription: \"" + description + "\"\n---\n\nBody.\n"
 }
 
-func TestWriteIndex(t *testing.T) {
+// repoT returns a new git repo in a temporary folder.
+func repoT(t *testing.T) string {
+	t.Helper()
 	repo := t.TempDir()
+	gitT(t, repo, "init", "-q", "-b", "main")
+	return repo
+}
+
+func TestWriteIndex(t *testing.T) {
+	repo := repoT(t)
 	shop := "work/shop/"
 	writeT(t, repo, shop+"memories/tests-first.md", doc("Read before you write code."), 0o644)
 	writeT(t, repo, shop+"memories/api-versions.md", doc("Read when you call the API: it has two versions."), 0o644)
@@ -40,7 +48,6 @@ func TestWriteIndex(t *testing.T) {
 	mkdirT(t, filepath.Join(repo, "empty"))
 	mkdirT(t, filepath.Join(repo, ".config"))
 	mkdirT(t, filepath.Join(repo, "old [draft] #2"))
-	mkdirT(t, filepath.Join(repo, ".git"))
 
 	tests := []struct {
 		name  string
@@ -143,7 +150,7 @@ func TestWriteIndex(t *testing.T) {
 }
 
 func TestLines(t *testing.T) {
-	repo := t.TempDir()
+	repo := repoT(t)
 	writeT(t, repo, "dev/memories/a.md", doc("Read when you test."), 0o644)
 	writeT(t, repo, "dev/plans/p.md", doc("Read when you plan."), 0o644)
 
@@ -195,6 +202,64 @@ func TestLines(t *testing.T) {
 			t.Errorf("%s = %+v, want %+v", want.Kind, got, want)
 		}
 	}
+
+	writeT(t, repo, "ign/.gitignore", "notes/a.md\nbin/tool~\nskills/old/\nskills/half/SKILL.md\n.idea/\n", 0o644)
+	writeT(t, repo, "ign/skills/half/run.sh", "#!/bin/sh\n", 0o755)
+	gitT(t, repo, "add", "ign")
+	gitT(t, repo, "commit", "-q", "-m", "a level with ignored paths")
+	writeT(t, repo, "ign/notes/a.md", doc("Read when you test a."), 0o644)
+	writeT(t, repo, "ign/notes/b.md", doc("Read when you test b."), 0o644)
+	writeT(t, repo, "ign/bin/tool~", "#!/bin/sh\n# Run when you test.\n", 0o755)
+	writeT(t, repo, "ign/skills/old/SKILL.md", doc("Use when you test old."), 0o644)
+	writeT(t, repo, "ign/skills/half/SKILL.md", doc("Use when you test half."), 0o644)
+	writeT(t, repo, "ign/.idea/workspace.xml", "<x/>\n", 0o644)
+	writeT(t, repo, "ign/skills/bare/run.sh", "#!/bin/sh\n", 0o755)
+	ix, err = Lines(repo, "ign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		kind string
+		want []string
+	}{
+		{"an ignored note gives no note line", KindNotes, []string{"b"}},
+		{"an ignored executable gives no script line", KindScripts, nil},
+		{"an ignored skill folder, an ignored SKILL.md beside a tracked helper, and a missing SKILL.md give no skill line", KindSkills, nil},
+		{"an ignored folder gives no level line", KindLevels, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, l := range ix.Of(tt.kind) {
+				got = append(got, l.Name)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("%s = %q, want %q", tt.kind, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMemoriesSkipsIgnored(t *testing.T) {
+	repo := repoT(t)
+	writeT(t, repo, ".gitignore", "c.md\nold/\n", 0o644)
+	writeT(t, repo, "dev/memories/a.md", doc("Read when you test a."), 0o644)
+	writeT(t, repo, "dev/memories/t/b.md", doc("Read when you test b."), 0o644)
+	writeT(t, repo, "dev/memories/c.md", doc("Read when you test c."), 0o644)
+	writeT(t, repo, "dev/memories/old/d.md", doc("Read when you test d."), 0o644)
+	writeT(t, repo, "dev/memories/old/e.md", doc("Read when you test e."), 0o644)
+	lines, err := Memories(repo, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, l := range lines {
+		got = append(got, l.Path)
+	}
+	if want := []string{"dev/memories/a.md", "dev/memories/t/b.md"}; !slices.Equal(got, want) {
+		t.Errorf("Memories = %q, want %q", got, want)
+	}
 }
 
 func TestFolder(t *testing.T) {
@@ -230,7 +295,7 @@ func topicDoc(name, description string) string {
 }
 
 func TestTopicIndex(t *testing.T) {
-	repo := t.TempDir()
+	repo := repoT(t)
 	writeT(t, repo, "dev/memories/a.md", doc("Read when you test a."), 0o644)
 	writeT(t, repo, "dev/memories/stedo/README.md", topicDoc("stedo", "Read when you query Stedo."), 0o644)
 	writeT(t, repo, "dev/memories/stedo/b.md", doc("Read when you test b."), 0o644)
@@ -312,6 +377,34 @@ func TestTopicIndex(t *testing.T) {
 		}
 		if got, _ := os.ReadFile(filepath.Join(repo, "dev", "memories", "bad", "README.md")); string(got) != bad {
 			t.Errorf("index = %q, want it unchanged", got)
+		}
+	})
+
+	t.Run("an ignored document and an ignored index give no line", func(t *testing.T) {
+		writeT(t, repo, ".gitignore", "*.tmp.md\n**/hidden/README.md\n", 0o644)
+		writeT(t, repo, "dev/memories/stedo/scratch.tmp.md", doc("Read when you test the scratch."), 0o644)
+		writeT(t, repo, "dev/memories/hidden/README.md", topicDoc("hidden", "Read when you test hidden."), 0o644)
+		writeT(t, repo, "dev/memories/hidden/h.md", doc("Read when you test h."), 0o644)
+		ix, err := TopicIndex(repo, "dev/memories/stedo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range ix.Lines {
+			if l.Name == "scratch.tmp" {
+				t.Errorf("the topic index lists the ignored %s", l.Path)
+			}
+		}
+		lines, err := Lines(repo, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range lines.Lines {
+			if l.Name == "hidden/" {
+				t.Errorf("the level index lists the topic folder of the ignored %s", l.Path)
+			}
+		}
+		if err := WriteTopicIndex(repo, "dev/memories/hidden"); err == nil {
+			t.Error("WriteTopicIndex of a folder with an ignored index: no error, want one")
 		}
 	})
 

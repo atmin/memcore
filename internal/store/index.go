@@ -121,10 +121,20 @@ func (ix Index) Of(kind string) []Line {
 
 // Lines returns the index lines of a level, read at its folder. A level that does not exist has none.
 func Lines(repo, level string) (Index, error) {
+	t, err := OpenTree(repo)
+	if err != nil {
+		return Index{Level: level}, err
+	}
+	return LinesIn(t, level)
+}
+
+// LinesIn returns the index lines of a level, as Lines does, read through the tree t. It lists no path that
+// git ignores.
+func LinesIn(t Tree, level string) (Index, error) {
 	ix := Index{Level: level}
 	folder := Folder(level)
-	dir := filepath.Join(repo, filepath.FromSlash(folder))
-	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+	dir := filepath.Join(t.Root(), filepath.FromSlash(folder))
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) || t.Ignored(folder) {
 		return ix, nil
 	}
 	rel := func(p string) string { return path.Join(folder, p) }
@@ -133,7 +143,7 @@ func Lines(repo, level string) (Index, error) {
 	}
 
 	for _, k := range []struct{ kind, folder string }{{KindMemories, "memories"}, {KindPlans, "plans"}, {KindNotes, "notes"}} {
-		names, err := entries(dir, k.folder, false)
+		names, err := entries(t, path.Join(folder, k.folder), false)
 		if err != nil {
 			return ix, err
 		}
@@ -154,7 +164,7 @@ func Lines(repo, level string) (Index, error) {
 		if k.kind == KindPlans {
 			continue
 		}
-		topics, err := topicLines(dir, folder, k.folder)
+		topics, err := topicLines(t, folder, k.folder)
 		if err != nil {
 			return ix, err
 		}
@@ -163,12 +173,15 @@ func Lines(repo, level string) (Index, error) {
 		}
 	}
 
-	skills, err := entries(dir, "skills", true)
+	skills, err := entries(t, path.Join(folder, "skills"), true)
 	if err != nil {
 		return ix, err
 	}
 	for _, n := range skills {
 		p := "skills/" + n + "/SKILL.md"
+		if !t.Exists(rel(p)) {
+			continue // a folder without its SKILL.md is no skill, also when git ignores the SKILL.md
+		}
 		d, err := description(filepath.Join(dir, p))
 		if err != nil {
 			return ix, fmt.Errorf("index %s: %w", rel(p), err)
@@ -179,7 +192,7 @@ func Lines(repo, level string) (Index, error) {
 		add(KindSkills, n, p, d)
 	}
 
-	scripts, err := entries(dir, "bin", false)
+	scripts, err := entries(t, path.Join(folder, "bin"), false)
 	if err != nil {
 		return ix, err
 	}
@@ -206,12 +219,12 @@ func Lines(repo, level string) (Index, error) {
 		{KindConventions, "conventions.md", "Read before you change anything in this repo."},
 		{KindGlossary, "glossary.md", "Read before you name anything at this level."},
 	} {
-		if _, err := os.Stat(filepath.Join(dir, f.file)); err == nil {
+		if t.Exists(rel(f.file)) {
 			add(f.kind, strings.TrimSuffix(f.file, ".md"), f.file, f.text)
 		}
 	}
 
-	children, err := os.ReadDir(dir)
+	children, err := t.ReadDir(folder)
 	if err != nil {
 		return ix, fmt.Errorf("index %s: %w", level, err)
 	}
@@ -235,21 +248,21 @@ func Lines(repo, level string) (Index, error) {
 	return ix, nil
 }
 
-// topicLines returns one line for each topic folder directly inside the folder sub of dir: a subfolder with a
-// README.md. Each path is relative to dir, and each text is the description of the README.md. prefix is the
-// path of dir in the repo.
-func topicLines(dir, prefix, sub string) ([]Line, error) {
-	names, err := entries(dir, sub, true)
+// topicLines returns one line for each topic folder directly inside the folder sub of prefix: a subfolder with
+// a README.md. Each path is relative to prefix, and each text is the description of the README.md. prefix is
+// a path in the repo.
+func topicLines(t Tree, prefix, sub string) ([]Line, error) {
+	names, err := entries(t, path.Join(prefix, sub), true)
 	if err != nil {
 		return nil, err
 	}
 	var lines []Line
 	for _, n := range names {
 		p := path.Join(sub, n, "README.md")
-		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err != nil {
+		if !t.Exists(path.Join(prefix, p)) {
 			continue // a folder without an index is no topic folder
 		}
-		d, err := description(filepath.Join(dir, filepath.FromSlash(p)))
+		d, err := description(filepath.Join(t.Root(), filepath.FromSlash(path.Join(prefix, p))))
 		if err != nil {
 			return nil, fmt.Errorf("index %s: %w", p, err)
 		}
@@ -264,24 +277,34 @@ func topicLines(dir, prefix, sub string) ([]Line, error) {
 // TopicIndex returns the lines of a topic folder, named by its path in the repo. Its topic folders come first,
 // then its documents, each by name.
 func TopicIndex(repo, folder string) (Index, error) {
+	t, err := OpenTree(repo)
+	if err != nil {
+		return Index{}, err
+	}
+	return TopicIndexIn(t, folder)
+}
+
+// TopicIndexIn returns the lines of a topic folder, as TopicIndex does, read through the tree t. It lists no
+// path that git ignores.
+func TopicIndexIn(t Tree, folder string) (Index, error) {
 	level, kind, _, ok := kindOf(folder + "/README.md")
 	if !ok || !IsTopicIndex(folder+"/README.md") {
 		return Index{}, fmt.Errorf("%s is no topic folder", folder)
 	}
 	ix := Index{Level: level, Topic: folder}
-	dir := filepath.Join(repo, filepath.FromSlash(folder))
-	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+	dir := filepath.Join(t.Root(), filepath.FromSlash(folder))
+	if !t.Exists(path.Join(folder, "README.md")) {
 		return ix, fmt.Errorf("%s is no topic folder: it has no README.md", folder)
 	}
 	rel := func(p string) string { return path.Join(folder, p) }
-	topics, err := topicLines(dir, folder, ".")
+	topics, err := topicLines(t, folder, ".")
 	if err != nil {
 		return ix, err
 	}
 	for _, l := range topics {
 		ix.Lines = append(ix.Lines, Line{Kind: KindTopics, Name: l.Name, Path: rel(l.Path), Text: l.Text})
 	}
-	names, err := entries(dir, ".", false)
+	names, err := entries(t, folder, false)
 	if err != nil {
 		return ix, err
 	}
@@ -347,26 +370,40 @@ func RenderTopic(repo string, ix Index) (string, error) {
 
 // WriteTopicIndex writes the index of a topic folder, named by its path in the repo, as its README.md.
 func WriteTopicIndex(repo, folder string) error {
-	ix, err := TopicIndex(repo, folder)
+	t, err := OpenTree(repo)
 	if err != nil {
 		return err
 	}
-	text, err := RenderTopic(repo, ix)
+	return WriteTopicIndexIn(t, folder)
+}
+
+// WriteTopicIndexIn writes the index of a topic folder, as WriteTopicIndex does, read through the tree t.
+func WriteTopicIndexIn(t Tree, folder string) error {
+	ix, err := TopicIndexIn(t, folder)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(folder), "README.md"), []byte(text), 0o644); err != nil {
+	text, err := RenderTopic(t.Root(), ix)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(t.Root(), filepath.FromSlash(folder), "README.md"), []byte(text), 0o644); err != nil {
 		return fmt.Errorf("write the index of %s: %w", folder, err)
 	}
 	return nil
 }
 
-// Memories returns one line for each memory of a level, inside its topic folders too, sorted by path.
+// Memories returns one line for each memory of a level, inside its topic folders too, sorted by path. It
+// lists no memory that git ignores.
 func Memories(repo, level string) ([]Line, error) {
+	t, err := OpenTree(repo)
+	if err != nil {
+		return nil, err
+	}
 	folder := path.Join(Folder(level), "memories")
 	root := filepath.Join(repo, filepath.FromSlash(folder))
 	var lines []Line
-	err := filepath.WalkDir(root, func(f string, d fs.DirEntry, err error) error {
+	err = t.WalkDir(folder, func(f string, d fs.DirEntry, err error) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fs.SkipAll
 		}
@@ -417,9 +454,10 @@ func Topics(p string) []string {
 	return topics
 }
 
-// entries lists the names in a folder of a level: directories when dirs is true, files otherwise.
-func entries(dir, folder string, dirs bool) ([]string, error) {
-	list, err := os.ReadDir(filepath.Join(dir, folder))
+// entries lists the names in a folder of the repo: directories when dirs is true, files otherwise. It lists no
+// path that git ignores.
+func entries(t Tree, folder string, dirs bool) ([]string, error) {
+	list, err := t.ReadDir(folder)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -509,11 +547,20 @@ func Render(ix Index) string {
 
 // WriteIndex writes the index of a level as the README.md of its folder.
 func WriteIndex(repo, level string) error {
-	ix, err := Lines(repo, level)
+	t, err := OpenTree(repo)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(repo, filepath.FromSlash(Folder(level)))
+	return WriteIndexIn(t, level)
+}
+
+// WriteIndexIn writes the index of a level, as WriteIndex does, read through the tree t.
+func WriteIndexIn(t Tree, level string) error {
+	ix, err := LinesIn(t, level)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(t.Root(), filepath.FromSlash(Folder(level)))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create the level %s: %w", level, err)
 	}
