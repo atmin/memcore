@@ -35,6 +35,7 @@ type header struct {
 	Session string `json:"session,omitempty"`
 	Parent  string `json:"parent,omitempty"`
 	Dir     string `json:"dir,omitempty"`
+	Source  string `json:"source,omitempty"` // exec for a codex exec run
 }
 
 // record is one line of the conversation in a trimmed transcript.
