@@ -155,26 +155,6 @@ func TestPreviewErrors(t *testing.T) {
 			},
 			want: `the rebase drops "test: an index by hand" as empty`,
 		},
-		{
-			name: "an ignored file",
-			queue: func(t *testing.T, home, repo, dev string) {
-				remember(t, dev, "a-fact", fact)
-				reviseT(t, dev, memoryText("a-fact", fact, "Sharper."), "a-fact", "Sharper.")
-				writeT(t, repo, ".git/info/exclude", "*.tmp\n")
-				writeT(t, repo, "dev/scratch.tmp", "An ignored file.\n")
-			},
-			want: "dev/scratch.tmp",
-		},
-		{
-			name: "an ignored file that the status of the repo hides",
-			queue: func(t *testing.T, home, repo, dev string) {
-				remember(t, dev, "a-fact", fact)
-				gitT(t, repo, "config", "status.showUntrackedFiles", "no")
-				writeT(t, repo, ".git/info/exclude", "*.tmp\n")
-				writeT(t, repo, "dev/scratch.tmp", "An ignored file.\n")
-			},
-			want: "dev/scratch.tmp",
-		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			home, repo, _ := newMemory(t)
@@ -188,6 +168,36 @@ func TestPreviewErrors(t *testing.T) {
 				t.Errorf("the repo before the preview:\n%s\nafter:\n%s", before, after)
 			}
 		})
+	}
+}
+
+func TestPreviewIgnoredFiles(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	home, repo, _ := newMemory(t)
+	dev := mkdirT(t, filepath.Join(home, "dev"))
+	commitByHand(t, repo, map[string]string{".gitignore": ".DS_Store\n.idea/\n"})
+	remember(t, dev, "a-fact", "Read when you test a fact.")
+	reviseT(t, dev, memoryText("a-fact", "Read when you test a fact.", "Sharper."), "a-fact", "Sharper.")
+	want, err := preview(repo, true)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+
+	writeT(t, repo, "dev/.DS_Store", "finder")
+	writeT(t, repo, "dev/.idea/workspace.xml", "<x/>\n")
+	writeT(t, repo, ".git/info/exclude", "*.tmp\ntmp/\n")
+	writeT(t, repo, "dev/scratch.tmp", "An ignored file.\n")
+	writeT(t, repo, "dev/tmp/README.md", "# Scratch\n")
+	before := stateOf(t, repo)
+	got, err := preview(repo, true)
+	if err != nil {
+		t.Fatalf("preview with ignored files: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("preview with ignored files:\n%+v\nwithout them:\n%+v", got, want)
+	}
+	if after := stateOf(t, repo); after != before {
+		t.Errorf("the repo before the preview:\n%s\nafter:\n%s", before, after)
 	}
 }
 

@@ -97,15 +97,17 @@ func TestUIQueue(t *testing.T) {
 		dev := mkdirT(t, filepath.Join(home, "dev"))
 		pushYes(t, home)
 		remember(t, dev, "deploy-fact", "Read when you deploy the shop.")
-		reviseT(t, dev, memoryText("deploy-fact", "Read when you deploy the shop.", "Sharper."), "deploy-fact", "Sharper.")
-		writeT(t, repo, ".git/info/exclude", "*.tmp\n")
-		writeT(t, repo, "dev/scratch.tmp", "An ignored file.\n")
+		// A fixup that conflicts with its target stops the fold, as in TestPreviewErrors.
+		writeT(t, repo, "dev/memories/deploy-fact.md", memoryText("deploy-fact", "Read when you deploy the shop.", "B."))
+		gitT(t, repo, "commit", "-q", "-a", "-m", "test: an edit by hand")
+		writeT(t, repo, "dev/memories/deploy-fact.md", memoryText("deploy-fact", "Read when you deploy the shop.", "C."))
+		gitT(t, repo, "commit", "-q", "-a", "-m", "fixup! remember: dev/memories/deploy-fact.md")
 		q, err := uiBackend{repo: repo, dir: home}.Queue(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if q.Folded || !strings.Contains(q.Warning, "dev/scratch.tmp") || len(q.Entries) != 2 {
-			t.Fatalf("queue = %+v, want the warning and two commits as they are", q)
+		if q.Folded || !strings.Contains(q.Warning, "a rebase stopped on a conflict in dev/memories/deploy-fact.md") || len(q.Entries) != 3 {
+			t.Fatalf("queue = %+v, want the warning and three commits as they are", q)
 		}
 		if !strings.HasPrefix(q.Entries[0].Subject, "fixup! ") || q.Entries[0].Commit != headCommit(repo) || len(q.Entries[0].Files) == 0 || q.Entries[0].Files[0].Patch == "" {
 			t.Errorf("newest entry = %+v, want the fixup with its patch", q.Entries[0])

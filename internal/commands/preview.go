@@ -37,16 +37,6 @@ type pick struct {
 // nothing in the memory repo, and runs no git hook and no file system monitor. With patches, it also reads the
 // diffs of each commit in the clone. The caller holds the write lock.
 func preview(repo string, patches bool) ([]previewed, error) {
-	// The clone lacks the ignored files, and an index of push might list them.
-	out, err := store.Git(repo, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain", "--ignored", "--untracked-files=all")
-	if err != nil {
-		return nil, fmt.Errorf("list the ignored files: %w", err)
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if p, ok := strings.CutPrefix(line, "!! "); ok {
-			return nil, fmt.Errorf("preview the fold at push: the working tree holds the ignored file %s, which a clone lacks", p)
-		}
-	}
 	queue, err := revList(repo, "refs/heads/main")
 	if err != nil {
 		return nil, err
@@ -115,7 +105,8 @@ func preview(repo string, patches bool) ([]previewed, error) {
 // clone.
 // No hook, file system monitor or signing helper runs in the clone. Its accepted commit is the one of the repo.
 // It takes the settings of the repo that shape a commit message, so its messages match those of push.
-// It holds every folder of the working tree, since an index lists the empty folders of its level.
+// It holds every folder of the working tree that git does not ignore, since an index lists the empty folders
+// of its level. An ignored folder is no level, so the clone lacks it, as it lacks the ignored files.
 func scratchClone(repo, tmp string) (string, error) {
 	hooks, clone := filepath.Join(tmp, "hooks"), filepath.Join(tmp, "clone")
 	if err := os.Mkdir(hooks, 0o755); err != nil {
