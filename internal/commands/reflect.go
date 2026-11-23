@@ -278,8 +278,9 @@ func appendAnswers(repo string, answers []reflectAnswer) error {
 }
 
 // sessionOf returns the session of a path on the transcripts branch, and false for any file that is no transcript
-// of a main session. Such a transcript is claude/<project>/<session id>.jsonl, or a version beside it,
-// claude/<project>/<session id>.<digits of its blob>.jsonl. A session id holds no dot.
+// of a main session of Claude Code. Such a transcript is claude/<project>/<session id>.jsonl, or a version beside it,
+// claude/<project>/<session id>.<digits of its blob>.jsonl. A session id holds no dot. A transcript of Codex, under
+// codex/, is no session of a pass, because memcore logs no start of a Codex session.
 func sessionOf(p string) (string, bool) {
 	parts := strings.Split(p, "/")
 	if len(parts) != 3 || parts[0] != "claude" || !strings.HasSuffix(parts[2], ".jsonl") {

@@ -106,6 +106,28 @@ func TestReflectSessions(t *testing.T) {
 			t.Errorf("the start of s-old = %v, want its first start %v", u.Start, old)
 		}
 	}
+
+	// A pass judges only the sessions of Claude Code. The same file differs only in its path.
+	for _, tt := range []struct {
+		path string
+		want int
+	}{
+		{"codex/p1/x-codex.jsonl", 0},
+		{"claude/p1/x-codex.jsonl", 1},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			_, repo, _ := newMemory(t)
+			content := strings.Replace(transcriptText("x-codex", old, "you|Use small commits."), `"agent":"claude"`, `"agent":"codex"`, 1)
+			transcriptT(t, repo, tt.path, content)
+			units, err := reflectSessions(repo, []Event{startEvent("x-codex", old, "c1")}, nil, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(units) != tt.want {
+				t.Errorf("units = %+v, want %d", units, tt.want)
+			}
+		})
+	}
 }
 
 func TestReflectCorrections(t *testing.T) {
