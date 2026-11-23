@@ -13,6 +13,10 @@ import (
 // localTimeout bounds one call of the local server. A test shortens it.
 var localTimeout = time.Hour
 
+// localMaxTokens bounds the answer of one call. An answer of extract or judge is a short JSON value. Without a
+// bound, a model that repeats itself inside a list of the schema never ends its answer.
+const localMaxTokens = 8192
+
 // localMessage is one message of the chat completions API.
 type localMessage struct {
 	Role    string `json:"role"`
@@ -20,6 +24,7 @@ type localMessage struct {
 }
 
 // localRequest is the body that runLocal posts. Temperature and stream have no omitempty, so the server gets them.
+// MaxTokens bounds the answer.
 type localRequest struct {
 	Model          string         `json:"model"`
 	Messages       []localMessage `json:"messages"`
@@ -33,12 +38,14 @@ type localRequest struct {
 	} `json:"response_format"`
 	Temperature float64 `json:"temperature"`
 	Stream      bool    `json:"stream"`
+	MaxTokens   int     `json:"max_tokens"`
 }
 
 // localReply is the part of the answer of the server that runLocal reads.
 type localReply struct {
 	Choices []struct {
-		Message struct {
+		FinishReason string `json:"finish_reason"` // length for an answer that the server cut at max_tokens
+		Message      struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
@@ -62,8 +69,9 @@ func localClient() *http.Client {
 // The schema of the request constrains the answer. The call follows no redirect, so the input goes to no other host.
 func runLocal(req Request) (Reply, error) {
 	body := localRequest{
-		Model:    req.Model,
-		Messages: []localMessage{{"system", req.Prompt}, {"user", req.Input}},
+		Model:     req.Model,
+		Messages:  []localMessage{{"system", req.Prompt}, {"user", req.Input}},
+		MaxTokens: localMaxTokens,
 	}
 	body.ResponseFormat.Type = "json_schema"
 	body.ResponseFormat.JSONSchema.Name = "answer"
@@ -99,6 +107,9 @@ func runLocal(req Request) (Reply, error) {
 	reply := Reply{In: r.Usage.PromptTokens, Out: r.Usage.CompletionTokens}
 	if len(r.Choices) == 0 {
 		return reply, fmt.Errorf("read the reply of the local model: it holds no choice")
+	}
+	if r.Choices[0].FinishReason == "length" {
+		return reply, fmt.Errorf("read the reply of the local model: the answer reached the limit of %d tokens, so it is cut", localMaxTokens)
 	}
 	content := []byte(r.Choices[0].Message.Content)
 	if !json.Valid(content) {

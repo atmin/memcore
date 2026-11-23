@@ -55,6 +55,7 @@ func TestRunLocal(t *testing.T) {
 				"response_format": `{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}}`,
 				"temperature":     `0`,
 				"stream":          `false`,
+				"max_tokens":      `8192`,
 			}
 			for key, w := range want {
 				if got := string(body[key]); got != w {
@@ -92,6 +93,9 @@ func TestRunLocalErrors(t *testing.T) {
 		{"content that is not JSON", func(w http.ResponseWriter, r *http.Request) {
 			completion(w, "Sure! Here are the corrections.", 3, 5)
 		}, "not valid JSON"},
+		{"an answer cut at the limit of the output", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"choices":[{"finish_reason":"length","message":{"content":"{\"corrections\":[]}"}}],"usage":{"prompt_tokens":3,"completion_tokens":8192}}`))
+		}, "the answer reached the limit of 8192 tokens"},
 		{"a call over the time", func(w http.ResponseWriter, r *http.Request) {
 			io.Copy(io.Discard, r.Body) // so the server sees the client go
 			select {
