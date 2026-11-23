@@ -1,6 +1,8 @@
 // Command reflect-eval compares a local model with the records of the reflect passes. It runs the two parts of a
 // pass, extract and judge, with the model over the transcripts that passes already judged, and prints how often
-// the model agrees with the records. The records are a reference, not the truth.
+// the model agrees with the records. The judge gets the same choice of memories as a pass.
+// The check measures the chosen memories and the corrections against the context limit.
+// The records are a reference, not the truth.
 //
 // The check reads the memory repo, and writes only results.jsonl in the folder of --out. It sends the
 // transcripts only to a server on this machine. Start the model in a local server that serves the chat
@@ -13,7 +15,8 @@
 // The stage measure calls no model, and needs only --out. It measures how much code could take over from the model
 // of a pass. It counts the lines of the person that simple rules drop or flag, against the recorded corrections. It
 // sizes an excerpt of each line, as a model would read it. It ranks the memories of each recorded correction by
-// BM25, and counts how often the recorded memory comes near the top:
+// BM25, and counts how often the recorded memory comes near the top. It reports the mean count and bytes per group
+// for all memories on the path and for the chosen memories.
 //
 //	go run ./scripts/reflect-eval --stage measure --out <new folder>
 //

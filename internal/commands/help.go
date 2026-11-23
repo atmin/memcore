@@ -167,8 +167,11 @@ redacted transcripts to the provider of the agent, and spends the limits of its 
 
 A pass reads each transcript of the transcripts branch that it has not judged yet, of a
 main session of Claude Code or Codex with a logged start. It skips a codex exec run. Your
-agent, headless, lists your corrections in it. Then the agent judges each correction
-against the memories that the session saw:
+agent, headless, lists your corrections in it. The judge gets together the corrections
+that saw the same commit of memory. If the path of the session holds five memories or
+fewer, it gets them all. Otherwise, memcore chooses up to five matches per correction. It
+also includes each memory on that path that the session read by the last correction in
+the group. The pass gives each correction one verdict.
 
   capture      no memory held the fact
   retrieval    a memory held the fact, and the session did not read it
