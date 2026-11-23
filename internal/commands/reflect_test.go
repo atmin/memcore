@@ -107,24 +107,48 @@ func TestReflectSessions(t *testing.T) {
 		}
 	}
 
-	// A pass judges only the sessions of Claude Code. The same file differs only in its path.
+	// A Codex session starts at its first event with the agent codex. Its directory comes from the header.
+	codexEvent := func(at time.Time, agent, command, level string) Event {
+		return Event{Time: at.UTC().Format(time.RFC3339), Session: "t1", Agent: agent, Command: command, Level: level, Commit: "c1", Outcome: "ok"}
+	}
+	orient := []Event{codexEvent(old, "codex", "orient", "~/dev")}
 	for _, tt := range []struct {
-		path string
-		want int
+		name   string
+		path   string
+		header string // the fields of the header after the agent, the session and the directory
+		agent  string // of the header
+		events []Event
+		want   int
 	}{
-		{"codex/p1/x-codex.jsonl", 0},
-		{"claude/p1/x-codex.jsonl", 1},
+		{"an orient of the session", "codex/p1/t1.jsonl", "", "codex", []Event{
+			codexEvent(old.Add(time.Minute), "codex", "show", "~/dev/app"),
+			codexEvent(old, "codex", "orient", "~/dev"),
+			{Time: old.Add(-time.Hour).UTC().Format(time.RFC3339), Session: "t2", Agent: "codex", Command: "orient", Level: "~", Outcome: "ok"},
+		}, 1},
+		{"no event", "codex/p1/t1.jsonl", "", "codex", nil, 0},
+		{"only a session-start hook of Claude Code", "codex/p1/t1.jsonl", "", "codex", []Event{startEvent("t1", old, "c1")}, 0},
+		{"a codex exec run", "codex/p1/t1.jsonl", `,"source":"exec"`, "codex", orient, 0},
+		{"a subagent", "codex/p1/t0/subagents/t1.jsonl", `,"parent":"t0"`, "codex", orient, 0},
+		{"a version beside the transcript", "codex/p1/t1.123.jsonl", "", "codex", orient, 1},
+		{"a transcript of Claude Code with only an orient", "claude/p1/t1.jsonl", "", "claude", []Event{codexEvent(old, "claude", "orient", "~/dev")}, 0},
 	} {
-		t.Run(tt.path, func(t *testing.T) {
-			_, repo, _ := newMemory(t)
-			content := strings.Replace(transcriptText("x-codex", old, "you|Use small commits."), `"agent":"claude"`, `"agent":"codex"`, 1)
-			transcriptT(t, repo, tt.path, content)
-			units, err := reflectSessions(repo, []Event{startEvent("x-codex", old, "c1")}, nil, now)
+		t.Run(tt.name, func(t *testing.T) {
+			home, repo, _ := newMemory(t)
+			content := transcriptText("t1", old, "you|Use small commits.")
+			header := fmt.Sprintf("{\"agent\":%q,\"session\":\"t1\",\"dir\":%q%s}", tt.agent, filepath.Join(home, "dev"), tt.header)
+			_, body, _ := strings.Cut(content, "\n")
+			blob := transcriptT(t, repo, tt.path, header+"\n"+body)
+			units, err := reflectSessions(repo, tt.events, nil, now)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(units) != tt.want {
-				t.Errorf("units = %+v, want %d", units, tt.want)
+				t.Fatalf("units = %+v, want %d", units, tt.want)
+			}
+			for _, u := range units {
+				if u.Session != "t1" || u.File != tt.path || u.Blob != blob || u.Level != "~/dev" || u.Dir != "~/dev" || !u.Start.Equal(old) {
+					t.Errorf("unit %+v, want t1 at ~/dev, from the orient at %v", u, old)
+				}
 			}
 		})
 	}

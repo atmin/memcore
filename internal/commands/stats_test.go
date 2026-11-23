@@ -1086,6 +1086,16 @@ func TestMisses(t *testing.T) {
 			t.Errorf("week %d: got %+v, want %+v", k, got, want[k])
 		}
 	}
+	// A record of a Codex session adds its miss to the week, and adds nothing to the started and the judged sessions.
+	codexEvents := append(append([]Event{}, events...), Event{Time: ago(2 * day), Session: "t-codex", Agent: "codex", Command: "orient", Outcome: "ok"})
+	codexRecords := append(append([]reflectRecord{}, records...), reflectRecord{Session: "t-codex", File: "codex/p/t-codex.jsonl", Blob: "b6",
+		Corrections: []reflectCorrection{correction(2*day, "h", verdictRetrieval)}})
+	codexWeeks := measure(codexEvents, nil, statsNow)
+	countMisses(codexWeeks, codexEvents, codexRecords, statsNow)
+	if got, want := (counted{codexWeeks[0].misses, codexWeeks[0].judged, codexWeeks[0].started}),
+		(counted{verdictCounts{capture: 2, retrieval: 2, application: 1, stale: 1, unrelated: 1, before: 1}, 1, 2}); got != want {
+		t.Errorf("with a Codex record, week 0: got %+v, want %+v", got, want)
+	}
 	// A week without a call prints its misses when it has some, and no line of misses otherwise.
 	quiet := week{end: statsNow}
 	var q strings.Builder

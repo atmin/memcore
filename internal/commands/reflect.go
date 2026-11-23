@@ -277,17 +277,17 @@ func appendAnswers(repo string, answers []reflectAnswer) error {
 	return nil
 }
 
-// sessionOf returns the session of a path on the transcripts branch, and false for any file that is no transcript
-// of a main session of Claude Code. Such a transcript is claude/<project>/<session id>.jsonl, or a version beside it,
-// claude/<project>/<session id>.<digits of its blob>.jsonl. A session id holds no dot. A transcript of Codex, under
-// codex/, is no session of a pass, because memcore logs no start of a Codex session.
-func sessionOf(p string) (string, bool) {
+// sessionOf returns the agent and the session of a path on the transcripts branch, and false for any file that is
+// no transcript of a main session. Such a transcript is <agent>/<project>/<session id>.jsonl, or a version beside it,
+// <agent>/<project>/<session id>.<digits of its blob>.jsonl, where the agent is claude or codex. A session id holds
+// no dot. The transcript of a subagent lies deeper, so it gives false.
+func sessionOf(p string) (agent, session string, ok bool) {
 	parts := strings.Split(p, "/")
-	if len(parts) != 3 || parts[0] != "claude" || !strings.HasSuffix(parts[2], ".jsonl") {
-		return "", false
+	if len(parts) != 3 || (parts[0] != "claude" && parts[0] != "codex") || !strings.HasSuffix(parts[2], ".jsonl") {
+		return "", "", false
 	}
 	id, _, _ := strings.Cut(strings.TrimSuffix(parts[2], ".jsonl"), ".")
-	return id, id != ""
+	return parts[0], id, id != ""
 }
 
 // reflectSessions returns the files of the transcripts branch that a reflect pass judges now, by the oldest start of
@@ -296,18 +296,31 @@ func sessionOf(p string) (string, bool) {
 //   - The use log holds a start of that session, so memcore knows what the session saw.
 //   - No record holds the blob of the file.
 //   - Its last line is older than settled.
+//
+// The start of a session of Claude Code is its first session-start hook. The unit takes its level and its directory
+// from that event. A session of Codex has no hook, so its start is its first event with the agent codex. The unit
+// takes its level from that event, and its directory from the header of the transcript. A codex exec run is no
+// session with the person, so a transcript whose header holds "source":"exec" does not count.
 func reflectSessions(repo string, events []Event, records []reflectRecord, now time.Time) ([]reflectUnit, error) {
 	ref, ok := revParse(repo, transcriptsRef)
 	if !ok {
 		return nil, nil
 	}
-	starts := map[string]Event{} // the first logged start of each session
+	starts := map[string]map[string]Event{"claude": {}, "codex": {}} // the first logged start of each session, by agent
 	for _, e := range events {
-		if e.Command != "hook" || e.Hook != "session-start" || e.Session == "" {
+		var agent string
+		switch {
+		case e.Session == "":
+			continue
+		case e.Command == "hook" && e.Hook == "session-start":
+			agent = "claude"
+		case e.Agent == "codex":
+			agent = "codex"
+		default:
 			continue
 		}
-		if first, ok := starts[e.Session]; !ok || eventTime(e).Before(eventTime(first)) {
-			starts[e.Session] = e
+		if first, ok := starts[agent][e.Session]; !ok || eventTime(e).Before(eventTime(first)) {
+			starts[agent][e.Session] = e
 		}
 	}
 	done := map[string]bool{}
@@ -325,11 +338,11 @@ func reflectSessions(repo string, events []Event, records []reflectRecord, now t
 		if !ok || len(f) != 3 {
 			continue
 		}
-		session, ok := sessionOf(p)
+		agent, session, ok := sessionOf(p)
 		if !ok || done[f[2]] {
 			continue
 		}
-		start, ok := starts[session]
+		start, ok := starts[agent][session]
 		if !ok {
 			continue
 		}
@@ -340,7 +353,18 @@ func reflectSessions(repo string, events []Event, records []reflectRecord, now t
 		if last, ok := lastLineTime(content); !ok || now.Sub(last) < settled {
 			continue
 		}
-		units = append(units, reflectUnit{Session: session, File: p, Blob: f[2], Dir: start.Dir, Level: start.Level, Start: eventTime(start)})
+		dir := start.Dir
+		if agent == "codex" {
+			h := transcriptHeader(content)
+			if h.Source == "exec" {
+				continue
+			}
+			dir = ""
+			if h.Dir != "" {
+				dir = tilde(h.Dir)
+			}
+		}
+		units = append(units, reflectUnit{Session: session, File: p, Blob: f[2], Dir: dir, Level: start.Level, Start: eventTime(start)})
 	}
 	sort.SliceStable(units, func(i, j int) bool {
 		if !units[i].Start.Equal(units[j].Start) {
@@ -353,6 +377,22 @@ func reflectSessions(repo string, events []Event, records []reflectRecord, now t
 		return units[i].File < units[j].File
 	})
 	return units, nil
+}
+
+// header is the first line of a trimmed transcript.
+type header struct {
+	Dir    string `json:"dir"`
+	Source string `json:"source"` // exec for a codex exec run
+}
+
+// transcriptHeader returns the header of a trimmed transcript, or an empty header when the first line is none.
+func transcriptHeader(content string) header {
+	first, _, _ := strings.Cut(content, "\n")
+	var h header
+	if json.Unmarshal([]byte(first), &h) != nil {
+		return header{}
+	}
+	return h
 }
 
 // lastLineTime returns the time of the last line of a trimmed transcript that has one, and false when no line has.

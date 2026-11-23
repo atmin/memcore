@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -197,6 +198,56 @@ func TestReflectPass(t *testing.T) {
 		}
 		if !strings.Contains(out, "The pass cost about 0.00 dollars at API prices.") {
 			t.Errorf("an agent that reports no cost:\n%s", out)
+		}
+	})
+
+	t.Run("a session of Codex", func(t *testing.T) {
+		dev, repo := reflectFixture(t)
+		commit := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+		at := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second)
+		// The first correction comes before the orient, and the second after the show of the memory.
+		header := fmt.Sprintf("{\"agent\":\"codex\",\"session\":\"t-codex\",\"dir\":%q}\n", dev)
+		_, body, _ := strings.Cut(transcriptText("t-codex", at, "you|Never push without asking.", "you|Add a retry.", "you|Push only when I ask."), "\n")
+		transcriptT(t, repo, "codex/p2/t-codex.jsonl", header+body)
+		for _, e := range []Event{
+			{Time: at.Add(30 * time.Second).Format(time.RFC3339), Session: "t-codex", Agent: "codex", Command: "orient", Level: "~/dev", Commit: commit, Outcome: "ok"},
+			{Time: at.Add(90 * time.Second).Format(time.RFC3339), Session: "t-codex", Agent: "codex", Command: "show", Paths: []string{"dev/memories/ask-before-push.md"}, Commit: commit, Outcome: "ok"},
+		} {
+			if err := appendEvent(repo, &e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var judged []string
+		fakeAgent(t, func(_ int, req thinking.Request) (thinking.Reply, error) {
+			out := `{"corrections":[]}`
+			if strings.Contains(req.Input, `"session":"t-codex"`) {
+				out = `{"corrections":[{"time":"","quote":"Never push without asking.","summary":"Ask before a push."},{"time":"","quote":"Push only when I ask.","summary":"Ask before a push."}]}`
+			}
+			return thinking.Reply{Output: []byte(out)}, nil
+		}, func(req thinking.Request) (thinking.Reply, error) {
+			judged = append(judged, req.Input)
+			return thinking.Reply{Output: []byte(`{"findings":[{"index":0,"kind":"holds","path":"dev/memories/ask-before-push.md","reason":"The memory says so."}]}`)}, nil
+		})
+		out, err := run(t, dev, "", "reflect")
+		if err != nil {
+			t.Fatalf("reflect: %v\n%s", err, out)
+		}
+		if want := " ~/dev t-codex: 2 corrections: 0 capture, 0 retrieval, 1 application, 0 stale, 0 unrelated, 1 before memory.\n"; !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+		if len(judged) != 1 || strings.Contains(judged[0], "Never push without asking.") || !strings.Contains(judged[0], "Push only when I ask.") {
+			t.Errorf("the judge got %q, want one call with only the later correction", judged)
+		}
+		records, err := readReflect(repo)
+		if err != nil || len(records) != 3 || records[0].Session != "t-codex" {
+			t.Fatalf("records = %+v, %v; want t-codex first of 3", records, err)
+		}
+		r := records[0]
+		if r.File != "codex/p2/t-codex.jsonl" || r.Level != "~/dev" || r.Dir != "~/dev" || r.Start != at.Add(30*time.Second).Format(time.RFC3339) {
+			t.Errorf("record = %+v, want the level of the orient and the directory of the header", r)
+		}
+		if c := r.Corrections; len(c) != 2 || c[0].Verdict != verdictBefore || c[1].Verdict != verdictApplication || c[1].Path != "dev/memories/ask-before-push.md" {
+			t.Errorf("corrections = %+v, want before memory, then an application miss", c)
 		}
 	})
 
