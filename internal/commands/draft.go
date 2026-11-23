@@ -97,13 +97,17 @@ func runDraft(env Env, args []string) error {
 			}
 		}
 	}
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return err
+	}
 	if d.inSkill != "" {
-		if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(path.Join(folder, "skills", d.inSkill, "SKILL.md")))); err != nil {
+		if !t.Exists(path.Join(folder, "skills", d.inSkill, "SKILL.md")) {
 			return inputErrf("no skill %s at %s: memcore draft skill %s starts it", d.inSkill, title(level), d.inSkill)
 		}
 	}
 	if kind == "script" {
-		if err := freeScriptName(repo, name); err != nil {
+		if err := freeScriptName(t, name); err != nil {
 			return err
 		}
 	}
@@ -273,10 +277,12 @@ func heading(name string) string {
 }
 
 // freeScriptName refuses a script name that another script of the memory repo or a command on PATH holds.
-// A command on PATH that is memcore's own link into the accepted checkout does not count.
-func freeScriptName(repo, name string) error {
+// A command on PATH that is memcore's own link into the accepted checkout does not count. An ignored file is no
+// script.
+func freeScriptName(t store.Tree, name string) error {
+	repo := t.Root()
 	var taken string
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

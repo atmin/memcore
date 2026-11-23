@@ -399,3 +399,33 @@ func TestGitTIgnoresRepoVariables(t *testing.T) {
 		t.Errorf("gitT committed to the repo of GIT_DIR: %s", out)
 	}
 }
+
+func TestFaultsSkipsIgnored(t *testing.T) {
+	repo := t.TempDir()
+	gitT(t, repo, "init", "-q", "-b", "main")
+	writeT(t, repo, ".gitignore", "*.draft.md\n/dev/glossary.md\n")
+	writeT(t, repo, "dev/notes/n.md", "---\nname: n\ndescription: \"Read when you test.\"\n---\n\nEach tier has an index.\n")
+	writeT(t, repo, "dev/notes/x.draft.md", "See [[nobody]] and [a gone page](gone.md).\n")
+	writeT(t, repo, "dev/glossary.md", "- **level**: a folder. Not: tier.\n")
+
+	faults, err := Faults(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults", faults, nil)
+	r, err := Verify(repo, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults of verify", r.Faults, nil)
+	r, err = VerifyContent(repo, "dev/notes/new.md", []byte("Each tier has an index.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults of new content", r.Faults, nil)
+	r, err = VerifyContent(repo, "dev/notes/new.md", []byte("See [the draft](x.draft.md).\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "faults of a link to an ignored file", r.Faults, []string{`dev/notes/new.md:1: dead link to "x.draft.md"`})
+}

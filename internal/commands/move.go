@@ -41,7 +41,7 @@ func runMove(env Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	from, err := resolve(repo, pos[0])
+	from, err := resolve(t, pos[0])
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func runMove(env Env, args []string) error {
 			return inputErrf("the name %s is not lower case with hyphens", newName)
 		}
 		if memory {
-			taken, err := findMemory(repo, newName)
+			taken, err := findMemory(t, newName)
 			if err != nil {
 				return err
 			}

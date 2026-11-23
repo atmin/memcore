@@ -67,9 +67,10 @@ func placeAt(dir, at, home string) (string, error) {
 
 // resolve returns the path in the memory repo of a document. The document is named by its path or, for a
 // memory, by its name. The path rules of show apply, and the document must exist.
-func resolve(repo, arg string) (string, error) {
+func resolve(t store.Tree, arg string) (string, error) {
+	repo := t.Root()
 	if !strings.Contains(arg, "/") {
-		found, err := findMemory(repo, arg)
+		found, err := findMemory(t, arg)
 		if err != nil {
 			return "", err
 		}

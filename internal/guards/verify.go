@@ -47,6 +47,7 @@ var (
 // verifier checks documents of one repo, and keeps what they share.
 type verifier struct {
 	repo       string
+	tree       store.Tree             // the working tree, without the paths that git ignores
 	gone       []string               // paths that count as removed: files, or folders with all they hold
 	pending    []string               // paths that count as present: files of a set that is not on disk yet
 	names      map[string]bool        // the names of the memories in the repo
@@ -62,8 +63,12 @@ type forbidden struct {
 }
 
 func newVerifier(repo string) (*verifier, error) {
-	v := &verifier{repo: repo, names: map[string]bool{}, glossaries: map[string][]forbidden{}}
-	err := filepath.WalkDir(repo, func(p string, d fs.DirEntry, err error) error {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return nil, err
+	}
+	v := &verifier{repo: repo, tree: t, names: map[string]bool{}, glossaries: map[string][]forbidden{}}
+	err = t.WalkDir("", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -83,7 +88,8 @@ func newVerifier(repo string) (*verifier, error) {
 	return v, nil
 }
 
-// Faults returns the faults of every markdown document in the repo except the indexes.
+// Faults returns the faults of every markdown document in the repo except the indexes and the files that git
+// ignores.
 // It checks the repo as if the removed paths were gone. A removed path is a file, or a folder
 // with everything in it. Only a removed memory file takes its name out of the [[name]] targets.
 // A command compares the faults with and without a removal, so only the faults that the removal adds stop it.
@@ -117,7 +123,7 @@ func FaultsWith(repo string, writes map[string][]byte, removed []string) ([]Find
 		}
 	}
 	var faults []Finding
-	err = filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err = v.tree.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -213,7 +219,8 @@ func VerifySet(repo string, files map[string][]byte) (map[string]Report, error) 
 	return reports, nil
 }
 
-// Verify checks one document, or every markdown document under a path relative to repo.
+// Verify checks one document, or every markdown document under a path relative to repo that git does not
+// ignore.
 func Verify(repo, p string) (Report, error) {
 	p = path.Clean(p)
 	full := filepath.Join(repo, filepath.FromSlash(p))
@@ -233,7 +240,7 @@ func Verify(repo, p string) (Report, error) {
 		return v.check(p, content)
 	}
 	var all Report
-	err = filepath.WalkDir(full, func(f string, d fs.DirEntry, err error) error {
+	err = v.tree.WalkDir(p, func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -421,6 +428,9 @@ func (v *verifier) deadLink(p, target string) bool {
 				return false
 			}
 		}
+		if v.tree.Ignored(rel) {
+			return true // a clone lacks an ignored file
+		}
 	}
 	_, err := os.Stat(full)
 	return err != nil
@@ -434,7 +444,7 @@ func (v *verifier) forbiddenOn(p string) ([]forbidden, error) {
 		words, ok := v.glossaries[g]
 		if !ok {
 			var err error
-			words, err = readGlossary(v.repo, g)
+			words, err = readGlossary(v.tree, g)
 			if err != nil {
 				return nil, err
 			}
@@ -447,9 +457,13 @@ func (v *verifier) forbiddenOn(p string) ([]forbidden, error) {
 	}
 }
 
-// readGlossary reads the words of the Not: lists of a glossary, which may not exist.
-func readGlossary(repo, g string) ([]forbidden, error) {
-	content, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(g)))
+// readGlossary reads the words of the Not: lists of a glossary, which may not exist. A glossary that git
+// ignores does not exist.
+func readGlossary(t store.Tree, g string) ([]forbidden, error) {
+	if t.Ignored(g) {
+		return nil, nil
+	}
+	content, err := os.ReadFile(filepath.Join(t.Root(), filepath.FromSlash(g)))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

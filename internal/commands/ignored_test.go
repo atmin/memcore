@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/atmin/memcore/internal/store"
 )
 
 // exclude makes git ignore the patterns in the memory repo alone, through .git/info/exclude.
@@ -230,5 +232,98 @@ func TestIgnoredInWrites(t *testing.T) {
 			t.Errorf("the commit changes\n%s\nwant no topic index", got)
 		}
 		clean(t, repo)
+	})
+}
+
+func TestIgnoredInReads(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	t.Run("orient counts no ignored plan and no ignored note", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		commitByHand(t, repo, map[string]string{
+			"dev/plans/p.md": "---\nname: p\ndescription: \"Read when you build p.\"\n---\n",
+			"dev/notes/n.md": "---\nname: n\ndescription: \"Read when you test n.\"\n---\n",
+		})
+		exclude(t, repo, "*.draft.md", "old/")
+		writeT(t, repo, "dev/plans/q.draft.md", "---\nname: q\n---\n")
+		writeT(t, repo, "dev/notes/m.draft.md", "---\nname: m\n---\n")
+		writeT(t, repo, "dev/notes/old/o.md", "---\nname: o\n---\n")
+		out, err := run(t, dev, "", "orient")
+		if err != nil {
+			t.Fatalf("orient: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "1 plan and 1 note:") {
+			t.Errorf("orient =\n%s\nwant 1 plan and 1 note", out)
+		}
+	})
+
+	t.Run("remember accepts a name that only an ignored memory holds", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		exclude(t, repo, "/lab/memories/taken.md")
+		writeT(t, repo, "lab/memories/taken.md", memoryText("taken", "Read when you test an ignored memory.", "A fact."))
+		remember(t, dev, "taken", "Read before you deploy the shop.")
+		survives(t, repo, "lab/memories/taken.md", memoryText("taken", "Read when you test an ignored memory.", "A fact."))
+		clean(t, repo)
+	})
+
+	t.Run("draft script accepts a name that only an ignored script holds", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		exclude(t, repo, "/lab/bin/ignored-tool")
+		writeT(t, repo, "lab/bin/ignored-tool", "#!/bin/sh\n# Run when you test.\n")
+		if err := os.Chmod(filepath.Join(repo, "lab", "bin", "ignored-tool"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := run(t, dev, "", "draft", "script", "ignored-tool", "--description", "Run when you test a script."); err != nil {
+			t.Fatalf("draft script: %v\n%s", err, out)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("draft refuses a file of a skill whose SKILL.md is ignored", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		dev := mkdirT(t, filepath.Join(home, "dev"))
+		exclude(t, repo, "/dev/skills/ghost/SKILL.md")
+		writeT(t, repo, "dev/skills/ghost/SKILL.md", "---\nname: ghost\ndescription: \"Use when you test.\"\n---\n")
+		if _, err := run(t, dev, "", "draft", "skill", "ghost/check.sh"); err == nil || !strings.Contains(err.Error(), "no skill ghost") {
+			t.Errorf("error = %v, want a refusal that says there is no skill ghost", err)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("the import writes no memory over an ignored file", func(t *testing.T) {
+		home, repo, _ := newMemory(t)
+		claude := filepath.Join(home, ".claude")
+		shop := mkdirT(t, filepath.Join(home, "dev", "shop"))
+		remember(t, shop, "a-fact", "Read when you test a fact.")
+		exclude(t, repo, "/dev/shop/memories/deploy-day.md")
+		writeT(t, repo, "dev/shop/memories/deploy-day.md", "mine")
+		autoMemory(t, claude, shop, "deploy_day.md", flat("deploy-day", "Read before you deploy.", "project", "Deploy on Fridays."))
+		importNow(t, home, repo, claude)
+		survives(t, repo, "dev/shop/memories/deploy-day.md", "mine")
+		if got := gitT(t, repo, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(got, "dev/shop/memories/deploy-day-shop.md") {
+			t.Errorf("the import commit changes\n%s\nwant dev/shop/memories/deploy-day-shop.md", got)
+		}
+		clean(t, repo)
+	})
+
+	t.Run("the import reads no name of an ignored memory", func(t *testing.T) {
+		_, repo, _ := newMemory(t)
+		exclude(t, repo, "*.bak.md")
+		writeT(t, repo, "dev/memories/kept.md", memoryText("kept", "Read when you test a kept fact.", "A fact."))
+		writeT(t, repo, "dev/memories/old.bak.md", memoryText("old.bak", "Read when you test a backup.", "A fact."))
+		tree, err := store.OpenTree(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, err := memoryNames(tree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !names["kept"] || names["old.bak"] {
+			t.Errorf("memoryNames = %v, want kept and not old.bak", names)
+		}
 	})
 }

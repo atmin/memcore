@@ -67,6 +67,10 @@ func orientation(repo, dir string) (orientText, error) {
 	if err != nil {
 		return orientText{}, err
 	}
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return orientText{}, err
+	}
 
 	var w strings.Builder
 	fmt.Fprintf(&w, "memcore keeps the long-term memory of your agents, in %s. Touch it only through these commands:\n", tilde(repo))
@@ -102,7 +106,7 @@ func orientation(repo, dir string) (orientText, error) {
 	fmt.Fprintln(&w, "\nThe indexes, from the working directory to the root. Each line says when to read a document, and memcore show <path> prints it.")
 	o := orientText{header: w.String()}
 	for _, l := range levels {
-		ix, err := store.Lines(repo, l)
+		ix, err := store.LinesIn(t, l)
 		if err != nil {
 			return orientText{}, err
 		}
@@ -117,11 +121,11 @@ func orientation(repo, dir string) (orientText, error) {
 				part.short = append(part.short, fmt.Sprintf("- %s%s", line.Path, label))
 			}
 		}
-		plans, err := countDocs(repo, l, "plans")
+		plans, err := countDocs(t, l, "plans")
 		if err != nil {
 			return orientText{}, err
 		}
-		notes, err := countDocs(repo, l, "notes")
+		notes, err := countDocs(t, l, "notes")
 		if err != nil {
 			return orientText{}, err
 		}
@@ -313,11 +317,12 @@ func section(doc, heading string) string {
 }
 
 // countDocs counts the markdown documents in a kind folder of a level, inside its topic folders too. The index
-// of a topic folder is no document.
-func countDocs(repo, level, kind string) (int, error) {
-	root := filepath.Join(repo, filepath.FromSlash(store.Folder(level)), kind)
+// of a topic folder is no document, and neither is an ignored file.
+func countDocs(t store.Tree, level, kind string) (int, error) {
+	folder := path.Join(store.Folder(level), kind)
+	root := filepath.Join(t.Root(), filepath.FromSlash(folder))
 	n := 0
-	err := filepath.WalkDir(root, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir(folder, func(f string, d fs.DirEntry, err error) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fs.SkipAll
 		}

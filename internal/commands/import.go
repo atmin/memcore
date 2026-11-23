@@ -166,7 +166,11 @@ func importProject(env Env, repo, h string, rec *importRecord, projects, folder 
 		return err
 	}
 	defer unlock()
-	inRepo, err := memoryNames(repo)
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return err
+	}
+	inRepo, err := memoryNames(t)
 	if err != nil {
 		return err
 	}
@@ -220,7 +224,13 @@ func importProject(env Env, repo, h string, rec *importRecord, projects, folder 
 		segment = ""
 	}
 	for _, c := range set {
-		c.name = freeName(c.name, segment, taken)
+		base := c.name
+		c.name = freeName(base, segment, taken)
+		// An ignored file is no memory, but the import writes no file over it.
+		for occupied(repo, memoryPath(level, c.name)) {
+			taken[c.name] = true
+			c.name = freeName(base, segment, taken)
+		}
 		taken[c.name] = true
 		if c.name != c.memory.Name {
 			notes = append(notes, fmt.Sprintf("Renamed %s to %s.", c.memory.Name, c.name))
@@ -487,10 +497,11 @@ func freeName(name, segment string, taken map[string]bool) string {
 	}
 }
 
-// memoryNames returns the names of the memories in the repo.
-func memoryNames(repo string) (map[string]bool, error) {
+// memoryNames returns the names of the memories in the repo. An ignored file is no memory.
+func memoryNames(t store.Tree) (map[string]bool, error) {
+	repo := t.Root()
 	names := map[string]bool{}
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -506,6 +517,12 @@ func memoryNames(repo string) (map[string]bool, error) {
 		return nil, fmt.Errorf("list the memories: %w", err)
 	}
 	return names, nil
+}
+
+// occupied reports whether a file or a folder exists at the path p of the repo.
+func occupied(repo, p string) bool {
+	_, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(p)))
+	return err == nil
 }
 
 // newToken returns a random token that names one import commit.

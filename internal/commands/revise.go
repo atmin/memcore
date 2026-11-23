@@ -40,7 +40,11 @@ func runRevise(env Env, args []string) error {
 		return err
 	}
 	defer unlock()
-	rel, err := resolve(repo, pos[0])
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return err
+	}
+	rel, err := resolve(t, pos[0])
 	if err != nil {
 		return err
 	}

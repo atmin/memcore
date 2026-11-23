@@ -23,9 +23,14 @@ type edit struct {
 // once that document moves to to. A path link to from points to to, relative to its own document. When memory
 // is true, each [[oldName]] becomes [[newName]]. Code stays as it is. The level indexes stay out, because a
 // write regenerates them. The moved document is returned under from, with its own [[oldName]] renamed.
+// A file that git ignores stays out too.
 func Relink(repo, from, to, oldName, newName string, memory bool) (map[string][]byte, error) {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return nil, err
+	}
 	changed := map[string][]byte{}
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err = t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

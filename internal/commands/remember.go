@@ -78,7 +78,11 @@ func runRemember(env Env, args []string) error {
 			return err
 		}
 	}
-	taken, err := findMemory(repo, m.Name)
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return err
+	}
+	taken, err := findMemory(t, m.Name)
 	if err != nil {
 		return err
 	}
@@ -188,10 +192,12 @@ func sizeWarning(level string, o orientText) string {
 		title(level), len(text), hookBytes)
 }
 
-// findMemory returns the path of the memory with a name anywhere in the repo, or "".
-func findMemory(repo, name string) (string, error) {
+// findMemory returns the path of the memory with a name anywhere in the repo, or "". An ignored file is no
+// memory.
+func findMemory(t store.Tree, name string) (string, error) {
+	repo := t.Root()
 	found := ""
-	err := filepath.WalkDir(repo, func(p string, d fs.DirEntry, err error) error {
+	err := t.WalkDir("", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

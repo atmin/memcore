@@ -116,7 +116,7 @@ func runForget(env Env, args []string) error {
 func forgetTarget(t store.Tree, arg string) (string, []string, error) {
 	repo := t.Root()
 	if !strings.Contains(arg, "/") {
-		found, err := findMemory(repo, arg)
+		found, err := findMemory(t, arg)
 		if err != nil {
 			return "", nil, err
 		}
