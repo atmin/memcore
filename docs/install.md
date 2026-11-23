@@ -52,7 +52,7 @@ Agents run `memcore` themselves. You run `memcore inbox` to see what waits for y
 
 Nothing of memcore runs between sessions: there is no service and no scheduled job. The one exception is the server of `memcore ui`. It runs in the background while a window is open, apart from any session, and stops 10 s after the last window closes. Snapshots start the way `git gc --auto` does:
 1. An agent calls `memcore`.
-2. If six hours have passed since the last snapshot, `memcore` starts a snapshot in the background.
+2. If six hours have passed since the last snapshot, `memcore` starts a snapshot in the background. The snapshot reads the sessions of Claude Code and of Codex.
 3. `memcore` answers the agent at once, without waiting for the snapshot.
 
 A snapshot also starts at the end of each session of Claude Code, through its `SessionEnd` hook.
