@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -88,7 +89,10 @@ func scoreMemories(query string, memories []thinking.Memory) []float64 {
 // rankMemories returns the indices of memories by their BM25 score for a query, over the description and the body
 // of each. Equal scores go by path.
 func rankMemories(query string, memories []thinking.Memory) []int {
-	scores := scoreMemories(query, memories)
+	return orderByScore(scoreMemories(query, memories), memories)
+}
+
+func orderByScore(scores []float64, memories []thinking.Memory) []int {
 	order := make([]int, len(memories))
 	for i := range order {
 		order[i] = i
@@ -100,4 +104,44 @@ func rankMemories(query string, memories []thinking.Memory) []int {
 		return memories[order[a]].Path < memories[order[b]].Path
 	})
 	return order
+}
+
+const nearestCount = 5
+
+// nearestMemories keeps every read memory and the nearest matches of each correction, in input order.
+func nearestMemories(corrections []thinking.Correction, memories []thinking.Memory, read map[string]bool) []thinking.Memory {
+	if len(memories) <= nearestCount {
+		return memories
+	}
+	chosen := make([]bool, len(memories))
+	for _, c := range corrections {
+		scores := scoreMemories(c.Quote+" "+c.Summary, memories)
+		order := orderByScore(scores, memories)
+		for _, i := range order[:nearestCount] {
+			if scores[i] == 0 {
+				break
+			}
+			chosen[i] = true
+		}
+	}
+	var out []thinking.Memory
+	for i, m := range memories {
+		if chosen[i] || read[m.Path] {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// readPaths returns the documents read by the session at or before until.
+func readPaths(events []Event, session string, until time.Time) map[string]bool {
+	read := map[string]bool{}
+	for _, e := range events {
+		if e.Session == session && !eventTime(e).After(until) {
+			for _, path := range readsOf(e) {
+				read[path] = true
+			}
+		}
+	}
+	return read
 }
