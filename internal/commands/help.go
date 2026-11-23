@@ -166,8 +166,9 @@ It runs one reflect pass. Only the person runs a pass, at a terminal, because a 
 redacted transcripts to the provider of the agent, and spends the limits of its plan.
 
 A pass reads each transcript of the transcripts branch that it has not judged yet, of a
-session with a logged start. Your agent, headless, lists your corrections in it. Then the
-agent judges each correction against the memories that the session saw:
+main session of Claude Code or Codex with a logged start. It skips a codex exec run. Your
+agent, headless, lists your corrections in it. Then the agent judges each correction
+against the memories that the session saw:
 
   capture      no memory held the fact
   retrieval    a memory held the fact, and the session did not read it

@@ -72,11 +72,11 @@ Agents seldom call `verify` themselves, because the write commands run it.
 **Stats.** `stats` measures whether memory helps, from the use log, git history and the records of the reflect passes. It reads no transcript and calls no agent. A week is 7 days that end at the time of the call, in UTC. `stats` prints the four newest weeks, newest first. It leaves out a week that ends before the log starts. For each week, it shows:
 - **Capture:** the committed lines of `remember`, `revise`, `forget` and `draft`, for memories and for other documents. A fold changes no count.
 - **Review:** the queue commits created, pushed and dropped. The fixups count among the created and the dropped. The commits of an agent's push and of an automatic push count among the pushed. An accepted memory is a memory that a pushed commit adds or modifies, imports included. Each push counts it once, in the week of the push. The precision is the share of accepted memories that are no accepted mistake. The two newest weeks say "so far", because their mistakes can still grow.
-- **Use:** the sessions, the reads per session, the reads around memcore, and the five most-read memories. Only reads with a session count here.
-- **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. A subagent can inherit the session id of its agent. So one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
+- **Use:** the sessions, the reads per session, the reads around memcore, and the five most-read memories. Only reads with a session count here. The sessions are those of each agent that sets a session id, Claude Code and Codex. A `codex exec` run counts too, because it uses memory.
+- **Context cost:** the prints of `orient` per session with a print, and the words and estimated tokens of one print. It counts the same sessions as Use. A subagent can inherit the session id of its agent. So one session id can gather the prints of many agents. The header and each level show their words at their last print. Each level also shows its lines against the budget of 40.
 - **Friction:** the failed calls of memcore, grouped by command and error. Errors that differ only in a path, a commit or a number fall in one group. The five largest groups show, then the count of the rest.
 - **Marks:** the counts of `#again`, `#wrong` and `#stale`.
-- **Misses:** the capture, retrieval and application misses and the stale memories, from the records of the reflect passes. A correction counts in the week of its own time. A correction with the verdict "before memory" or "unrelated" counts as no miss. Then come the judged sessions, of the sessions with a logged start in the week. A session counts in the week of its first start. A week without a judged session says so.
+- **Misses:** the capture, retrieval and application misses and the stale memories, from the records of the reflect passes. A correction counts in the week of its own time, for a session of either agent. A correction with the verdict "before memory" or "unrelated" counts as no miss. Then come the judged sessions of Claude Code, of the sessions of Claude Code with their first logged start in the week. The use log cannot tell a session of Codex with you from a `codex exec` run, so these two counts leave out Codex. A week without a judged session says so.
 
 More rules of `stats`:
 - A line without a session still counts for capture, review, friction and marks. A line that does not parse stays out, and `stats` names the count.
@@ -98,8 +98,11 @@ Then `stats` lists the memories with no logged read in 30 days, 20 at most:
 **Reflect.** `memcore reflect` runs one reflect pass, in the foreground. A pass never starts by itself, proposes no change and commits nothing. An agent in a session with you turns its corrections into changes, by the learn skill below. Only you run a pass, because it has two costs: it sends redacted transcripts to the provider of your agent, and it spends the limits of your plan.
 
 A pass judges each file of the transcripts branch that fits all of these:
-- It is the transcript of a main session of Claude Code, or a version beside it. A subagent gets its words from the agent, so a pass skips its file. memcore logs no start of a Codex session, so a pass skips the transcripts of Codex.
+- It is the transcript of a main session of Claude Code or Codex, or a version beside it. A subagent gets its words from the agent, so a pass skips its file. A `codex exec` run is no session with you, because another agent writes its prompt. So a pass skips a transcript whose header holds `"source":"exec"`.
 - The use log holds a start of the session. Only then memcore knows what the session saw.
+  - A session of Claude Code starts at its first `SessionStart` hook. Its level and its directory come from that line.
+  - A session of Codex has no hook, so it starts at its first call of memcore, such as the `memcore orient` of the instruction. Its level is the level of that call, and its directory comes from the header of the transcript.
+  - An older version of memcore logs no session of Codex. So a session of Codex with only calls of such a version has no start, and no pass judges it.
 - No record holds this version of the file. So a transcript that grew is judged again, and a correction of one session counts once.
 - Its last line is older than one hour, so the session has most likely ended.
 
@@ -115,7 +118,7 @@ memcore turns each answer into a verdict:
 - **unrelated:** the correction concerns only the task of that session.
 - **before memory:** memcore saw the session only after the correction. So memcore does not know what memory held then, and no agent judges the correction. It counts as no miss.
 
-The use log decides between a retrieval miss and an application miss, not the agent. A line of `orient` is no read.
+The use log decides between a retrieval miss and an application miss, not the agent. A line of `orient` is no read. Codex has no hook, so a read of a session of Codex is a `memcore show`.
 
 A pass has two limits, and ends at the first:
 - **The budget**, 2 dollars unless `--budget` or the setting `memcore.reflectbudget` says otherwise. The cost is what the agent reports, at API prices. On a subscription, a pass spends the limits of the plan and no money. A pass compares its cost with the budget before it starts a session. It finishes each session that it starts, so it can pass the budget by one session. No call of the agent gets a limit of its own.
@@ -162,6 +165,8 @@ The hooks read only this simple form, so `stats` calls these reads "around memco
 - the hooks cannot tell which side of `&&` or `||` ran, so they count both.
 
 **Any agent.** The whole integration is one instruction in `AGENTS.md`<sup>[1](#sources)</sup>. It says: run `memcore orient` at the start of every session and follow it. The output of `orient` teaches the rest: the commands, the rules, the indexes and the skill descriptions. `memcore help <command>` holds the full text and the input of a command.
+
+memcore reads the session of Codex from `CODEX_THREAD_ID`, which Codex sets for each command that it runs. So the use log and a memory name the session of Codex. memcore logs no session of another agent.
 
 **Claude Code.** Claude Code needs no instruction, because `init` adds five hooks to its settings:
 - The `SessionStart` hook runs `orient` for the directory of the session, at every start, resume, clear, compaction and fork. Claude Code adds the output to the context, so a session sees `orient` without an instruction. The hook also logs the start of the session. The line in the use log holds the words that the hook printed, and the levels that it shortened. Claude Code passes a hook output over 10,000 characters only as a file and a preview. So the hook prints at most 9,500 bytes:

@@ -6,7 +6,7 @@ memcore is long-term memory for the agents you work with, kept as plain markdown
 
 Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.
 
-**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `move`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `reflect`, `push`, `drop`, `recover` and `ui` work on it. `snapshot` also keeps the sessions of Codex.
+**Status:** the store, the write-read loop and the correction loop exist. `init` sets up the memory repo and Claude Code. It snapshots the transcripts, imports auto-memory, and adds the hooks and the permissions. `orient`, `show`, `help`, `remember`, `revise`, `forget`, `move`, `draft`, `verify`, `snapshot`, `inbox`, `stats`, `reflect`, `push`, `drop`, `recover` and `ui` work on it. `snapshot` also keeps the sessions of Codex, and `reflect` judges them.
 
 `push` asks at your terminal, and an agent's push sends memories, notes and plans without a question. With `memcore.autopush` set, memcore pushes ripe memories, notes and plans by itself. `memcore ui` opens a window to review, push, browse and search. `memcore reflect` finds your corrections in new transcripts, and says which of them memory should have prevented. With the learn skill, an agent then turns those corrections into changes of memory, for your review.
 

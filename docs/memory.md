@@ -4,7 +4,7 @@ A memory is one file that holds one fact. It lives at `memories/<name>.md` at it
 - `name`: the topic, in lower case with hyphens. A name is unique in the memory repo, so a `[[name]]` link is never ambiguous.
 - `description`: one line of 25 words at most that says when to read the memory. It is the memory's line in the index. memcore writes it in double quotes, so a colon inside it stays one value for any YAML reader.
 - `type`: `user`, `feedback`, `project` or `reference`.
-- `sessions`: the sessions the fact came from, each as `<agent>:<id>`. memcore fills it from the agent's environment: for Claude Code, from `CLAUDE_CODE_SESSION_ID`. memcore ignores sessions in the input, so the input may leave them out. The list stays empty, as `sessions: []`, when no agent sets an id.
+- `sessions`: the sessions the fact came from, each as `<agent>:<id>`. memcore fills it from the agent's environment: for Codex, from `CODEX_THREAD_ID`, and for Claude Code, from `CLAUDE_CODE_SESSION_ID`. Claude Code runs `codex exec`, and Codex passes the environment of its parent on. So when both variables are set, Codex is the caller, and its session counts. memcore ignores sessions in the input, so the input may leave them out. The list stays empty, as `sessions: []`, when no agent sets an id.
 
 memcore reads the frontmatter with a small parser of its own, so it needs no YAML library. It reads input leniently and writes it canonically:
 - It reads `key: value` lines, a block list and a flow list, such as `[a, b]`.
