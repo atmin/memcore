@@ -263,11 +263,15 @@ func settle(repo string) error {
 // writeIndexes writes every index of the working tree again from the documents: each topic index, deepest
 // first, and then the index of each level. It returns their paths, and stages nothing.
 func writeIndexes(repo string) ([]string, error) {
-	levels, err := levelFolders(repo)
+	t, err := store.OpenTree(repo)
 	if err != nil {
 		return nil, err
 	}
-	topics, err := topicFolders(repo)
+	levels, err := levelFolders(t)
+	if err != nil {
+		return nil, err
+	}
+	topics, err := topicFolders(t)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +281,7 @@ func writeIndexes(repo string) ([]string, error) {
 		if err := noSymlink(repo, index); err != nil {
 			return nil, err
 		}
-		if err := store.WriteTopicIndex(repo, tf); err != nil {
+		if err := store.WriteTopicIndexIn(t, tf); err != nil {
 			return nil, err
 		}
 		indexes = append(indexes, index)
@@ -287,7 +291,7 @@ func writeIndexes(repo string) ([]string, error) {
 		if err := noSymlink(repo, index); err != nil {
 			return nil, err
 		}
-		if err := store.WriteIndex(repo, l); err != nil {
+		if err := store.WriteIndexIn(t, l); err != nil {
 			return nil, err
 		}
 		indexes = append(indexes, index)
@@ -314,10 +318,11 @@ func atOnto(repo string) (bool, error) {
 	return onto == head, nil
 }
 
-// levelFolders returns every level of the working tree that has an index or holds a file.
-func levelFolders(repo string) ([]string, error) {
+// levelFolders returns every level of the working tree that has an index or holds a file. An ignored path
+// does not count.
+func levelFolders(t store.Tree) ([]string, error) {
 	var levels []string
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -327,7 +332,7 @@ func levelFolders(repo string) ([]string, error) {
 		if d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		rel, err := filepath.Rel(repo, f)
+		rel, err := filepath.Rel(t.Root(), f)
 		if err != nil {
 			return err
 		}
@@ -339,7 +344,7 @@ func levelFolders(repo string) ([]string, error) {
 		if !ok {
 			return nil
 		}
-		if _, err := os.Stat(filepath.Join(f, "README.md")); err == nil || holdsFile(f) {
+		if t.Exists(path.Join(folder, "README.md")) || holdsFile(t, folder) {
 			levels = append(levels, level)
 		}
 		return nil

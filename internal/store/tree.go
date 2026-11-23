@@ -113,6 +113,33 @@ func (t Tree) WalkDir(rel string, fn fs.WalkDirFunc) error {
 	})
 }
 
+// onlyIgnored reports whether the folder rel holds files, and git ignores each of them. Git reports such a
+// folder as ignored only while its index tracks no file in it, so a removal that is not committed yet hides it.
+func (t Tree) onlyIgnored(rel string) bool {
+	ignored, seen := false, false
+	err := filepath.WalkDir(t.abs(rel), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		r, err := filepath.Rel(t.root, p)
+		if err != nil {
+			return err
+		}
+		switch {
+		case t.Ignored(filepath.ToSlash(r)):
+			ignored = true
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+		case !d.IsDir():
+			seen = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return err == nil && ignored && !seen
+}
+
 // abs returns the absolute path of rel.
 func (t Tree) abs(rel string) string {
 	return filepath.Join(t.root, filepath.FromSlash(clean(rel)))

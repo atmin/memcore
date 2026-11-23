@@ -194,8 +194,12 @@ func runDrop(env Env, args []string) error {
 
 // orphanSkills returns the folders of skills that hold files but no SKILL.md. An empty folder is no skill.
 func orphanSkills(repo string) ([]string, error) {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return nil, err
+	}
 	var orphans []string
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err = t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -220,7 +224,7 @@ func orphanSkills(repo string) ([]string, error) {
 		if _, isLevel := store.LevelOf(folder); !isLevel {
 			return nil
 		}
-		if _, err := os.Stat(filepath.Join(f, "SKILL.md")); err != nil && holdsFile(f) {
+		if !t.Exists(path.Join(rel, "SKILL.md")) && holdsFile(t, rel) {
 			orphans = append(orphans, rel)
 		}
 		return filepath.SkipDir

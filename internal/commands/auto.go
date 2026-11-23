@@ -490,6 +490,10 @@ func dropQueueFolders(repo, clone string) error {
 		return fmt.Errorf("list the folders of the review queue: %w", err)
 	}
 	folders := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+	t, err := store.OpenTree(clone)
+	if err != nil {
+		return err
+	}
 	slices.Sort(folders)
 	slices.Reverse(folders) // a folder comes after the folders inside it
 	for _, folder := range folders {
@@ -500,7 +504,7 @@ func dropQueueFolders(repo, clone string) error {
 			return err
 		}
 		dir := filepath.Join(clone, filepath.FromSlash(folder))
-		if _, err := os.Stat(dir); err != nil || holdsFile(dir) {
+		if _, err := os.Stat(dir); err != nil || holdsFile(t, folder) {
 			continue
 		}
 		if err := os.RemoveAll(dir); err != nil {

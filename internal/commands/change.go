@@ -48,8 +48,12 @@ func lockWrite(repo string) (func(), error) {
 //   - It commits them all.
 //
 // It refuses a symlink on any path and a path with uncommitted changes. On a failure it restores every path
-// from HEAD. The caller holds the lock of lockWrite.
+// from HEAD. It never removes a file that git ignores. The caller holds the lock of lockWrite.
 func apply(repo string, c change) (string, error) {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return "", err
+	}
 	var docs []string
 	for _, f := range c.writes {
 		docs = append(docs, f.path)
@@ -63,8 +67,8 @@ func apply(repo string, c change) (string, error) {
 			if slices.Contains(topics, tf) {
 				continue
 			}
-			if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(index))); err != nil && !slices.Contains(docs, index) {
-				continue // a folder without an index is no topic folder
+			if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(index))); (err != nil || t.Ignored(index)) && !slices.Contains(docs, index) {
+				continue // a folder without an index is no topic folder, and an ignored index does not exist
 			}
 			topics = append(topics, tf)
 			if !slices.Contains(paths, index) {
@@ -86,13 +90,16 @@ func apply(repo string, c change) (string, error) {
 		}
 	}
 	for _, l := range levels {
-		if _, err := store.Lines(repo, l); err != nil {
+		if _, err := store.LinesIn(t, l); err != nil {
 			return "", fmt.Errorf("read the index of the path: %w", err)
 		}
 	}
 	for _, p := range paths {
 		if err := noSymlink(repo, p); err != nil {
 			return "", err
+		}
+		if _, err := os.Lstat(filepath.Join(repo, filepath.FromSlash(p))); err == nil && t.Ignored(p) {
+			return "", inputErrf("git ignores %s, so memcore wrote nothing: memcore writes and removes no ignored file", p)
 		}
 	}
 	dirty, err := store.Git(repo, append([]string{"--literal-pathspecs", "status", "--porcelain", "--"}, paths...)...)
@@ -136,8 +143,13 @@ func apply(repo string, c change) (string, error) {
 			for dir := filepath.Dir(full); dir != repo && os.Remove(dir) == nil; dir = filepath.Dir(dir) {
 			}
 		}
+		// The writes and the removals change which folders hold only ignored files, so the tree opens again.
+		t, err := store.OpenTree(repo)
+		if err != nil {
+			return err
+		}
 		for _, p := range c.prune {
-			if err := pruneEmpty(filepath.Join(repo, filepath.FromSlash(p))); err != nil {
+			if err := pruneEmpty(t, p); err != nil {
 				return err
 			}
 		}
@@ -159,12 +171,12 @@ func apply(repo string, c change) (string, error) {
 				if _, err := os.Stat(full); err != nil {
 					continue
 				}
-				empty, err := topicEmpty(repo, tf)
+				empty, err := topicEmpty(t, tf)
 				if err != nil {
 					return err
 				}
 				if empty {
-					if err := os.RemoveAll(full); err != nil {
+					if err := removeVisible(t, tf); err != nil {
 						return fmt.Errorf("remove the empty topic folder %s: %w", tf, err)
 					}
 					goneTopic[tf] = true
@@ -172,13 +184,10 @@ func apply(repo string, c change) (string, error) {
 			}
 		}
 		for _, tf := range topics {
-			if goneTopic[tf] {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(tf), "README.md")); err != nil {
+			if goneTopic[tf] || !t.Exists(path.Join(tf, "README.md")) {
 				continue // a folder without an index is no topic folder
 			}
-			if err := store.WriteTopicIndex(repo, tf); err != nil {
+			if err := store.WriteTopicIndexIn(t, tf); err != nil {
 				return err
 			}
 		}
@@ -192,12 +201,12 @@ func apply(repo string, c change) (string, error) {
 				if l == "" {
 					continue
 				}
-				empty, err := levelEmpty(repo, l)
+				empty, err := levelEmpty(t, l)
 				if err != nil {
 					return err
 				}
 				if empty {
-					if err := os.RemoveAll(filepath.Join(repo, filepath.FromSlash(store.Folder(l)))); err != nil {
+					if err := removeVisible(t, store.Folder(l)); err != nil {
 						return fmt.Errorf("remove the empty level %s: %w", l, err)
 					}
 					gone[l] = true
@@ -208,7 +217,7 @@ func apply(repo string, c change) (string, error) {
 			if gone[l] {
 				continue
 			}
-			if err := store.WriteIndex(repo, l); err != nil {
+			if err := store.WriteIndexIn(t, l); err != nil {
 				return err
 			}
 		}
@@ -313,11 +322,12 @@ func docKind(p string) string {
 	return ""
 }
 
-// levelEmpty reports whether the folder of a level holds no file but its own index.
-func levelEmpty(repo, level string) (bool, error) {
-	dir := filepath.Join(repo, filepath.FromSlash(store.Folder(level)))
+// levelEmpty reports whether the folder of a level holds no file but its own index. An ignored file does not
+// count.
+func levelEmpty(t store.Tree, level string) (bool, error) {
+	dir := filepath.Join(t.Root(), filepath.FromSlash(store.Folder(level)))
 	empty := true
-	err := filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir(store.Folder(level), func(f string, d fs.DirEntry, err error) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fs.SkipAll
 		}
@@ -336,11 +346,41 @@ func levelEmpty(repo, level string) (bool, error) {
 	return empty, nil
 }
 
-// pruneEmpty removes the empty folders inside dir, deepest first, then dir itself when it is empty.
-// A folder that holds a file stays.
-func pruneEmpty(dir string) error {
-	var dirs []string
-	err := filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+// pruneEmpty removes the empty folders inside the folder p of the repo, deepest first, then p itself when it is
+// empty. A folder that holds a file stays, also an ignored file.
+func pruneEmpty(t store.Tree, p string) error {
+	_, dirs, err := visible(t, p)
+	if err != nil {
+		return err
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		os.Remove(dirs[i]) // fails, and keeps the folder, when it holds anything
+	}
+	return nil
+}
+
+// removeVisible removes each file inside the folder p of the repo that git does not ignore. Then it removes each
+// empty folder, deepest first. A folder that holds an ignored file stays, with that file.
+func removeVisible(t store.Tree, p string) error {
+	files, dirs, err := visible(t, p)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", f, err)
+		}
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		os.Remove(dirs[i]) // fails, and keeps the folder, when it holds an ignored file
+	}
+	return nil
+}
+
+// visible returns the files and the folders inside the folder p of the repo, with p first, that git does not
+// ignore. A folder comes before the folders inside it.
+func visible(t store.Tree, p string) (files, dirs []string, err error) {
+	err = t.WalkDir(p, func(f string, d fs.DirEntry, err error) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fs.SkipAll
 		}
@@ -349,14 +389,13 @@ func pruneEmpty(dir string) error {
 		}
 		if d.IsDir() {
 			dirs = append(dirs, f)
+		} else {
+			files = append(files, f)
 		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("list the folders of %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("list the files of %s: %w", p, err)
 	}
-	for i := len(dirs) - 1; i >= 0; i-- {
-		os.Remove(dirs[i]) // fails, and keeps the folder, when it holds anything
-	}
-	return nil
+	return files, dirs, nil
 }

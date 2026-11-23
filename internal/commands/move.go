@@ -37,6 +37,10 @@ func runMove(env Env, args []string) error {
 		return err
 	}
 	defer unlock()
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return err
+	}
 	from, err := resolve(repo, pos[0])
 	if err != nil {
 		return err
@@ -104,7 +108,7 @@ func runMove(env Env, args []string) error {
 	}
 	// The removal of from can empty folders: a topic folder, a kind folder or a level. apply prunes them, so
 	// they count as removed, unless they hold the target.
-	emptied, err := wouldPrune(repo, []string{from}, nil)
+	emptied, err := wouldPrune(t, []string{from}, nil)
 	if err != nil {
 		return err
 	}

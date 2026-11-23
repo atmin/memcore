@@ -236,6 +236,9 @@ func LinesIn(t Tree, level string) (Index, error) {
 		if !ok {
 			continue // a folder that no level maps to
 		}
+		if t.onlyIgnored(rel(c.Name())) {
+			continue // a folder that holds only ignored files is no level
+		}
 		add(KindLevels, child, c.Name()+"/README.md", "Read when you work under ~/"+path.Join(level, child)+".")
 	}
 
@@ -491,6 +494,12 @@ func description(file string) (string, error) {
 	return fm.Values["description"], nil
 }
 
+// fileExists reports whether a file exists at the absolute path p.
+func fileExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
 // noDescription is the index line of a document without a description.
 func noDescription(p string) string {
 	return "No description. Run memcore verify " + p + "."
@@ -556,6 +565,9 @@ func WriteIndex(repo, level string) error {
 
 // WriteIndexIn writes the index of a level, as WriteIndex does, read through the tree t.
 func WriteIndexIn(t Tree, level string) error {
+	if index := path.Join(Folder(level), "README.md"); t.Ignored(index) && fileExists(filepath.Join(t.Root(), filepath.FromSlash(index))) {
+		return fmt.Errorf("git ignores the index %s, so memcore writes no index there: the person removes the rule that ignores it", index)
+	}
 	ix, err := LinesIn(t, level)
 	if err != nil {
 		return err

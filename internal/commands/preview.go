@@ -149,7 +149,11 @@ func scratchClone(repo, tmp string) (string, error) {
 	if err := os.MkdirAll(store.StateDir(clone), 0o755); err != nil {
 		return "", fmt.Errorf("create the local state of the clone: %w", err)
 	}
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return "", err
+	}
+	err = t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
 			return err
 		}

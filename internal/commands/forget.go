@@ -37,13 +37,23 @@ func runForget(env Env, args []string) error {
 		return err
 	}
 	defer unlock()
-	target, files, err := forgetTarget(repo, pos[0])
+	t, err := store.OpenTree(repo)
 	if err != nil {
 		return err
 	}
+	target, files, err := forgetTarget(t, pos[0])
+	if err != nil {
+		return err
+	}
+	if t.Ignored(target) {
+		return inputErrf("git ignores %s, so forget removed nothing: memcore removes no ignored file", target)
+	}
+	if len(files) == 0 {
+		return inputErrf("%s holds only files that git ignores, so forget removed nothing: memcore removes no ignored file", target)
+	}
 	env.event().Paths, env.event().Reason = []string{target}, *reason
 	if store.IsTopicIndex(target) {
-		empty, err := topicEmpty(repo, path.Dir(target))
+		empty, err := topicEmpty(t, path.Dir(target))
 		if err != nil {
 			return err
 		}
@@ -60,7 +70,7 @@ func runForget(env Env, args []string) error {
 	if target != files[0] {
 		prune = []string{target}
 	}
-	emptied, err := wouldPrune(repo, files, prune)
+	emptied, err := wouldPrune(t, files, prune)
 	if err != nil {
 		return err
 	}
@@ -101,7 +111,10 @@ func runForget(env Env, args []string) error {
 // forgetTarget returns what forget removes, and the files of the target. The target is one of these:
 //   - a document, named by its path or, for a memory, by its name
 //   - the folder of a skill, named by the folder or its SKILL.md
-func forgetTarget(repo, arg string) (string, []string, error) {
+//
+// The files of a skill are those that git does not ignore.
+func forgetTarget(t store.Tree, arg string) (string, []string, error) {
+	repo := t.Root()
 	if !strings.Contains(arg, "/") {
 		found, err := findMemory(repo, arg)
 		if err != nil {
@@ -140,7 +153,10 @@ func forgetTarget(repo, arg string) (string, []string, error) {
 		return p, []string{p}, nil
 	}
 	var files []string
-	err = filepath.WalkDir(filepath.Join(repo, filepath.FromSlash(dir)), func(f string, d fs.DirEntry, err error) error {
+	err = t.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) && f == filepath.Join(repo, filepath.FromSlash(dir)) {
+			return fs.SkipAll // a folder of only ignored files, which git ignores as a whole
+		}
 		if err != nil {
 			return err
 		}
@@ -223,7 +239,8 @@ func forgetMessage(repo, target string, skill bool, reason string) (string, erro
 // their index. An empty folder inside counts as gone only where apply removes it too. That is inside a
 // level that empties, or inside a pruned folder, such as the folder of a skill. A link into such a folder
 // breaks too.
-func wouldPrune(repo string, files, prune []string) ([]string, error) {
+// An ignored file does not count.
+func wouldPrune(t store.Tree, files, prune []string) ([]string, error) {
 	var dirs []string
 	for _, f := range files {
 		for d := path.Dir(f); d != "."; d = path.Dir(d) {
@@ -235,7 +252,7 @@ func wouldPrune(repo string, files, prune []string) ([]string, error) {
 	slices.SortFunc(dirs, func(a, b string) int { return strings.Count(b, "/") - strings.Count(a, "/") })
 	var emptied []string
 	for _, d := range dirs {
-		entries, err := os.ReadDir(filepath.Join(repo, filepath.FromSlash(d)))
+		entries, err := t.ReadDir(d)
 		if err != nil {
 			return nil, fmt.Errorf("check whether %s empties: %w", d, err)
 		}
@@ -247,7 +264,7 @@ func wouldPrune(repo string, files, prune []string) ([]string, error) {
 			switch {
 			case slices.Contains(files, p), slices.Contains(emptied, p):
 			case (isLevel || isTopic) && e.Name() == "README.md":
-			case e.IsDir() && !holdsAny(repo, p, files) && (isLevel || isTopic || inside(d, prune)):
+			case e.IsDir() && !holdsAny(t, p, files) && (isLevel || isTopic || inside(d, prune)):
 			default:
 				empty = false
 			}
@@ -259,14 +276,15 @@ func wouldPrune(repo string, files, prune []string) ([]string, error) {
 	return emptied, nil
 }
 
-// holdsAny reports whether a folder holds a file anywhere inside it, apart from the files that go.
-func holdsAny(repo, dir string, gone []string) bool {
+// holdsAny reports whether a folder holds a file anywhere inside it, apart from the files that go. An ignored
+// file does not count.
+func holdsAny(t store.Tree, dir string, gone []string) bool {
 	found := false
-	filepath.WalkDir(filepath.Join(repo, filepath.FromSlash(dir)), func(f string, d fs.DirEntry, err error) error {
+	t.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if rel, err := filepath.Rel(repo, f); err == nil && slices.Contains(gone, filepath.ToSlash(rel)) {
+		if rel, err := filepath.Rel(t.Root(), f); err == nil && slices.Contains(gone, filepath.ToSlash(rel)) {
 			return nil
 		}
 		found = true

@@ -16,8 +16,12 @@ import (
 // staleIndexes returns the indexes that differ from what their levels generate, as paths in the repo. An
 // example is an index after a commit by hand. A level with documents and no index counts as well.
 func staleIndexes(repo string) ([]string, error) {
+	t, err := store.OpenTree(repo)
+	if err != nil {
+		return nil, err
+	}
 	var stale []string
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err = t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -38,10 +42,10 @@ func staleIndexes(repo string) ([]string, error) {
 		level, ok := store.LevelOf(folder)
 		if !ok {
 			if index := path.Join(folder, "README.md"); store.IsTopicIndex(index) {
-				if _, err := os.Stat(filepath.Join(f, "README.md")); err != nil {
+				if !t.Exists(index) {
 					return nil // a folder without an index is no topic folder
 				}
-				if old, err := topicStale(repo, folder); err != nil {
+				if old, err := topicStale(t, folder); err != nil {
 					return err
 				} else if old {
 					stale = append(stale, index)
@@ -49,13 +53,16 @@ func staleIndexes(repo string) ([]string, error) {
 			}
 			return nil // a kind folder, or a folder that no level maps to
 		}
-		ix, err := store.Lines(repo, level)
+		ix, err := store.LinesIn(t, level)
 		if err != nil {
 			return err
 		}
 		index := path.Join(folder, "README.md")
 		have, err := os.ReadFile(filepath.Join(f, "README.md"))
-		if errors.Is(err, fs.ErrNotExist) && !holdsFile(f) {
+		if t.Ignored(index) {
+			have, err = nil, fs.ErrNotExist // an ignored index does not exist
+		}
+		if errors.Is(err, fs.ErrNotExist) && !holdsFile(t, folder) {
 			return nil // an empty folder needs no index
 		}
 		if string(have) != store.Render(ix) {
@@ -71,9 +78,9 @@ func staleIndexes(repo string) ([]string, error) {
 }
 
 // topicFolders returns the topic folders of the repo that hold an index, deepest first.
-func topicFolders(repo string) ([]string, error) {
+func topicFolders(t store.Tree) ([]string, error) {
 	var topics []string
-	err := filepath.WalkDir(repo, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir("", func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -83,7 +90,7 @@ func topicFolders(repo string) ([]string, error) {
 		if d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		rel, err := filepath.Rel(repo, f)
+		rel, err := filepath.Rel(t.Root(), f)
 		if err != nil {
 			return err
 		}
@@ -91,7 +98,7 @@ func topicFolders(repo string) ([]string, error) {
 		if !store.IsTopicIndex(path.Join(folder, "README.md")) {
 			return nil
 		}
-		if _, err := os.Stat(filepath.Join(f, "README.md")); err == nil {
+		if t.Exists(path.Join(folder, "README.md")) {
 			topics = append(topics, folder)
 		}
 		return nil
@@ -108,11 +115,11 @@ func deepestFirst(folders []string) {
 	slices.SortStableFunc(folders, func(a, b string) int { return strings.Count(b, "/") - strings.Count(a, "/") })
 }
 
-// topicEmpty reports whether a topic folder holds no file but its own index.
-func topicEmpty(repo, folder string) (bool, error) {
-	dir := filepath.Join(repo, filepath.FromSlash(folder))
+// topicEmpty reports whether a topic folder holds no file but its own index. An ignored file does not count.
+func topicEmpty(t store.Tree, folder string) (bool, error) {
+	dir := filepath.Join(t.Root(), filepath.FromSlash(folder))
 	empty := true
-	err := filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+	err := t.WalkDir(folder, func(f string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -130,16 +137,16 @@ func topicEmpty(repo, folder string) (bool, error) {
 
 // topicStale reports whether the index of a topic folder differs from what the folder generates. An index
 // whose frontmatter does not parse counts as stale, so push names it.
-func topicStale(repo, folder string) (bool, error) {
-	ix, err := store.TopicIndex(repo, folder)
+func topicStale(t store.Tree, folder string) (bool, error) {
+	ix, err := store.TopicIndexIn(t, folder)
 	if err != nil {
 		return false, err
 	}
-	want, err := store.RenderTopic(repo, ix)
+	want, err := store.RenderTopic(t.Root(), ix)
 	if err != nil {
 		return true, nil
 	}
-	have, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(folder), "README.md"))
+	have, err := os.ReadFile(filepath.Join(t.Root(), filepath.FromSlash(folder), "README.md"))
 	if err != nil {
 		return false, fmt.Errorf("read the index of %s: %w", folder, err)
 	}
@@ -181,10 +188,11 @@ func regenerate(repo string) ([]string, error) {
 	return made, nil
 }
 
-// holdsFile reports whether a folder holds a file anywhere inside it.
-func holdsFile(dir string) bool {
+// holdsFile reports whether a folder, named by its path in the repo, holds a file anywhere inside it. An ignored
+// file does not count.
+func holdsFile(t store.Tree, folder string) bool {
 	found := false
-	filepath.WalkDir(dir, func(f string, d fs.DirEntry, err error) error {
+	t.WalkDir(folder, func(f string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
 			found = true
 			return fs.SkipAll
