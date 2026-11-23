@@ -77,8 +77,8 @@ func runRevise(env Env, args []string) error {
 			return fmt.Errorf("read the sessions of %s: %w", rel, err)
 		}
 		m.Sessions = was.Sessions
-		if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" && !slices.Contains(m.Sessions, "claude:"+id) {
-			m.Sessions = append(m.Sessions, "claude:"+id)
+		if agent, id := agentSession(); id != "" && !slices.Contains(m.Sessions, agent+":"+id) {
+			m.Sessions = append(m.Sessions, agent+":"+id)
 		}
 		content, warnings = m.Bytes(), m.Warnings()
 	case store.HasFrontmatter(string(input)):

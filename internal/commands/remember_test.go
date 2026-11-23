@@ -150,6 +150,17 @@ func TestRemember(t *testing.T) {
 		}
 	})
 
+	t.Run("session of Codex from the environment", func(t *testing.T) {
+		t.Setenv("CODEX_THREAD_ID", "019a8c2e-codex-thread")
+		if out, err := run(t, app, memoryText("with-codex-session", "Read before you name the agent that wrote a fact.", "A fact."), "remember"); err != nil {
+			t.Fatalf("remember: %v\n%s", err, out)
+		}
+		got := readT(t, filepath.Join(repo, "dev", "app", "memories", "with-codex-session.md"))
+		if !strings.Contains(got, "sessions:\n  - codex:019a8c2e-codex-thread\n") {
+			t.Errorf("memory = %q", got)
+		}
+	})
+
 	t.Run("sessions only from the environment", func(t *testing.T) {
 		text := strings.Replace(memoryText("given-session", "Read when you check where sessions of a memory come from.", "A fact."), "sessions: []", "sessions:\n  - claude:made-up", 1)
 		if out, err := run(t, app, text, "remember"); err != nil {

@@ -95,6 +95,20 @@ func TestRevise(t *testing.T) {
 		}
 	})
 
+	t.Run("a session of Codex after a session of Claude Code", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_SESSION_ID", "a")
+		remember(t, dev, "two-agents", "Read when you test the sessions of two agents.")
+		t.Setenv("CODEX_THREAD_ID", "b")
+		in := memoryText("two-agents", "Read when you test the sessions of two agents.", "A fact from Codex.")
+		if out, err := run(t, dev, in, "revise", "two-agents", "--reason", "From Codex."); err != nil {
+			t.Fatalf("revise: %v\n%s", err, out)
+		}
+		got := readT(t, filepath.Join(repo, "dev", "memories", "two-agents.md"))
+		if !strings.Contains(got, "sessions:\n  - claude:a\n  - codex:b\n") {
+			t.Errorf("memory =\n%s\nwant claude:a, then codex:b", got)
+		}
+	})
+
 	t.Run("an unpushed memory gives fixups", func(t *testing.T) {
 		remember(t, dev, "fresh-fact", "Read when you test a fresh fact.")
 		in := memoryText("fresh-fact", "Read when you test a fresh fact, revised.", "A sharper fact.")

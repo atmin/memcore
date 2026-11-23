@@ -45,8 +45,8 @@ func runRemember(env Env, args []string) error {
 	}
 	env.event().input(m.Name, m.Description, m.Type)
 	m.Sessions = nil
-	if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
-		m.Sessions = []string{"claude:" + id}
+	if agent, id := agentSession(); id != "" {
+		m.Sessions = []string{agent + ":" + id}
 	}
 	h, err := home()
 	if err != nil {
