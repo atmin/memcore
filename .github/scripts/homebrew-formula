@@ -1,0 +1,116 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Prints the Homebrew formula of a memcore release: homebrew-formula TAG SHA256SUMS
+# TAG is a stable tag of the release workflow: a v, then a version with no hyphen, slash or whitespace. SHA256SUMS is the file
+# of that release, in the format of sha256sum. The formula pins the URL and the SHA-256 of each executable
+# that Homebrew installs. The static Linux builds are not among them.
+# The script prints nothing, and exits 1, when the tag or any required digest is invalid.
+# It uses the standard library only, so it runs on the Ruby of macOS and of the runners.
+
+require "erb"
+
+# TARGETS lists the executables of the formula, in the order of their blocks: the Homebrew system, the
+# Homebrew processor selector, the asset, and the architecture that depends_on checks.
+TARGETS = [
+  { os: "macos", cpu: "arm", asset: "memcore-darwin-arm64", arch: "arm64" },
+  { os: "macos", cpu: "intel", asset: "memcore-darwin-amd64", arch: "x86_64" },
+  { os: "linux", cpu: "arm", asset: "memcore-linux-arm64-glibc", arch: "arm64" },
+  { os: "linux", cpu: "intel", asset: "memcore-linux-amd64-glibc", arch: "x86_64" },
+].freeze
+
+RELEASES = "https://github.com/atmin/memcore/releases/download"
+
+# fail prints the reason of a failure, and exits.
+def fail(message)
+  warn "homebrew-formula: #{message}"
+  exit 1
+end
+
+# check_tag fails unless the tag is a stable tag: a v, then a nonempty version with no hyphen, and no
+# whitespace or control character.
+def check_tag(tag)
+  fail "the tag is not valid UTF-8" unless tag.valid_encoding?
+  fail "the tag #{tag.inspect} has whitespace or a control character" if tag.match?(/[[:space:][:cntrl:]]/)
+  fail "the tag #{tag} does not start with v and a version" unless tag.match?(/\Av.+\z/)
+  fail "the tag #{tag} has a hyphen, so it is a prerelease" if tag.include?("-")
+  fail "the tag #{tag} has a slash, which a Homebrew version cannot hold" if tag.include?("/")
+end
+
+# read_digests returns the SHA-256 of each required asset in the file of checksums. A required asset that
+# is missing, listed twice or given a malformed digest is a failure.
+def read_digests(path)
+  begin
+    text = File.binread(path)
+  rescue SystemCallError => e
+    fail "cannot read #{path}: #{e.message}"
+  end
+  required = TARGETS.map { |t| t[:asset] }
+  digests = {}
+  text.each_line do |line|
+    digest, name = line.chomp.split(" ", 2)
+    next if name.nil?
+
+    name = name.delete_prefix("*")
+    next unless required.include?(name)
+    fail "#{path} lists #{name} more than once" if digests.key?(name)
+    fail "#{path} has a malformed SHA-256 for #{name}" unless digest.match?(/\A[0-9a-f]{64}\z/)
+
+    digests[name] = digest
+  end
+  required.each { |name| fail "#{path} lists no #{name}" unless digests.key?(name) }
+  digests
+end
+
+# formula returns the text of the formula. String#inspect gives the double-quoted Ruby string, with escapes.
+def formula(tag, digests)
+  out = +<<~HEAD
+    class Memcore < Formula
+      desc "Long-term memory for coding agents"
+      homepage "https://memco.re"
+      version #{tag.delete_prefix("v").inspect}
+  HEAD
+  %w[macos linux].each do |os|
+    out << "\n  on_#{os} do\n"
+    TARGETS.select { |t| t[:os] == os }.each do |t|
+      url = "#{RELEASES}/#{ERB::Util.url_encode(tag)}/#{t[:asset]}"
+      out << <<-BLOCK
+    on_#{t[:cpu]} do
+      url #{url.inspect}, using: :nounzip
+      sha256 "#{digests.fetch(t[:asset])}"
+      depends_on arch: :#{t[:arch]}
+    end
+      BLOCK
+    end
+    out << "  end\n"
+  end
+  out << <<~'TAIL'
+
+      def install
+        bin.install Dir["memcore-*"].first => "memcore"
+        chmod 0555, bin/"memcore"
+      end
+
+      def caveats
+        <<~EOS
+          To add the desktop application, run this after the installation and after each upgrade:
+            memcore ui --install
+        EOS
+      end
+
+      test do
+        assert_equal "v#{version}", shell_output("#{bin}/memcore version").split[1]
+      end
+    end
+  TAIL
+  out
+end
+
+fail "usage: homebrew-formula TAG SHA256SUMS" unless ARGV.size == 2
+
+tag, sums = ARGV
+# Arguments take the encoding of the locale, so read the tag as UTF-8 whatever it is.
+tag = tag.dup.force_encoding(Encoding::UTF_8)
+check_tag(tag)
+# The formula is whole before the first byte of it is printed, so a failure prints nothing.
+print formula(tag, read_digests(sums))
