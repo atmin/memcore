@@ -62,13 +62,14 @@ def read_digests(path)
   digests
 end
 
-# formula returns the text of the formula. String#inspect gives the double-quoted Ruby string, with escapes.
+# formula returns the text of the formula. The version is written with String#dump, not String#inspect: dump escapes
+# every non-ASCII character, so String#undump reads it back in any locale, and inspect may emit raw characters that undump rejects.
 def formula(tag, digests)
   out = +<<~HEAD
     class Memcore < Formula
       desc "Long-term memory for coding agents"
       homepage "https://memco.re"
-      version #{tag.delete_prefix("v").inspect}
+      version #{tag.delete_prefix("v").dump}
   HEAD
   %w[macos linux].each do |os|
     out << "\n  on_#{os} do\n"

@@ -58,3 +58,43 @@ jobs:
           *-*) prerelease=--prerelease ;;
           esac
           gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/* --generate-notes $prerelease
+
+  # A stable release also updates the Homebrew tap. The tap token reaches the tap checkout and its push only.
+  publish-homebrew:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir "$RUNNER_TEMP/homebrew"
+          gh release download "$TAG" -R atmin/memcore -p SHA256SUMS --dir "$RUNNER_TEMP/homebrew"
+
+      - name: Render formula
+        env:
+          TAG: ${{ github.ref_name }}
+        run: .github/scripts/homebrew-formula "$TAG" "$RUNNER_TEMP/homebrew/SHA256SUMS" > "$RUNNER_TEMP/homebrew/memcore.rb"
+
+      - name: Check formula syntax
+        run: ruby -c "$RUNNER_TEMP/homebrew/memcore.rb"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atmin/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Publish formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: .github/scripts/publish-homebrew-formula "$TAG" "$RUNNER_TEMP/homebrew/memcore.rb" homebrew-tap

@@ -1,0 +1,119 @@
+#!/bin/sh
+# Publishes the formula of a stable release to the Homebrew tap: publish-homebrew-formula TAG CANDIDATE_FILE TAP_CHECKOUT
+# CANDIDATE_FILE is the output of homebrew-formula for TAG. TAP_CHECKOUT is a clean checkout of the tap's default branch,
+# and the job has its credential for the push. GH_TOKEN reads the latest release of atmin/memcore.
+# The script changes Formula/memcore.rb alone. It skips a tag that is older than GitHub's latest, and it fails on a
+# candidate that is older than the tap or differs at the same version. A lost push race restarts from the new head,
+# at most three times. The version of a formula is read as data and the Ruby of the tap never runs.
+set -eu
+
+die() {
+  echo "publish-homebrew-formula: $*" >&2
+  exit 1
+}
+
+[ $# -eq 3 ] || die "usage: publish-homebrew-formula TAG CANDIDATE_FILE TAP_CHECKOUT"
+tag=$1 candidate=$2 tap=$3
+: "${GH_TOKEN:?GH_TOKEN is empty}"
+
+# Repository-local variables of the caller, such as GIT_DIR, GIT_WORK_TREE and GIT_CONFIG_COUNT, must not steer git.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
+# older A B succeeds when version A sorts before version B.
+older() {
+  [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort -V | head -n 1)" = "$1" ]
+}
+
+# version_of FILE prints the version of a formula, and fails unless the file has exactly one version line with a string.
+version_of() {
+  [ -f "$1" ] && [ ! -L "$1" ] || die "$1 is not a regular file"
+  lines=$(sed -n 's/^  version \(".*"\)$/\1/p' "$1")
+  [ -n "$lines" ] && [ "$(printf '%s\n' "$lines" | wc -l)" -eq 1 ] || die "$1 has no single version line"
+  # The check is in Ruby, before the print: a shell substitution would lose a trailing newline of the decoded version.
+  ruby --disable-gems -e '
+    v = ARGV[0].dup.force_encoding("UTF-8").undump
+    exit 1 unless v.valid_encoding? && v.match?(/\A[^[:space:][:cntrl:]\/-]+\z/)
+    print v' "$lines" 2>/dev/null ||
+    die "$1 has a version that is not a Ruby string of a plain version"
+}
+
+case $tag in
+v?* ) ;;
+*) die "the tag '$tag' is not a v and a version" ;;
+esac
+case $tag in
+*-* | */* | *[[:space:][:cntrl:]]*) die "the tag '$tag' is not a stable tag" ;;
+esac
+[ -s "$candidate" ] || die "the candidate $candidate is missing or empty"
+want=${tag#v}
+[ "$(version_of "$candidate")" = "$want" ] || die "the candidate does not have the version $want"
+
+git_tap() { git -C "$tap" "$@"; }
+
+[ -d "$tap/.git" ] || die "$tap is not a git checkout"
+status=$(git_tap status --porcelain) || die "cannot read the status of $tap"
+[ -z "$status" ] || die "$tap has changes, and the job needs a clean checkout"
+remote_head=$(git_tap ls-remote --symref origin HEAD) || die "cannot read the head of the tap"
+branch=$(printf '%s\n' "$remote_head" | awk '$1 == "ref:" { sub("refs/heads/", "", $2); print $2; exit }')
+[ -n "$branch" ] || die "cannot find the default branch of the tap"
+current=$(git_tap symbolic-ref --short HEAD) || die "cannot read the branch of $tap"
+[ "$current" = "$branch" ] || die "$tap is not on the default branch $branch"
+git_tap config user.name "github-actions[bot]"
+git_tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+# sync moves the checkout to the remote head. It drops only the commit of an earlier attempt.
+sync() {
+  git_tap fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+  git_tap merge-base --is-ancestor HEAD "origin/$branch" || [ "$1" = retry ] ||
+    die "$tap has commits that the tap does not"
+  git_tap reset --hard --quiet "origin/$branch"
+}
+
+# check_latest exits when the tag is older than GitHub's latest, and fails when the latest stays behind the tag.
+check_latest() {
+  for attempt in 1 2 3 4 5; do
+    latest=$(gh release view -R atmin/memcore --json tagName --jq .tagName) || die "cannot read the latest release"
+    [ -n "$latest" ] || die "GitHub reports no latest release"
+    [ "$latest" = "$tag" ] && return 0
+    if older "$tag" "$latest"; then
+      echo "$tag is older than the latest release $latest, so the tap keeps its formula"
+      exit 0
+    fi
+    [ "$attempt" -lt 5 ] || break
+    echo "the latest release is $latest, behind $tag; waiting" >&2
+    sleep 1
+  done
+  die "GitHub still reports $latest as the latest release, behind $tag"
+}
+
+first=first
+for _ in 1 2 3 4; do
+  sync "$first"
+  first=retry
+  check_latest
+  # A symlink in the checkout could lead the copy out of the repo.
+  [ -d "$tap/Formula" ] && [ ! -L "$tap/Formula" ] || die "$tap/Formula is not a directory"
+  formula=$tap/Formula/memcore.rb
+  have=$(version_of "$formula")
+  if [ "$have" = "$want" ]; then
+    cmp -s "$candidate" "$formula" || die "the tap has another formula at version $want"
+    echo "the tap already holds $want"
+    exit 0
+  fi
+  older "$have" "$want" || die "the candidate $want is older than the tap's $have, so the tap keeps its formula"
+
+  cp "$candidate" "$formula"
+  git_tap add -- Formula/memcore.rb
+  git_tap commit --quiet -m "chore: update memcore to $want" -- Formula/memcore.rb
+  if out=$(git_tap push origin "HEAD:refs/heads/$branch" 2>&1); then
+    echo "published $want to the tap"
+    exit 0
+  fi
+  echo "$out" >&2
+  case $out in
+  *'! [rejected]'* | *'cannot lock ref'*) echo "lost a push race; starting again from the new head" >&2 ;;
+  *) die "the push failed" ;;
+  esac
+done
+die "lost the push race four times"
