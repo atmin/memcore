@@ -149,6 +149,29 @@ A correction is open when it is a miss or a stale memory, and it has no answer. 
 
 A session outside home has no level, so the list shows its directory instead, such as `/tmp/work/checks`. The first line of the list counts every correction, and the open ones. `memcore reflect --list --all` prints every correction, and the answer of each answered one. The answer of a moved document shows the path that the document has now.
 
+`--list --all` prints a copied turn once. A turn is one redacted `you` line of a transcript. A quote is the words of that line that state a correction. A session that continues another holds the same early turns, so one turn can carry corrections of several sessions.
+
+A group needs two or more distinct sessions. They must share every transcript event through the quoted turn. Each quote must match exactly one `you` line at the recorded time. Later events may differ. A correction without this proof stays separate, such as one with a missing, unreadable or ambiguous transcript. Other verified copies can still group.
+
+A group takes the place of its first member. Its heading shows the time, and the whole turn under `You`. Each child heading carries its id, session, location and verdict. Each child shows its rule, followed by the reason and answer when present.
+
+When every child shares one partial quote, it shows once under `You`. When the quotes differ, each child shows its own. A quote of the full turn never repeats. This example uses invented text:
+
+```text
+2026-11-23 09:10  Copied turn
+  You: Use the project template. Include the impact.
+  f1995c2  ~/dev/shop  session 4e14814: before memory
+    Quote: Use the project template.
+    Rule: Use the project template.
+  22a38b6  ~/dev/shop  session 6ef110c: retrieval miss, dev/shop/memories/template.md
+    Quote: Include the impact.
+    Rule: State the impact in the description.
+    Why: The session did not read the memory.
+    Answer: dev/shop/memories/template.md
+```
+
+The totals count each correction once, including every correction in a group. Of the two list views, only `--list --all` reads transcripts. Use `--answer` with the ids of the corrections you want to answer.
+
 `memcore reflect --answer <id>[,<id>]` records an answer: what happened to a correction. It takes an id, or its first 7 digits or more.
 - `--with <path>` names the document of the memory repo that now holds the rule.
 - `--reason <text>` says why. It stands alone for no change, and after `forget` removed the document.

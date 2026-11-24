@@ -73,6 +73,25 @@ func TestHelp(t *testing.T) {
 		}
 	})
 
+	t.Run("reflect describes the copied turns", func(t *testing.T) {
+		help, err := run(t, home, "", "help", "reflect")
+		if err != nil {
+			t.Fatalf("help reflect: %v\n%s", err, help)
+		}
+		// The help wraps its lines by hand, so compare the words and not the line breaks.
+		words := strings.Join(strings.Fields(help), " ")
+		for _, want := range []string{
+			"prints a copied turn once",
+			"share every transcript event through the quoted turn",
+			"without this proof stays single",
+			"counts each correction once, including every correction in a group",
+		} {
+			if !strings.Contains(words, want) {
+				t.Errorf("the help of reflect lacks %q:\n%s", want, help)
+			}
+		}
+	})
+
 	t.Run("--help", func(t *testing.T) {
 		help, _ := run(t, home, "", "help", "remember")
 		for _, flag := range []string{"--help", "-h"} {

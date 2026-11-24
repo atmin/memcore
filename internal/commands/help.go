@@ -194,11 +194,18 @@ the memory repo change the defaults:
 --list runs no pass, and an agent may run it. It prints the open corrections, the newest
 session first, each with its id, its verdict, your words, the rule and the reason of the
 judge. A correction is open when it is a miss or a stale memory, and it has no answer.
-The first line counts every correction. --list --all prints every correction, and the
-answer of each answered one.
+--list --all prints every correction, and the answer of each answered one.
+
+--list --all prints a copied turn once. A turn is one of your lines in a transcript. A
+quote is the part of that line that states the correction. Two or more distinct sessions
+form a group when they share every transcript event through the quoted turn. Each quote
+must match exactly one of your lines at the recorded time. Later events may differ. A
+correction without this proof stays single. The first line counts each correction once,
+including every correction in a group.
 
 --answer runs no pass either, and an agent may run it. It records what happened to a
-correction, by the id that --list prints, or by its first 7 digits or more:
+correction, by the id that --list prints, or by its first 7 digits or more. Name one or
+more correction ids. Each receives its own answer. It takes these flags:
 
   --with <path>    the document of the memory repo that now holds the rule
   --reason <text>  why: for no change, or after forget removed the document
