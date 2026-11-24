@@ -51,12 +51,27 @@
   <p>Agents forget between sessions, so you repeat the same instructions again and again. Your attention is the scarcest resource in this work. memcore keeps what you teach your agents, so you never tell an agent the same thing twice.</p>
 
   <h2>Install</h2>
-  <p>On macOS or Linux, install memcore into <code>~/.local/bin</code>, then set up a machine with your memory remote:</p>
-  <pre>curl -fsSL https://memco.re/install | sh
-memcore init git@github.com:you/memory.git</pre>
-  <p>The script checks the SHA-256 of the download, and needs no <code>sudo</code>. It also adds memcore to your applications, as the window to review and push what your agents remember. <a href="https://github.com/atmin/memcore/blob/main/site/install">Read the script</a> before you run it. To update, run the first line again.</p>
-  <p>To uninstall memcore, run the line below. It keeps your memory repo.</p>
+  <p>On macOS or Linux, choose one install method.</p>
+
+  <p><strong>Homebrew</strong></p>
+  <p>If you already use the shell installer, <a href="https://github.com/atmin/memcore/blob/main/docs/install.md#switch-from-the-shell-installer-to-homebrew">follow the steps to switch to Homebrew</a>.</p>
+  <pre>brew install atmin/tap/memcore</pre>
+  <p>To update, run <code>brew upgrade atmin/tap/memcore</code>. If you want the desktop application, run <code>memcore ui --install</code> after installation and each upgrade.</p>
+
+  <p><strong>Shell installer</strong></p>
+  <pre>curl -fsSL https://memco.re/install | sh</pre>
+  <p>The script checks the SHA-256 of the download, installs memcore in <code>~/.local/bin</code> and adds the desktop application. It needs no <code>sudo</code>. To update, run the installer again. <a href="https://github.com/atmin/memcore/blob/main/site/install">Read the install script</a>.</p>
+
+  <p>After either method, run <code>command -v memcore</code>. For Homebrew, the path should be <code>$(brew --prefix)/bin/memcore</code>. For the shell installer, it should be <code>~/.local/bin/memcore</code>. Then set up the machine with your memory remote.</p>
+  <pre>memcore init git@github.com:you/memory.git</pre>
+
+  <h2>Uninstall</h2>
+  <p>Use the command for your install method. Both keep your memory repo.</p>
+  <p><strong>Homebrew</strong></p>
+  <pre>memcore init --undo &amp;&amp; memcore ui --uninstall &amp;&amp; brew uninstall atmin/tap/memcore</pre>
+  <p><strong>Shell installer</strong></p>
   <pre>curl -fsSL https://memco.re/uninstall | sh</pre>
+  <p>For switching install methods or building from source, see the <a href="https://github.com/atmin/memcore/blob/main/docs/install.md">install guide</a>.</p>
 
   <footer>
     <a href="https://github.com/atmin/memcore">github.com/atmin/memcore</a>
