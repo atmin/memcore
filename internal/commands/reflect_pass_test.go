@@ -835,6 +835,263 @@ func TestReflectListFollowsMoves(t *testing.T) {
 	})
 }
 
+func TestReflectListCopiedTurns(t *testing.T) {
+	const (
+		turn   = "Use the project template. Include the impact."
+		memory = "dev/memories/ask-before-push.md"
+		topic  = "dev/memories/git/ask-before-push.md"
+	)
+	base := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Hour)
+	stamp := base.Add(time.Minute).Format(time.RFC3339) // the time of the turn in every blob that blob makes
+	day := base.Add(time.Minute).Format("2006-01-02 15:04")
+	hours := func(n int) string { return base.Add(time.Duration(n) * time.Hour).Format(time.RFC3339) }
+
+	// setup makes the fixture. An agent may list, and no call of the agent is allowed.
+	setup := func(t *testing.T) (dev, repo string, calls *[]thinking.Request) {
+		t.Helper()
+		dev, repo = reflectFixture(t)
+		t.Setenv("CLAUDECODE", "1")
+		return dev, repo, fakeAgent(t, twoCorrections(0), heldAndNone(0))
+	}
+	// blob stores a transcript with a first line of its own, the turn, and then the lines of its tail.
+	blob := func(t *testing.T, repo, session, first string, tail ...string) string {
+		t.Helper()
+		return transcriptT(t, repo, "claude/p/"+session+".jsonl", transcriptText(session, base, append([]string{"you|" + first, "you|" + turn}, tail...)...))
+	}
+	correction := func(quote, summary, verdict string) reflectCorrection {
+		return reflectCorrection{Time: stamp, Quote: quote, Summary: summary, Verdict: verdict}
+	}
+	save := func(t *testing.T, repo, session, level, blob string, start int, cs ...reflectCorrection) {
+		t.Helper()
+		r := reflectRecord{Session: session, File: "claude/p/" + session + ".jsonl", Blob: blob, Level: level, Start: hours(start), Corrections: cs}
+		if err := appendReflect(repo, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id := func(session string, c reflectCorrection) string { return short(correctionID(session, c.Time, c.Quote)) }
+	listed := func(t *testing.T, dev string, args ...string) string {
+		t.Helper()
+		out, err := run(t, dev, "", append([]string{"reflect", "--list"}, args...)...)
+		if err != nil {
+			t.Fatalf("reflect --list %v: %v\n%s", args, err, out)
+		}
+		return out
+	}
+	// group, child and single print the expected blocks.
+	group := func(shared string) string {
+		text := "\n" + day + "  Copied turn\n  You: " + turn + "\n"
+		if shared != "" {
+			text += "  Quote: " + shared + "\n"
+		}
+		return text
+	}
+	child := func(session, level string, c reflectCorrection, label string, lines ...string) string {
+		text := fmt.Sprintf("  %s  %s  session %s: %s\n", id(session, c), level, session, label)
+		for _, l := range lines {
+			text += "    " + l + "\n"
+		}
+		return text
+	}
+	single := func(session, level string, c reflectCorrection, label string, lines ...string) string {
+		text := fmt.Sprintf("\n%s %s %s %s: %s\n", id(session, c), day, level, short(session), label)
+		for _, l := range lines {
+			text += "  " + l + "\n"
+		}
+		return text
+	}
+
+	t.Run("different excerpts, verdicts, answers and a singleton between", func(t *testing.T) {
+		dev, repo, calls := setup(t)
+		if out, err := run(t, dev, "", "draft", "topic", "memories/git", "--description", "Read when you test a move."); err != nil {
+			t.Fatalf("draft topic: %v\n%s", err, out)
+		}
+		if out, err := run(t, dev, "", "move", memory, topic, "--reason", "It belongs there."); err != nil {
+			t.Fatalf("move: %v\n%s", err, out)
+		}
+		a := correction("Use the project template.", "Use the project template.", verdictBefore)
+		b := correction("Include\n the impact.", "State the impact in the description.", verdictRetrieval)
+		b.Path, b.Reason = memory, "The session did not read the memory."
+		lone := reflectCorrection{Time: hours(1), Quote: "Keep the log.", Summary: "Keep the log.", Verdict: verdictCapture, Reason: "No memory holds it."}
+		save(t, repo, "s-shop", "~/dev/shop", blob(t, repo, "s-shop", "Open the file."), 30, a)
+		save(t, repo, "s-lone", "~", "unused", 20, lone)
+		save(t, repo, "s-api", "~/dev/api", blob(t, repo, "s-api", "Open the file.", "you|Later I go another way."), 10, b)
+		if err := appendAnswers(repo, []reflectAnswer{{ID: correctionID("s-api", b.Time, b.Quote), Session: "s-api", Time: b.Time, Path: memory, Answered: base.Format(time.RFC3339)}}); err != nil {
+			t.Fatal(err)
+		}
+
+		totals := "3 corrections in 3 judged sessions: 1 capture, 1 retrieval, 0 application, 0 stale, 0 unrelated, 1 before memory. 1 open.\n"
+		loneText := "\n" + id("s-lone", lone) + " " + base.Add(time.Hour).Format("2006-01-02 15:04") + " ~ s-lone: capture miss\n  You: Keep the log.\n  Rule: Keep the log.\n  Why: No memory holds it.\n"
+		want := totals + group("") +
+			child("s-shop", "~/dev/shop", a, "before memory", "Quote: Use the project template.", "Rule: Use the project template.") +
+			child("s-api", "~/dev/api", b, "retrieval miss, "+memory, "Quote: Include the impact.", "Rule: State the impact in the description.", "Why: The session did not read the memory.", "Answer: "+topic) +
+			loneText
+		if got := listed(t, dev, "--all"); got != want {
+			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+		}
+		// The plain list is open corrections only, and it prints no group.
+		if got := listed(t, dev); got != totals+loneText {
+			t.Errorf("--list:\n got %s\nwant %s", got, totals+loneText)
+		}
+
+		// Each child answers on its own, with the id that the list printed.
+		if out, err := run(t, dev, "", "reflect", "--answer", id("s-shop", a), "--reason", "Handled."); err != nil {
+			t.Fatalf("--answer: %v\n%s", err, out)
+		}
+		got := listed(t, dev, "--all")
+		for _, line := range []string{"    Rule: Use the project template.\n    Answer: Handled.\n", "    Answer: " + topic + "\n"} {
+			if strings.Count(got, line) != 1 {
+				t.Errorf("--list --all after one answer lacks %q:\n%s", line, got)
+			}
+		}
+		if strings.Count(got, "Answer:") != 2 {
+			t.Errorf("--list --all after one answer: want two answers:\n%s", got)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("the list called the agent %d times", len(*calls))
+		}
+	})
+
+	t.Run("one shared excerpt", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		x := correction("Include the impact.", "State the impact.", verdictCapture)
+		y := correction("Include  the\nimpact.", "Say what changes.", verdictUnrelated)
+		z := correction("Include the impact.", "Name the impact.", verdictCapture)
+		z.Reason = "No memory holds it."
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 30, x)
+		save(t, repo, "s-y", "~", blob(t, repo, "s-y", "Open the file.", "you|One more thing."), 20, y)
+		save(t, repo, "s-z", "~/dev", blob(t, repo, "s-z", "Open the file.", "you|Something else.", "you|And more."), 10, z)
+		want := "3 corrections in 3 judged sessions: 2 capture, 0 retrieval, 0 application, 0 stale, 1 unrelated. 2 open.\n" + group("Include the impact.") +
+			child("s-x", "~/dev", x, "capture miss", "Rule: State the impact.") +
+			child("s-y", "~", y, "unrelated to memory", "Rule: Say what changes.") +
+			child("s-z", "~/dev", z, "capture miss", "Rule: Name the impact.", "Why: No memory holds it.")
+		if got := listed(t, dev, "--all"); got != want {
+			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	// Two sessions copied the turn, and each has one open correction.
+	for _, c := range []struct {
+		name     string
+		sessions [2]string
+		names    [2]string // the session of each child as the list prints it
+		quotes   [2]string
+		rules    [2]string
+		shared   string // the excerpt under the turn
+	}{
+		{"a quote that covers the whole turn is not repeated", [2]string{"s-x", "s-y"}, [2]string{"s-x", "s-y"},
+			[2]string{turn, "Use the project template.\n Include the impact."}, [2]string{"Use the template.", "State the impact."}, ""},
+		{"colliding session abbreviations grow inside a group", [2]string{"4e14814a-one", "4e14814b-two"}, [2]string{"4e14814a", "4e14814b"},
+			[2]string{"Include the impact.", "Include the impact."}, [2]string{"State the impact.", "Say what changes."}, "Include the impact."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dev, repo, _ := setup(t)
+			want := "2 corrections in 2 judged sessions: 2 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 2 open.\n" + group(c.shared)
+			for k, session := range c.sessions {
+				x := correction(c.quotes[k], c.rules[k], verdictCapture)
+				save(t, repo, session, "~/dev", blob(t, repo, session, "Open the file."), 20-10*k, x)
+				want += fmt.Sprintf("  %s  ~/dev  session %s: capture miss\n    Rule: %s\n", id(session, x), c.names[k], c.rules[k])
+			}
+			if got := listed(t, dev, "--all"); got != want {
+				t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+
+	t.Run("two corrections of one session join a copy", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		first := correction("Use the project template.", "Use the template.", verdictBefore)
+		second := correction("Include the impact.", "State the impact.", verdictCapture)
+		other := correction("Include the impact.", "Say what changes.", verdictUnrelated)
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 20, first, second)
+		save(t, repo, "s-y", "~/dev", blob(t, repo, "s-y", "Open the file."), 10, other)
+		want := "3 corrections in 2 judged sessions: 1 capture, 0 retrieval, 0 application, 0 stale, 1 unrelated, 1 before memory. 1 open.\n" + group("") +
+			child("s-x", "~/dev", first, "before memory", "Quote: Use the project template.", "Rule: Use the template.") +
+			child("s-x", "~/dev", second, "capture miss", "Quote: Include the impact.", "Rule: State the impact.") +
+			child("s-y", "~/dev", other, "unrelated to memory", "Quote: Include the impact.", "Rule: Say what changes.")
+		if got := listed(t, dev, "--all"); got != want {
+			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	t.Run("one session alone stays flat", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		first := correction("Use the project template.", "Use the template.", verdictCapture)
+		second := correction("Include the impact.", "State the impact.", verdictCapture)
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 20, first, second)
+		want := "2 corrections in 1 judged session: 2 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 2 open.\n" +
+			single("s-x", "~/dev", first, "capture miss", "You: Use the project template.", "Rule: Use the template.") +
+			single("s-x", "~/dev", second, "capture miss", "You: Include the impact.", "Rule: State the impact.")
+		if got := listed(t, dev, "--all"); got != want {
+			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	t.Run("a missing blob or another history stays an ordinary entry", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		w := correction("Include the impact.", "Rule of w.", verdictCapture)
+		x := correction("Include the impact.", "Rule of x.", verdictCapture)
+		y := correction("Include the impact.", "Rule of y.", verdictCapture)
+		v := correction("Include the impact.", "Rule of v.", verdictCapture)
+		save(t, repo, "s-w", "~/dev", "0000000000000000000000000000000000000000", 40, w)
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 30, x)
+		save(t, repo, "s-y", "~/dev", blob(t, repo, "s-y", "Open the file."), 20, y)
+		save(t, repo, "s-v", "~/dev", blob(t, repo, "s-v", "Open another file."), 10, v)
+		want := "4 corrections in 4 judged sessions: 4 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 4 open.\n" +
+			single("s-w", "~/dev", w, "capture miss", "You: Include the impact.", "Rule: Rule of w.") +
+			group("Include the impact.") +
+			child("s-x", "~/dev", x, "capture miss", "Rule: Rule of x.") +
+			child("s-y", "~/dev", y, "capture miss", "Rule: Rule of y.") +
+			single("s-v", "~/dev", v, "capture miss", "You: Include the impact.", "Rule: Rule of v.")
+		if got := listed(t, dev, "--all"); got != want {
+			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	// The twins of TestReflectAnswer share seven digits of their ids. A copy joins the first twin only, so the
+	// first prints inside a group and the second stays single. Both print their expanded ids.
+	t.Run("expanded ids of a grouped child and a single entry", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		fixed := time.Date(2026, 11, 18, 10, 4, 0, 0, time.UTC) // the turn is the second line, at 10:05
+		const twin = "Use rule 12272."
+		const at = "2026-11-18T10:05:00Z"
+		twinA := reflectCorrection{Time: at, Quote: twin, Summary: "Rule A.", Verdict: verdictCapture}
+		twinB := reflectCorrection{Time: at, Quote: "Use rule 15967.", Summary: "Rule B.", Verdict: verdictCapture}
+		copyA := reflectCorrection{Time: at, Quote: twin, Summary: "Rule C.", Verdict: verdictCapture}
+		// One blob serves both sessions, although its header names the first.
+		shared := transcriptT(t, repo, "claude/p/s-first.jsonl", transcriptText("s-first", fixed, "you|Open the file.", "you|"+twin))
+		save(t, repo, "s-first", "~/dev", shared, 0, twinA, twinB)
+		save(t, repo, "s-copy", "~/dev", shared, -24, copyA)
+		idA, idB, idC := correctionID("s-first", at, twinA.Quote), correctionID("s-first", at, twinB.Quote), correctionID("s-copy", at, copyA.Quote)
+		if idA[:7] != "1d2633e" || idB[:7] != "1d2633e" || idC[:7] == "1d2633e" {
+			t.Fatalf("ids %s, %s, %s: want the first two to share 1d2633e", idA, idB, idC)
+		}
+		got := listed(t, dev, "--all")
+		for _, want := range []string{
+			"\n2026-11-18 10:05  Copied turn\n  You: " + twin + "\n",
+			"\n  " + idA[:8] + "  ~/dev  session s-first: capture miss\n    Rule: Rule A.\n",
+			"\n  " + idC[:7] + "  ~/dev  session s-copy: capture miss\n    Rule: Rule C.\n",
+			"\n" + idB[:8] + " 2026-11-18 10:05 ~/dev s-first: capture miss\n  You: Use rule 15967.\n",
+		} {
+			if strings.Count(got, want) != 1 {
+				t.Errorf("--list --all lacks %q:\n%s", want, got)
+			}
+		}
+		// Answering the grouped child by its printed id leaves its open sibling answerable, and then it answers too.
+		for n, c := range []struct{ id, rule string }{{idA[:8], "Rule A."}, {idC[:7], "Rule C."}} {
+			if out, err := run(t, dev, "", "reflect", "--answer", c.id, "--reason", "Handled."); err != nil {
+				t.Fatalf("--answer %s: %v\n%s", c.id, err, out)
+			}
+			got := listed(t, dev, "--all")
+			if strings.Count(got, "Answer: Handled.") != n+1 || !strings.Contains(got, "Rule: "+c.rule+"\n    Answer: Handled.\n") {
+				t.Errorf("--list --all after answering %s:\n%s", c.id, got)
+			}
+			if want := fmt.Sprintf(" %d open.\n", 2-n); !strings.Contains(got, want) {
+				t.Errorf("--list --all after answering %s lacks %q:\n%s", c.id, want, got)
+			}
+		}
+	})
+}
+
 func TestReflectAnswer(t *testing.T) {
 	dev, repo := reflectFixture(t)
 	t.Setenv("CLAUDECODE", "1") // an agent may answer

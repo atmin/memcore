@@ -422,7 +422,9 @@ func openCorrection(c judged, answers map[string]reflectAnswer) bool {
 
 // listReflect prints the open corrections of the records, or every correction with all. The newest session comes
 // first, and each session in the order of its corrections. Each one starts with its short id, which reflect
-// --answer takes. The first line counts every correction. It runs no agent and writes nothing, so an agent may run it too.
+// --answer takes. The first line counts every correction. With all, a turn that several sessions copied prints once,
+// with its corrections under it, and the list reads the transcript blobs for that proof, each blob at most once.
+// Plain --list reads no blob. It runs no agent and writes nothing, so an agent may run it too.
 func listReflect(env Env, all bool) error {
 	repo, err := openRepo()
 	if err != nil {
@@ -473,37 +475,177 @@ func listReflect(env Env, all bool) error {
 		return err
 	}
 	ids := shortIDs(correctionIDs(corrections))
-	for _, c := range corrections {
+	// Only the history of all corrections reads transcripts, to show a copied turn once.
+	var turns map[int]*copiedTurn
+	if all {
+		turns = copiedTurns(repo, corrections)
+	}
+	for i, c := range corrections {
 		if !all && !openCorrection(c, answers) {
 			continue
 		}
-		when := c.Time
-		if t, err := time.Parse(time.RFC3339, c.Time); err == nil {
-			when = t.UTC().Format("2006-01-02 15:04")
-		}
-		name := verdictNames[c.Verdict]
-		if name == "" {
-			name = c.Verdict
-		}
-		head := fmt.Sprintf("\n%s %s %s %s: %s", ids[c.id()], when, c.Record.where(), short(c.Record.Session), name)
-		if c.Path != "" {
-			head += ", " + c.Path
-		}
-		fmt.Fprintln(env.Out, head)
-		fmt.Fprintf(env.Out, "  You: %s\n", strings.Join(strings.Fields(c.Quote), " "))
-		fmt.Fprintf(env.Out, "  Rule: %s\n", c.Summary)
-		if c.Reason != "" {
-			fmt.Fprintf(env.Out, "  Why: %s\n", c.Reason)
-		}
-		if a, ok := answers[c.id()]; ok {
-			text := follow(a)
-			if a.Path != "" && a.Reason != "" {
-				text += ": "
+		if turn := turns[i]; turn != nil {
+			if i == turn.members[0] { // a copied turn prints at its first member
+				printCopiedTurn(env, turn, corrections, ids, answers, follow)
 			}
-			fmt.Fprintf(env.Out, "  Answer: %s\n", text+a.Reason)
+			continue
 		}
+		fmt.Fprintf(env.Out, "\n%s %s %s %s: %s\n", ids[c.id()], correctionWhen(c), c.Record.where(), short(c.Record.Session), verdictText(c))
+		fmt.Fprintf(env.Out, "  You: %s\n", foldSpace(c.Quote))
+		printVerdictDetail(env, "  ", c, answers, follow)
 	}
 	return nil
+}
+
+// foldSpace joins the whitespace of a text into single spaces, as the list shows a quote.
+func foldSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// correctionWhen is the time of a correction as the list shows it: the UTC minute.
+func correctionWhen(c judged) string {
+	if t, err := time.Parse(time.RFC3339, c.Time); err == nil {
+		return t.UTC().Format("2006-01-02 15:04")
+	}
+	return c.Time
+}
+
+// verdictText names the verdict of a correction, and its path when it has one.
+func verdictText(c judged) string {
+	name := verdictNames[c.Verdict]
+	if name == "" {
+		name = c.Verdict
+	}
+	if c.Path != "" {
+		name += ", " + c.Path
+	}
+	return name
+}
+
+// printVerdictDetail prints the rule, the reason and the answer of a correction, each line after the indent.
+func printVerdictDetail(env Env, indent string, c judged, answers map[string]reflectAnswer, follow func(reflectAnswer) string) {
+	fmt.Fprintf(env.Out, "%sRule: %s\n", indent, c.Summary)
+	if c.Reason != "" {
+		fmt.Fprintf(env.Out, "%sWhy: %s\n", indent, c.Reason)
+	}
+	if a, ok := answers[c.id()]; ok {
+		text := follow(a)
+		if a.Path != "" && a.Reason != "" {
+			text += ": "
+		}
+		fmt.Fprintf(env.Out, "%sAnswer: %s\n", indent, text+a.Reason)
+	}
+}
+
+// A copiedTurn is one turn of a person that several sessions copied, with the corrections that quote it.
+type copiedTurn struct {
+	text    string // the complete turn
+	members []int  // the indices of its corrections in the sorted list, in list order
+}
+
+// copiedTurns finds the turns that corrections of two or more sessions quote on the same verified history. It
+// returns each member index with its turn. A correction with no proof is no member: a missing blob, an unclear turn
+// or another history leaves it alone. Only a time that distinct sessions share needs a transcript, and each such
+// blob is read once, for all its candidates together.
+func copiedTurns(repo string, corrections []judged) map[int]*copiedTurn {
+	byTime := map[string][]int{}
+	for i, c := range corrections {
+		byTime[c.Time] = append(byTime[c.Time], i)
+	}
+	byBlob := map[string][]int{}
+	for _, indices := range byTime {
+		sessions := map[string]bool{}
+		for _, i := range indices {
+			sessions[corrections[i].Record.Session] = true
+		}
+		if len(sessions) < 2 {
+			continue
+		}
+		for _, i := range indices {
+			blob := corrections[i].Record.Blob
+			byBlob[blob] = append(byBlob[blob], i)
+		}
+	}
+	proofs := map[int]turnSource{}
+	for blob, indices := range byBlob {
+		content, err := store.Git(repo, "cat-file", "blob", blob)
+		if err != nil {
+			continue // the blob is gone, so its corrections stay single
+		}
+		candidates := make([]reflectCorrection, len(indices))
+		for k, i := range indices {
+			candidates[k] = corrections[i].reflectCorrection
+		}
+		for k, proof := range turnSources(content, candidates) {
+			if proof.OK {
+				proofs[indices[k]] = proof
+			}
+		}
+	}
+	byPrefix := map[string]*copiedTurn{}
+	for i := range corrections { // in list order, so each turn lists its members in list order
+		proof, ok := proofs[i]
+		if !ok {
+			continue
+		}
+		turn := byPrefix[proof.Prefix]
+		if turn == nil {
+			turn = &copiedTurn{text: proof.Text}
+			byPrefix[proof.Prefix] = turn
+		}
+		turn.members = append(turn.members, i)
+	}
+	out := map[int]*copiedTurn{}
+	for _, turn := range byPrefix {
+		sessions := map[string]bool{}
+		for _, i := range turn.members {
+			sessions[corrections[i].Record.Session] = true
+		}
+		if len(sessions) < 2 {
+			continue
+		}
+		for _, i := range turn.members {
+			out[i] = turn
+		}
+	}
+	return out
+}
+
+// printCopiedTurn prints a copied turn once, with each of its corrections under it. Excerpts that every correction
+// shares print once under the turn. A different excerpt prints under its correction. An excerpt that is the whole
+// turn never prints.
+func printCopiedTurn(env Env, turn *copiedTurn, corrections []judged, ids map[string]string, answers map[string]reflectAnswer, follow func(reflectAnswer) string) {
+	first := corrections[turn.members[0]]
+	full := foldSpace(turn.text)
+	shared := foldSpace(first.Quote)
+	var sessions []string
+	seen := map[string]bool{}
+	for _, i := range turn.members {
+		c := corrections[i]
+		if foldSpace(c.Quote) != shared {
+			shared = ""
+		}
+		if session := c.Record.Session; !seen[session] {
+			seen[session] = true
+			sessions = append(sessions, session)
+		}
+	}
+	names := shortIDs(sessions)
+	if shared == full {
+		shared = ""
+	}
+	fmt.Fprintf(env.Out, "\n%s  Copied turn\n  You: %s\n", correctionWhen(first), full)
+	if shared != "" {
+		fmt.Fprintf(env.Out, "  Quote: %s\n", shared)
+	}
+	for _, i := range turn.members {
+		c := corrections[i]
+		fmt.Fprintf(env.Out, "  %s  %s  session %s: %s\n", ids[c.id()], c.Record.where(), names[c.Record.Session], verdictText(c))
+		if excerpt := foldSpace(c.Quote); shared == "" && excerpt != full {
+			fmt.Fprintf(env.Out, "    Quote: %s\n", excerpt)
+		}
+		printVerdictDetail(env, "    ", c, answers, follow)
+	}
 }
 
 // answerFollower returns the path that the document of an answer has now. It follows each move of the use log
