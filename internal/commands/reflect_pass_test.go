@@ -879,11 +879,11 @@ func TestReflectListCopiedTurns(t *testing.T) {
 	}
 	// group, child and single print the expected blocks.
 	group := func(shared string) string {
-		text := "\n" + day + "  Copied turn\n  You: " + turn + "\n"
+		text := "\n" + day + "  Copied turn\n"
 		if shared != "" {
-			text += "  Quote: " + shared + "\n"
+			return text + "  Quote: " + shared + "\n"
 		}
-		return text
+		return text + "  You: " + turn + "\n"
 	}
 	child := func(session, level string, c reflectCorrection, label string, lines ...string) string {
 		text := fmt.Sprintf("  %s  %s  session %s: %s\n", id(session, c), level, session, label)
@@ -999,13 +999,14 @@ func TestReflectListCopiedTurns(t *testing.T) {
 
 	t.Run("two corrections of one session join a copy", func(t *testing.T) {
 		dev, repo, _ := setup(t)
-		first := correction("Use the project template.", "Use the template.", verdictBefore)
+		// The first correction quotes the whole turn, so it prints no Quote of its own, and the turn prints once.
+		first := correction(turn, "Use the template.", verdictBefore)
 		second := correction("Include the impact.", "State the impact.", verdictCapture)
 		other := correction("Include the impact.", "Say what changes.", verdictUnrelated)
 		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 20, first, second)
 		save(t, repo, "s-y", "~/dev", blob(t, repo, "s-y", "Open the file."), 10, other)
 		want := "3 corrections in 2 judged sessions: 1 capture, 0 retrieval, 0 application, 0 stale, 1 unrelated, 1 before memory. 1 open.\n" + group("") +
-			child("s-x", "~/dev", first, "before memory", "Quote: Use the project template.", "Rule: Use the template.") +
+			child("s-x", "~/dev", first, "before memory", "Rule: Use the template.") +
 			child("s-x", "~/dev", second, "capture miss", "Quote: Include the impact.", "Rule: State the impact.") +
 			child("s-y", "~/dev", other, "unrelated to memory", "Quote: Include the impact.", "Rule: Say what changes.")
 		if got := listed(t, dev, "--all"); got != want {

@@ -153,9 +153,9 @@ A session outside home has no level, so the list shows its directory instead, su
 
 A group needs two or more distinct sessions. They must share every transcript event through the quoted turn. Each quote must match exactly one `you` line at the recorded time. Later events may differ. A correction without this proof stays separate, such as one with a missing, unreadable or ambiguous transcript. Other verified copies can still group.
 
-A group takes the place of its first member. Its heading shows the time, and the whole turn under `You`. Each child heading carries its id, session, location and verdict. Each child shows its rule, followed by the reason and answer when present.
+A group takes the place of its first member. Its heading shows the time. Each child heading carries its id, session, location and verdict. Each child shows its rule, followed by the reason and answer when present.
 
-When every child shares one partial quote, it shows once under `You`. When the quotes differ, each child shows its own. A quote of the full turn never repeats. This example uses invented text:
+When every child quotes the same part of the turn, the group shows only that `Quote`, and no `You` line. When every child quotes the whole turn, the group shows the whole turn once under `You`. When the quotes differ, the group shows the whole turn under `You`, and each child shows its own partial quote. A quote of the full turn never repeats under a child. This example uses invented text and different quotes:
 
 ```text
 2026-11-23 09:10  Copied turn

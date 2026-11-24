@@ -611,9 +611,9 @@ func copiedTurns(repo string, corrections []judged) map[int]*copiedTurn {
 	return out
 }
 
-// printCopiedTurn prints a copied turn once, with each of its corrections under it. Excerpts that every correction
-// shares print once under the turn. A different excerpt prints under its correction. An excerpt that is the whole
-// turn never prints.
+// printCopiedTurn shows a shared partial quote once under Quote. Otherwise it shows the whole turn under You.
+// When the quotes differ, each child shows its own partial quote. A child that quotes the whole turn needs only
+// the group's You line.
 func printCopiedTurn(env Env, turn *copiedTurn, corrections []judged, ids map[string]string, answers map[string]reflectAnswer, follow func(reflectAnswer) string) {
 	first := corrections[turn.members[0]]
 	full := foldSpace(turn.text)
@@ -634,9 +634,11 @@ func printCopiedTurn(env Env, turn *copiedTurn, corrections []judged, ids map[st
 	if shared == full {
 		shared = ""
 	}
-	fmt.Fprintf(env.Out, "\n%s  Copied turn\n  You: %s\n", correctionWhen(first), full)
+	fmt.Fprintf(env.Out, "\n%s  Copied turn\n", correctionWhen(first))
 	if shared != "" {
 		fmt.Fprintf(env.Out, "  Quote: %s\n", shared)
+	} else {
+		fmt.Fprintf(env.Out, "  You: %s\n", full)
 	}
 	for _, i := range turn.members {
 		c := corrections[i]
