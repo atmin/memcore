@@ -197,6 +197,8 @@ The hooks read only this simple form, so `stats` calls these reads "around memco
 
 **Any agent.** The whole integration is one instruction in `AGENTS.md`<sup>[1](#sources)</sup>. It says: run `memcore orient` at the start of every session and follow it. The output of `orient` teaches the rest: the commands, the rules, the indexes and the skill descriptions. `memcore help <command>` holds the full text and the input of a command.
 
+At session start, `orient` tells the agent how to handle a choice that future sessions will need. Once the person settles the choice, the agent checks whether the config or spec records it. If so, the agent uses that source. Otherwise, the agent uses `memcore remember` to save one memory that says where the choice applies.
+
 memcore reads the session of Codex from `CODEX_THREAD_ID`, which Codex sets for each command that it runs. So the use log and a memory name the session of Codex. memcore logs no session of another agent.
 
 **Claude Code.** Claude Code needs no instruction, because `init` adds five hooks to its settings:

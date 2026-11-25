@@ -90,6 +90,8 @@ func orientation(repo, dir string) (orientText, error) {
 	fmt.Fprintln(&w, "Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.")
 	fmt.Fprintln(&w, "Before you first use a command, run memcore help <command>: it shows the input, with an example.")
 	fmt.Fprintln(&w)
+	fmt.Fprintln(&w, "When the person settles a choice that future sessions will need, check where it belongs. If the config or spec already records it, use that source. Otherwise, save one scoped memory with memcore remember.")
+	fmt.Fprintln(&w)
 
 	if voice, ok := accepted(repo, voicePath); ok {
 		fmt.Fprintln(&w, "Follow the voice skill in every reply and every document:")

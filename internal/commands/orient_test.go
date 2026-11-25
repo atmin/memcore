@@ -248,6 +248,8 @@ Only the person runs recover, drop, ui and init, and a reflect pass.
 Run push only when the person asks. An agent's push sends only memories, notes, plans and indexes.
 Before you first use a command, run memcore help <command>: it shows the input, with an example.
 
+When the person settles a choice that future sessions will need, check where it belongs. If the config or spec already records it, use that source. Otherwise, save one scoped memory with memcore remember.
+
 Follow the voice skill in every reply and every document:
 
 ## Always
@@ -279,7 +281,7 @@ The indexes, from the working directory to the root. Each line says when to read
 		t.Errorf("output =\n%s\nwant\n%s", out, want)
 	}
 	e := last(t, repo)
-	wantWords := map[string]int{"header": 421, "~/dev/app": 34, "~/dev": 30, "~": 7}
+	wantWords := map[string]int{"header": 455, "~/dev/app": 34, "~/dev": 30, "~": 7}
 	wantLines := map[string]int{"~/dev/app": 2, "~/dev": 2, "~": 1}
 	if !maps.Equal(e.Words, wantWords) || !maps.Equal(e.Lines, wantLines) {
 		t.Errorf("words %v and lines %v, want %v and %v", e.Words, e.Lines, wantWords, wantLines)
