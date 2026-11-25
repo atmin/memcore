@@ -170,7 +170,9 @@ When every child quotes the same part of the turn, the group shows only that `Qu
     Answer: dev/shop/memories/template.md
 ```
 
-The totals count each correction once, including every correction in a group. Of the two list views, only `--list --all` reads transcripts. Use `--answer` with the ids of the corrections you want to answer.
+`--list` groups its open corrections with the same proof and the same layout. Only open corrections can be members of a group there, so a group needs two open members, and a lone one stays flat. One session can form a group there. Its heading is `Same turn`. A group of several sessions keeps the heading `Copied turn`. Each child keeps its id, so every id stays answerable.
+
+The totals count every correction once, including corrections outside the open list. A list reads a transcript only for a time that its visible corrections could group on, and reads each blob once. Use `--answer` with the ids of the corrections you want to answer.
 
 `memcore reflect --answer <id>[,<id>]` records an answer: what happened to a correction. It takes an id, or its first 7 digits or more.
 - `--with <path>` names the document of the memory repo that now holds the rule.
@@ -178,7 +180,7 @@ The totals count each correction once, including every correction in a group. Of
 
 An answer needs `--with`, `--reason` or both, and a second answer of a correction replaces the first. An answer changes no document. It is a line of the local state, `.git/memcore/answers.jsonl`. It still holds after you delete `reflect.jsonl`, when the next pass finds the same words. Its print follows each later `move` of its document, so a move needs no second answer. `--list` and `--answer` run no agent, so an agent may run them.
 
-**Learn.** memcore ships the [learn](../skills/learn/SKILL.md) skill, which an agent follows in a session with you after a pass. The agent checks each open correction against memory as it is now. Then it makes the change that fits the verdict, with `remember`, `revise` or `forget`, and records the answer. A correction that concerns only its task gets a reason and no memory. The skill makes at most ten changes in one session, and each change lands in the review queue. When `remember` warns about the bytes of `orient`, the skill adds no more memories at the top of that level.
+**Learn.** memcore ships the [learn](../skills/learn/SKILL.md) skill, which an agent follows in a session with you after a pass. The agent checks each open correction against memory as it is now. It groups corrections by rule and level, and ranks the groups by independent turns. A turn counts once for each rule and level. A correction outside a proven block counts as one, provisionally, and identical wording proves no copy. Equal groups keep the order of the open list. The CLI supplies the proof. The skill decides which corrections state one rule. Then it makes the change that fits the verdict, with `remember`, `revise` or `forget`, and records the answer. A correction that concerns only its task gets a reason and no memory. The skill makes at most ten changes in one session, and each change lands in the review queue. When `remember` warns about the bytes of `orient`, the skill adds no more memories at the top of that level.
 
 **Reads around memcore.** The `PostToolUse` and `PostToolUseFailure` hooks log the documents that a call of `Bash`, `Read` or `Grep` reads. So the reads also count what an agent reads around `memcore show`. A document is a regular file of the working tree, outside any `.git` folder, with no symlink on its path. The hooks find the documents by these rules:
 - `Read` reads its `file_path`, and `Grep` reads its `path` when the path is a file. A relative path starts at `cwd`.

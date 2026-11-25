@@ -845,6 +845,8 @@ func TestReflectListCopiedTurns(t *testing.T) {
 	stamp := base.Add(time.Minute).Format(time.RFC3339) // the time of the turn in every blob that blob makes
 	day := base.Add(time.Minute).Format("2006-01-02 15:04")
 	hours := func(n int) string { return base.Add(time.Duration(n) * time.Hour).Format(time.RFC3339) }
+	later := base.Add(2 * time.Minute).Format(time.RFC3339) // the time of the third line of a blob, a second turn
+	nextMinute := base.Add(2 * time.Minute).Format("2006-01-02 15:04")
 
 	// setup makes the fixture. An agent may list, and no call of the agent is allowed.
 	setup := func(t *testing.T) (dev, repo string, calls *[]thinking.Request) {
@@ -878,12 +880,15 @@ func TestReflectListCopiedTurns(t *testing.T) {
 		return out
 	}
 	// group, child and single print the expected blocks.
-	group := func(shared string) string {
-		text := "\n" + day + "  Copied turn\n"
+	titled := func(title, when, shared string) string {
+		text := "\n" + when + "  " + title + "\n"
 		if shared != "" {
 			return text + "  Quote: " + shared + "\n"
 		}
 		return text + "  You: " + turn + "\n"
+	}
+	group := func(shared string) string {
+		return titled("Copied turn", day, shared)
 	}
 	child := func(session, level string, c reflectCorrection, label string, lines ...string) string {
 		text := fmt.Sprintf("  %s  %s  session %s: %s\n", id(session, c), level, session, label)
@@ -928,7 +933,7 @@ func TestReflectListCopiedTurns(t *testing.T) {
 		if got := listed(t, dev, "--all"); got != want {
 			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
 		}
-		// The plain list is open corrections only, and it prints no group.
+		// Only the singleton is open in this fixture.
 		if got := listed(t, dev); got != totals+loneText {
 			t.Errorf("--list:\n got %s\nwant %s", got, totals+loneText)
 		}
@@ -964,6 +969,13 @@ func TestReflectListCopiedTurns(t *testing.T) {
 			child("s-x", "~/dev", x, "capture miss", "Rule: State the impact.") +
 			child("s-y", "~", y, "unrelated to memory", "Rule: Say what changes.") +
 			child("s-z", "~/dev", z, "capture miss", "Rule: Name the impact.", "Why: No memory holds it.")
+		// The open list drops the unrelated child, and the two capture misses still share the turn.
+		plain := "3 corrections in 3 judged sessions: 2 capture, 0 retrieval, 0 application, 0 stale, 1 unrelated. 2 open.\n" + group("Include the impact.") +
+			child("s-x", "~/dev", x, "capture miss", "Rule: State the impact.") +
+			child("s-z", "~/dev", z, "capture miss", "Rule: Name the impact.", "Why: No memory holds it.")
+		if got := listed(t, dev); got != plain {
+			t.Errorf("--list:\n got %s\nwant %s", got, plain)
+		}
 		if got := listed(t, dev, "--all"); got != want {
 			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
 		}
@@ -1022,6 +1034,13 @@ func TestReflectListCopiedTurns(t *testing.T) {
 		want := "2 corrections in 1 judged session: 2 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 2 open.\n" +
 			single("s-x", "~/dev", first, "capture miss", "You: Use the project template.", "Rule: Use the template.") +
 			single("s-x", "~/dev", second, "capture miss", "You: Include the impact.", "Rule: State the impact.")
+		// The history stays flat, but the open list shows both excerpts as one turn of one session.
+		plain := "2 corrections in 1 judged session: 2 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 2 open.\n" + titled("Same turn", day, "") +
+			child("s-x", "~/dev", first, "capture miss", "Quote: Use the project template.", "Rule: Use the template.") +
+			child("s-x", "~/dev", second, "capture miss", "Quote: Include the impact.", "Rule: State the impact.")
+		if got := listed(t, dev); got != plain {
+			t.Errorf("--list:\n got %s\nwant %s", got, plain)
+		}
 		if got := listed(t, dev, "--all"); got != want {
 			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
 		}
@@ -1043,8 +1062,104 @@ func TestReflectListCopiedTurns(t *testing.T) {
 			child("s-x", "~/dev", x, "capture miss", "Rule: Rule of x.") +
 			child("s-y", "~/dev", y, "capture miss", "Rule: Rule of y.") +
 			single("s-v", "~/dev", v, "capture miss", "You: Include the impact.", "Rule: Rule of v.")
+		// Every entry is open, so the open list has the same groups, and unproven ones stay separate.
+		if got := listed(t, dev); got != want {
+			t.Errorf("--list:\n got %s\nwant %s", got, want)
+		}
 		if got := listed(t, dev, "--all"); got != want {
 			t.Errorf("--list --all:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	t.Run("the open list counts only open children and keeps a lone one flat", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		x := correction("Include the impact.", "State the impact.", verdictCapture)
+		y := correction("Include the impact.", "Say what changes.", verdictCapture)
+		z := correction("Include the impact.", "Name the impact.", verdictUnrelated)
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 30, x)
+		save(t, repo, "s-y", "~/dev", blob(t, repo, "s-y", "Open the file."), 20, y)
+		save(t, repo, "s-z", "~/dev", blob(t, repo, "s-z", "Open the file."), 10, z)
+		if out, err := run(t, dev, "", "reflect", "--answer", id("s-y", y), "--reason", "Handled."); err != nil {
+			t.Fatalf("--answer: %v\n%s", err, out)
+		}
+		// One copy is answered and one is unrelated, so the one open correction has no visible sibling.
+		want := "3 corrections in 3 judged sessions: 2 capture, 0 retrieval, 0 application, 0 stale, 1 unrelated. 1 open.\n" +
+			single("s-x", "~/dev", x, "capture miss", "You: Include the impact.", "Rule: State the impact.")
+		if got := listed(t, dev); got != want {
+			t.Errorf("--list:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	t.Run("separate turns of one session count in separate groups", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		const next = "Keep the log. Name the owner."
+		x1 := correction("Include the impact.", "State the impact.", verdictCapture)
+		y1 := correction("Include the impact.", "Say what changes.", verdictCapture)
+		x2 := correction("Name the owner.", "Assign an owner.", verdictCapture)
+		y2 := correction("Name the owner.", "Say who owns it.", verdictCapture)
+		x2.Time, y2.Time = later, later
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file.", "you|"+next), 20, x1, x2)
+		save(t, repo, "s-y", "~/dev", blob(t, repo, "s-y", "Open the file.", "you|"+next), 10, y1, y2)
+		// Each turn is one occurrence for every rule it supports, and groups follow the first appearance of a member.
+		want := "4 corrections in 2 judged sessions: 4 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 4 open.\n" +
+			group("Include the impact.") +
+			child("s-x", "~/dev", x1, "capture miss", "Rule: State the impact.") +
+			child("s-y", "~/dev", y1, "capture miss", "Rule: Say what changes.") +
+			titled("Copied turn", nextMinute, "Name the owner.") +
+			child("s-x", "~/dev", x2, "capture miss", "Rule: Assign an owner.") +
+			child("s-y", "~/dev", y2, "capture miss", "Rule: Say who owns it.")
+		if got := listed(t, dev); got != want {
+			t.Errorf("--list:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	t.Run("a copied turn in the open list keeps both excerpts of one session", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		first := correction(turn, "Use the template.", verdictCapture)
+		second := correction("Include the impact.", "State the impact.", verdictCapture)
+		other := correction("Include the impact.", "Say what changes.", verdictCapture)
+		save(t, repo, "s-x", "~/dev", blob(t, repo, "s-x", "Open the file."), 20, first, second)
+		save(t, repo, "s-y", "~/dev", blob(t, repo, "s-y", "Open the file."), 10, other)
+		want := "3 corrections in 2 judged sessions: 3 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated. 3 open.\n" + group("") +
+			child("s-x", "~/dev", first, "capture miss", "Rule: Use the template.") +
+			child("s-x", "~/dev", second, "capture miss", "Quote: Include the impact.", "Rule: State the impact.") +
+			child("s-y", "~/dev", other, "capture miss", "Quote: Include the impact.", "Rule: Say what changes.")
+		if got := listed(t, dev); got != want {
+			t.Errorf("--list:\n got %s\nwant %s", got, want)
+		}
+	})
+
+	// The hidden twin is not open, but its id still decides how long the printed ids are.
+	t.Run("a hidden twin still expands the id of an open correction", func(t *testing.T) {
+		dev, repo, _ := setup(t)
+		fixed := time.Date(2026, 11, 18, 10, 4, 0, 0, time.UTC) // fixed, so that the ids below are stable
+		const twin = "Use rule 12272."
+		const at = "2026-11-18T10:05:00Z"
+		twinA := reflectCorrection{Time: at, Quote: twin, Summary: "Rule A.", Verdict: verdictCapture}
+		hidden := reflectCorrection{Time: at, Quote: "Use rule 15967.", Summary: "Rule B.", Verdict: verdictBefore}
+		copyA := reflectCorrection{Time: at, Quote: twin, Summary: "Rule C.", Verdict: verdictCapture}
+		shared := transcriptT(t, repo, "claude/p/s-first.jsonl", transcriptText("s-first", fixed, "you|Open the file.", "you|"+twin))
+		save(t, repo, "s-first", "~/dev", shared, 0, twinA, hidden)
+		save(t, repo, "s-copy", "~/dev", shared, -24, copyA)
+		idA, idB, idC := correctionID("s-first", at, twinA.Quote), correctionID("s-first", at, hidden.Quote), correctionID("s-copy", at, copyA.Quote)
+		if idA[:7] != "1d2633e" || idB[:7] != "1d2633e" || idC[:7] == "1d2633e" {
+			t.Fatalf("ids %s, %s, %s: want the first two to share 1d2633e", idA, idB, idC)
+		}
+		want := "3 corrections in 2 judged sessions: 2 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated, 1 before memory. 2 open.\n" +
+			"\n2026-11-18 10:05  Copied turn\n  You: " + twin + "\n" +
+			"  " + idA[:8] + "  ~/dev  session s-first: capture miss\n    Rule: Rule A.\n" +
+			"  " + idC[:7] + "  ~/dev  session s-copy: capture miss\n    Rule: Rule C.\n"
+		if got := listed(t, dev); got != want {
+			t.Errorf("--list:\n got %s\nwant %s", got, want)
+		}
+		// The expanded id answers, and the copy left alone has no visible sibling, so it prints flat.
+		if out, err := run(t, dev, "", "reflect", "--answer", idA[:8], "--reason", "Handled."); err != nil {
+			t.Fatalf("--answer %s: %v\n%s", idA[:8], err, out)
+		}
+		want = "3 corrections in 2 judged sessions: 2 capture, 0 retrieval, 0 application, 0 stale, 0 unrelated, 1 before memory. 1 open.\n" +
+			"\n" + idC[:7] + " 2026-11-18 10:05 ~/dev s-copy: capture miss\n  You: " + twin + "\n  Rule: Rule C.\n"
+		if got := listed(t, dev); got != want {
+			t.Errorf("--list after the answer:\n got %s\nwant %s", got, want)
 		}
 	})
 

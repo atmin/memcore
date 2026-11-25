@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -420,11 +421,11 @@ func openCorrection(c judged, answers map[string]reflectAnswer) bool {
 	return false
 }
 
-// listReflect prints the open corrections of the records, or every correction with all. The newest session comes
-// first, and each session in the order of its corrections. Each one starts with its short id, which reflect
-// --answer takes. The first line counts every correction. With all, a turn that several sessions copied prints once,
-// with its corrections under it, and the list reads the transcript blobs for that proof, each blob at most once.
-// Plain --list reads no blob. It runs no agent and writes nothing, so an agent may run it too.
+// listReflect prints open corrections, or every correction with all. The first line counts all corrections.
+// The newest session comes first. Each correction keeps the short ID that --answer takes.
+// Both views check for a shared turn only at a time with multiple visible corrections.
+// With all, those corrections must span sessions. Each candidate blob is read at most once.
+// Listing runs no agent and writes nothing.
 func listReflect(env Env, all bool) error {
 	repo, err := openRepo()
 	if err != nil {
@@ -475,15 +476,12 @@ func listReflect(env Env, all bool) error {
 		return err
 	}
 	ids := shortIDs(correctionIDs(corrections))
-	// Only the history of all corrections reads transcripts, to show a copied turn once.
-	var turns map[int]*copiedTurn
-	if all {
-		turns = copiedTurns(repo, corrections)
+	// Derive IDs from the full list before choosing the corrections that can form a visible group.
+	if !all {
+		corrections = slices.DeleteFunc(corrections, func(c judged) bool { return !openCorrection(c, answers) })
 	}
+	turns := copiedTurns(repo, corrections, all)
 	for i, c := range corrections {
-		if !all && !openCorrection(c, answers) {
-			continue
-		}
 		if turn := turns[i]; turn != nil {
 			if i == turn.members[0] { // a copied turn prints at its first member
 				printCopiedTurn(env, turn, corrections, ids, answers, follow)
@@ -537,28 +535,43 @@ func printVerdictDetail(env Env, indent string, c judged, answers map[string]ref
 	}
 }
 
-// A copiedTurn is one turn of a person that several sessions copied, with the corrections that quote it.
+// A copiedTurn is one turn of a person that several corrections quote, from several sessions or from one.
 type copiedTurn struct {
 	text    string // the complete turn
 	members []int  // the indices of its corrections in the sorted list, in list order
 }
 
-// copiedTurns finds the turns that corrections of two or more sessions quote on the same verified history. It
+// groupable tells whether corrections can form a group. With crossSession, they need two distinct sessions.
+// Otherwise two corrections are enough, even of one session.
+func groupable(corrections []judged, indices []int, crossSession bool) bool {
+	if len(indices) < 2 {
+		return false
+	}
+	if !crossSession {
+		return true
+	}
+	first := corrections[indices[0]].Record.Session
+	for _, i := range indices[1:] {
+		if corrections[i].Record.Session != first {
+			return true
+		}
+	}
+	return false
+}
+
+// copiedTurns finds the turns that several of the given corrections quote on the same verified history. It
 // returns each member index with its turn. A correction with no proof is no member: a missing blob, an unclear turn
-// or another history leaves it alone. Only a time that distinct sessions share needs a transcript, and each such
+// or another history leaves it alone. With crossSession, a group needs two distinct sessions, as in the history.
+// Otherwise it needs two corrections. Only a time that could form a group needs a transcript, and each such
 // blob is read once, for all its candidates together.
-func copiedTurns(repo string, corrections []judged) map[int]*copiedTurn {
+func copiedTurns(repo string, corrections []judged, crossSession bool) map[int]*copiedTurn {
 	byTime := map[string][]int{}
 	for i, c := range corrections {
 		byTime[c.Time] = append(byTime[c.Time], i)
 	}
 	byBlob := map[string][]int{}
 	for _, indices := range byTime {
-		sessions := map[string]bool{}
-		for _, i := range indices {
-			sessions[corrections[i].Record.Session] = true
-		}
-		if len(sessions) < 2 {
+		if !groupable(corrections, indices, crossSession) {
 			continue
 		}
 		for _, i := range indices {
@@ -597,11 +610,7 @@ func copiedTurns(repo string, corrections []judged) map[int]*copiedTurn {
 	}
 	out := map[int]*copiedTurn{}
 	for _, turn := range byPrefix {
-		sessions := map[string]bool{}
-		for _, i := range turn.members {
-			sessions[corrections[i].Record.Session] = true
-		}
-		if len(sessions) < 2 {
+		if !groupable(corrections, turn.members, crossSession) {
 			continue
 		}
 		for _, i := range turn.members {
@@ -634,7 +643,11 @@ func printCopiedTurn(env Env, turn *copiedTurn, corrections []judged, ids map[st
 	if shared == full {
 		shared = ""
 	}
-	fmt.Fprintf(env.Out, "\n%s  Copied turn\n", correctionWhen(first))
+	title := "Copied turn"
+	if len(sessions) < 2 {
+		title = "Same turn" // only the open list groups one session
+	}
+	fmt.Fprintf(env.Out, "\n%s  %s\n", correctionWhen(first), title)
 	if shared != "" {
 		fmt.Fprintf(env.Out, "  Quote: %s\n", shared)
 	} else {

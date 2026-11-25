@@ -203,6 +203,12 @@ must match exactly one of your lines at the recorded time. Later events may diff
 correction without this proof stays single. The first line counts each correction once,
 including every correction in a group.
 
+--list groups its open corrections the same way, and two open corrections of one session
+can form a group, headed Same turn. A group of several sessions is headed Copied turn. A
+lone open correction stays flat. The learn skill counts a turn once for each rule at each
+level. A correction outside a group counts as one, provisionally. Identical wording proves
+no copy.
+
 --answer runs no pass either, and an agent may run it. It records what happened to a
 correction, by the id that --list prints, or by its first 7 digits or more. Name one or
 more correction ids. Each receives its own answer. It takes these flags:

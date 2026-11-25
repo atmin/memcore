@@ -11,11 +11,12 @@ Make every change through a memcore command, so it lands in the review queue. Ne
 
 ## Survey
 
-1. Run `memcore reflect --list`. It prints each open correction with its id, its verdict, the words of the person and the rule. `memcore reflect --list --all` also prints the answered corrections, each with its answer.
-2. Group the corrections that state one rule at one level. One change answers a whole group. A memory answers only the sessions that see it, at its level or below it. So the same rule at a sibling level is a group of its own.
-3. Order the groups by the count of their sessions. A rule that the person repeated in several sessions comes first.
+1. Run `memcore reflect --list`. It prints each open correction with its id, its verdict, the words of the person and the rule. `memcore reflect --list --all` also prints the answered corrections, each with its answer. A block headed `Copied turn` or `Same turn` holds corrections that the CLI proved came from one turn of the person.
+2. Group the corrections that state one rule at one level. One change answers a whole group. A memory answers only the sessions that see it, at its level or below it. So the same rule at a sibling level is a group of its own. Keep distinct rules apart, even when they come from one turn. Keep every id of a group, so that you can answer all of them.
+3. Count each group by independent turns. A turn counts once for each rule at each level it supports, however many of its corrections state that rule. Separate turns count separately, even in one session. A correction outside a proven block counts as one, provisionally. Never infer a copy from identical wording.
+4. Order the groups by that count, highest first. Equal counts keep the order of the open list, by the first appearance of any member.
 
-Change nothing yet. Give the person the count of the open corrections and the groups in a few lines.
+Change nothing yet. Tell the person how many corrections are open. List the groups in a few lines, and show each group's turn count.
 
 ## Check
 
