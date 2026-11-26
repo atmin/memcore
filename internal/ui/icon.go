@@ -47,9 +47,8 @@ func IconGrid() ([gridSize][gridSize]bool, error) {
 	return g, nil
 }
 
-// IconImage draws the icon on a square of size pixels, with whole pixels for each cell of the grid. At 16 and
-// 32 px, the grid fills the white square, as icon.svg draws it. From 64 px, it sits inset on a white tile with
-// round corners, the shape of a macOS application icon, because the letters span the full width of the grid.
+// IconImage draws the letters of icon.svg as lime rectangles on a black tile.
+// At 16 and 32 px the grid fills the square. From 64 px the tile has rounded corners.
 func IconImage(size int) (image.Image, error) {
 	if size != 16 && size != 32 && (size <= 0 || size%64 != 0) {
 		return nil, fmt.Errorf("draw the icon at %d px: the size is 16, 32 or a multiple of 64", size)
@@ -59,12 +58,13 @@ func IconImage(size int) (image.Image, error) {
 		return nil, err
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	white, black := color.NRGBA{255, 255, 255, 255}, color.NRGBA{0, 0, 0, 255}
+	black := color.NRGBA{0, 0, 0, 255}
+	lime := color.NRGBA{0xb6, 0xf3, 0x4a, 255}
 	cell, inner := size/gridSize, 0
 	if size <= 32 {
 		for y := range size {
 			for x := range size {
-				img.SetNRGBA(x, y, white)
+				img.SetNRGBA(x, y, black)
 			}
 		}
 	} else {
@@ -75,7 +75,7 @@ func IconImage(size int) (image.Image, error) {
 		for y := range tile {
 			for x := range tile {
 				if inRound(x, y, tile, radius) {
-					img.SetNRGBA(off+x, off+y, white)
+					img.SetNRGBA(off+x, off+y, black)
 				}
 			}
 		}
@@ -83,14 +83,17 @@ func IconImage(size int) (image.Image, error) {
 		cell = tile / 20
 		inner = (size - cell*gridSize) / 2
 	}
+	// Keep small cells solid. Leave a wider gap between rows as the cells grow.
+	gapX, gapY := (cell+2)/6, cell/4
 	for gy := range gridSize {
 		for gx := range gridSize {
 			if !g[gy][gx] {
 				continue
 			}
-			for y := range cell {
-				for x := range cell {
-					img.SetNRGBA(inner+gx*cell+x, inner+gy*cell+y, black)
+			left, top := inner+gx*cell+gapX/2, inner+gy*cell+gapY/2
+			for y := range cell - gapY {
+				for x := range cell - gapX {
+					img.SetNRGBA(left+x, top+y, lime)
 				}
 			}
 		}

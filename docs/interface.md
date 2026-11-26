@@ -36,7 +36,7 @@ Agents touch memory only through `memcore`: they run no git commands and edit no
 - A second `memcore ui` opens one more window on the same server. One server runs for each memory repo.
 - memcore.app runs its own copy of memcore. With no server running, the application is the server, so the Dock and Cmd+Tab show memcore. A click on its Dock icon with no window open opens a window, until the server stops.
 
-**The icon.** `internal/ui/static/icon.svg` is the one source of the icon: a 16 x 16 pixel wordmark, MEM above CORE. It has black letters on white in light mode, and white letters on black in dark mode. The window, its favicon and memco.re use the file itself. The application icon draws its pixels as whole pixels: full bleed at 16 and 32 px, and inset on a white tile with round corners from 64 px.
+**The icon.** `internal/ui/static/icon.svg` defines the 16 x 16 pixel wordmark, MEM above CORE. The window, its favicon and memco.re use the SVG. It has black letters on white in light mode, and white letters on black in dark mode. The application icon draws the same letters with lime-green rectangles on black. At 16 and 32 px the letters span the full width. From 64 px they sit inside a tile with rounded corners. From 128 px thin black gaps separate the rectangles.
 
 The window has three views:
 - **Review** lists the queue as `inbox` does. Entries that change a skill or a script come first. Each entry is a section that folds, with its arrow or with Enter. Its head counts the added and the removed lines. "Seen" folds the entry, and a seen entry starts folded. A push confirms in a dialog, and runs `push --expect`, so it pushes only the queue that the window shows. A drop confirms in a dialog, and records your reason.

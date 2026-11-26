@@ -116,8 +116,8 @@ func TestIconImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	black := color.NRGBA{0, 0, 0, 255}
-	white := color.NRGBA{255, 255, 255, 255}
-	for _, size := range []int{16, 32, 64, 512, 1024} {
+	lime := color.NRGBA{0xb6, 0xf3, 0x4a, 255}
+	for _, size := range []int{16, 32, 64, 128, 256, 512, 1024} {
 		img, err := IconImage(size)
 		if err != nil {
 			t.Fatalf("IconImage(%d): %v", size, err)
@@ -128,9 +128,9 @@ func TestIconImage(t *testing.T) {
 			cell := size / 16
 			for y := range size {
 				for x := range size {
-					want := white
+					want := black
 					if g[y/cell][x/cell] {
-						want = black
+						want = lime
 					}
 					if at(x, y) != want {
 						t.Fatalf("IconImage(%d) at (%d,%d) is %v, want %v", size, x, y, at(x, y), want)
@@ -139,31 +139,31 @@ func TestIconImage(t *testing.T) {
 			}
 			continue
 		}
-		// Inset: each letter cell is whole black pixels on the white tile, and no letter pixel leaves the tile.
+		// Every lit cell has a solid green center. At larger sizes, black gaps separate neighbors.
 		tile := size * 824 / 1024
 		off := (size - tile) / 2
-		radius := float64(tile) * 185 / 824
 		cell := tile / 20
 		inner := (size - cell*16) / 2
-		for gy := range 16 {
-			for gx := range 16 {
-				for y := inner + gy*cell; y < inner+(gy+1)*cell; y++ {
-					for x := inner + gx*cell; x < inner+(gx+1)*cell; x++ {
-						if !g[gy][gx] {
-							continue
-						}
-						if at(x, y) != black {
-							t.Fatalf("IconImage(%d) at (%d,%d) is %v, want black", size, x, y, at(x, y))
-						}
-						if !inRound(x-off, y-off, tile, radius) {
-							t.Fatalf("IconImage(%d): the letter pixel (%d,%d) leaves the tile", size, x, y)
-						}
-					}
+		for gy, row := range g {
+			for gx, lit := range row {
+				x, y := inner+gx*cell+cell/2, inner+gy*cell+cell/2
+				want := black
+				if lit {
+					want = lime
+				}
+				if got := at(x, y); got != want {
+					t.Fatalf("IconImage(%d) at cell (%d,%d) is %v, want %v", size, gx, gy, got, want)
 				}
 			}
 		}
-		if c := at(size/2, off+1); c != white {
-			t.Errorf("IconImage(%d): the tile at (%d,%d) is %v, want white", size, size/2, off+1, c)
+		if size >= 128 {
+			// The top bar and stem of E each contain adjacent lit cells.
+			if at(inner+7*cell-1, inner+3*cell+cell/2) != black || at(inner+6*cell+cell/2, inner+4*cell-1) != black {
+				t.Errorf("IconImage(%d) has no black gap between adjacent rectangles", size)
+			}
+		}
+		if c := at(size/2, off+1); c != black {
+			t.Errorf("IconImage(%d): the tile at (%d,%d) is %v, want black", size, size/2, off+1, c)
 		}
 		if c := at(0, 0); c.A != 0 {
 			t.Errorf("IconImage(%d): the corner outside the tile is %v, want transparent", size, c)
